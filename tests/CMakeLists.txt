@@ -26,3 +26,19 @@ foreach(test IN LISTS FLYWHEEL_DAG_TESTS)
   target_link_libraries(${test} PRIVATE flywheel::dag GTest::gtest)
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
+
+# The engine as a downstream project sees it: pulled in with FetchContent, built
+# and run (consumer/). It reuses the dependency sources this build has already
+# fetched, so it needs no network. Building spdlog again takes longer than the
+# default timeout allows.
+add_test(NAME test_consumer_subproject
+  COMMAND ${CMAKE_CTEST_COMMAND}
+    --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/consumer
+                     ${CMAKE_CURRENT_BINARY_DIR}/consumer
+    --build-generator ${CMAKE_GENERATOR}
+    --build-options -DFLYWHEEL_DAG_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+                    -DFETCHCONTENT_SOURCE_DIR_SPDLOG=${spdlog_SOURCE_DIR}
+                    -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${nlohmann_json_SOURCE_DIR}
+                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+    --test-command consumer)
+set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)

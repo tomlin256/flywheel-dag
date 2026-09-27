@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# A newer run on the same ref cancels the one in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    # Far above a normal run; the bound is for a hung test, which otherwise
+    # runs until GitHub's six-hour job cap.
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v6
+
+    # -Werror=dev -Werror=deprecated: any CMake developer or deprecation warning,
+    # ours or a dependency's, fails the run. The build type is left to the
+    # project's own default (RelWithDebInfo), the configuration consumers get.
+    - name: Configure
+      run: cmake -B build -Werror=dev -Werror=deprecated
+
+    - name: Build
+      run: cmake --build build --parallel 4
+
+    # --timeout bounds each test that does not set its own TIMEOUT.
+    - name: Test
+      working-directory: build
+      run: ctest --output-on-failure --timeout 120
