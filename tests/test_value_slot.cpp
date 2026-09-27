@@ -394,7 +394,7 @@ TEST(ValueSlot, RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine) {
         << "this was 0.0 — the release never propagated at all";
 }
 
-// Characterisation test for a PRE-EXISTING bug, not a spec.
+// Characterisation test for a PRE-EXISTING bug, not a spec: flywheel-dag#1.
 //
 // StatefulNodeBase::eval assigns cached_ unconditionally after
 // notifyDownstream() has already decided whether to, so cached_ changes
