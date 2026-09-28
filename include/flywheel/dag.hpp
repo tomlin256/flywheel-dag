@@ -647,6 +647,10 @@ using InPlaceComputeNodePtr = std::shared_ptr<InPlaceComputeNode<Out, Ins...>>;
 //   • Returns a fixed value from eval() — its functor is never called.
 //   • Silently absorbs invalidate() from upstream — inputs are irrelevant.
 //   • Immediately notifies downstream when the tweak value changes.
+//   • Delivers a changed tweak value to its own engine output, once, on the
+//     engine's next cycle. tweak() leaves the node dirty until it is evaluated.
+//   • Treats an equal tweak as no change. The published value keeps its
+//     identity, so nothing downstream or at the output sees anything.
 //
 // Clearing a tweak:
 //   • Marks the node dirty and notifies downstream.
@@ -659,7 +663,10 @@ public:
 
     /// Freeze this node at `val`. Downstream is notified immediately (respecting
     /// the node's equality policy). Upstream invalidations are absorbed until
-    /// clearTweak() is called.
+    /// clearTweak() is called. A `val` that differs from the published value
+    /// also leaves the node dirty, so that an engine evaluates it on its next
+    /// cycle and delivers `val` to this node's own output. An equal `val` only
+    /// freezes.
     virtual void tweak(T val) = 0;
 
     /// Remove the freeze. Marks the node dirty and notifies downstream so they
@@ -683,12 +690,14 @@ public:
 //   ┌──────────────────────────────────────────────────────────────┐
 //   │  NORMAL                        TWEAKED                       │
 //   │  ──────                        ───────                       │
-//   │  state_ tracks upstream        state_ is always Clean        │
+//   │  state_ tracks upstream        Clean, or Dirty from a new    │
+//   │                                tweak until eval() runs       │
 //   │  eval() runs functor           eval() returns frozen value   │
 //   │  invalidate() propagates       invalidate() is absorbed      │
 //   │                                                              │
-//   │  ─── tweak(v) ──►  freeze, notify downstream, markClean()   │
-//   │  ◄── clearTweak() ─  markDirty(), notify downstream         │
+//   │  ─── tweak(v) ──►  freeze; if v is new, markDirty() and      │
+//   │                    notify downstream                         │
+//   │  ◄── clearTweak() ─  markDirty(), notify downstream          │
 //   └──────────────────────────────────────────────────────────────┘
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>

@@ -192,7 +192,10 @@ wait on a cycle that cannot finish.
 > comes back.
 
 **Tweakable nodes** — `TweakableComputeNode::tweak(v)` freezes output
-mid-graph; `clearTweak()` resumes and marks dirty.
+mid-graph; `clearTweak()` resumes and marks dirty. A changed tweak reaches the
+node's own engine output once, on the engine's next cycle, because `tweak()`
+leaves the node dirty until it is evaluated. An equal tweak only freezes, and
+`cached_` keeps its identity (flywheel-dag#5).
 
 **Custom node design** — Compose `ComputeNode` (+ captured mutable state), or a
 `dag::ts::StatefulNodeBase` for incremental time-series state, or a

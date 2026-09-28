@@ -1,6 +1,6 @@
 # TweakableComputeNode: Keep the Cached Value on an Equal Tweak, and Deliver a Tweak to Its Own Output
 
-**Status: In progress (2026-09-28).** Approved 2026-09-28. Step 1 is done.
+**Status: In progress (2026-09-28).** Approved 2026-09-28. Steps 1 and 2 are done.
 
 Closes [flywheel-dag#5](https://github.com/tomlin256/flywheel-dag/issues/5).
 
@@ -156,5 +156,5 @@ A patch release, because it fixes behaviour and adds no API.
 | Step | Status | Notes |
 |---|---|---|
 | 1 — Tests, then the fix | Done | All five new tests failed on v0.1.1 for the stated reasons. The equal tweak returned a new pointer, 20 was delivered twice, and `{}` arrived where `{99}` was due, three times. The adjusted absorbing test passes on both. After the fix, ctest passes 21 / 21 and `quickstart` output is identical. The comment on `eval()`'s tweaked branch no longer says the node is "always clean while tweaked" |
-| 2 — Docs | Not started | |
+| 2 — Docs | Done | Updated the `ITweakable` comment and the `tweak()` doc. Rebuilt the state-machine box at its full width; two of its rows were a column short. Updated the `CLAUDE.md` line. ctest 21 / 21 |
 | 3 — Release v0.1.2 | Not started | |
