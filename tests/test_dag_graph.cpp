@@ -146,22 +146,11 @@ TEST(DagGraph, SharedUpstreamDeduplicated) {
 
     std::string dot = GraphExporter::toDot({ d });
 
-    // "shared" should appear exactly once as a node declaration
-    // Count occurrences of the node declaration (the one inside the cluster block)
-    std::string needle = "\"shared\"";
-    std::size_t count = 0;
-    std::size_t pos = 0;
-    while ((pos = dot.find(needle, pos)) != std::string::npos) {
-        ++count;
-        pos += needle.size();
-    }
-    // node declaration + 2 edge references = 3 occurrences minimum,
-    // but the node itself appears only once in a cluster block.
-    // The edge "shared" -> "b" and "shared" -> "c" also contain the name.
-    // Key check: the node is not declared twice.
-    // We verify by counting [shape= ... ] attribute lines — only one for "shared".
+    // "shared" should appear exactly once as a node declaration. The edges
+    // "shared" -> "b" and "shared" -> "c" also contain the name, so count the
+    // [shape= ... ] attribute lines instead — only one for "shared".
     std::size_t attrCount = 0;
-    pos = 0;
+    std::size_t pos = 0;
     std::string declNeedle = "\"shared\" [shape=";
     while ((pos = dot.find(declNeedle, pos)) != std::string::npos) {
         ++attrCount;

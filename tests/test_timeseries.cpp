@@ -100,12 +100,10 @@ TEST(TimeSeriesTests, EWMANodeAndLaziness) {
     std::vector<double> series = { 0, 10, 10, 10, 0, 0, 5, 5 };
 
     EvalContext ctx;
-    int t = 0;
     for (double v : series) {
         raw->set(v);
         double e = get_value<double>(ewma->eval(ctx));
         (void)e; // suppress unused warning
-        ++t;
     }
 
     // Laziness: setting same value should not mark dirty
@@ -129,7 +127,7 @@ TEST(TimeSeriesTests, ThresholdAndDebounce) {
     bool alarmFiredAt7 = false, alarmFiredAt11 = false;
     for (double v : series) {
         raw->set(v);
-        bool ab = get_value<bool>(above->eval(ctx));
+        get_value<bool>(above->eval(ctx));
         bool al = get_value<bool>(alarm->eval(ctx));
 
         if (t == 7 && al) alarmFiredAt7 = true;  // Alarm fires after 3 sustained ticks
@@ -205,12 +203,10 @@ TEST(TimeSeriesTests, RateLimiterNode) {
     std::vector<double> vals = { 0, 0.5, 1.0, 1.5, 2.0, 2.3, 2.5, 4.0, 4.1 };
 
     EvalContext ctx;
-    int t = 0;
     for (double v : vals) {
         raw->set(v);
-        double em = get_value<double>(limited->eval(ctx));
+        get_value<double>(limited->eval(ctx));
         get_value<double>(sink->eval(ctx));
-        ++t;
     }
 
     // Sink should recompute fewer times than input updates due to rate limiting

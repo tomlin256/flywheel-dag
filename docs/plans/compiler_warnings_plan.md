@@ -275,7 +275,7 @@ Commits: `docs: say what the build warns about`, `build: release v0.1.4` and
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Fix what Clang finds | Not started | |
+| 1 — Fix what Clang finds | Done | All ten sites are fixed. A clean probe build (flags added by hand, Apple Clang 21, `bench_hot_path` included) prints no warnings, down from 145. ctest 22 / 22. `--invariants` matches the committed file |
 | 2 — Turn the flags on, and guard them | Not started | |
 | 3 — Fix what CI finds | Not started | |
 | 4 — Warnings are errors in CI | Not started | |

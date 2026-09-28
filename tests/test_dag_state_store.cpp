@@ -495,7 +495,6 @@ TEST(NodeStateTests, RestoreInvalidatesDownstream) {
 TEST(InMemoryStoreTests, SaveRestoreRoundTrip) {
     auto inp   = Input<double>::make("x", 0.0);
     auto stats = RollingStats::make("stats", inp, 5);
-    EvalContext ctx;
     feed(inp, stats, {1, 2, 3, 4, 5});
 
     InMemoryStateStore store;
@@ -522,7 +521,6 @@ TEST(InMemoryStoreTests, Reset) {
     InMemoryStateStore store;
     auto inp   = Input<double>::make("x", 0.0);
     auto stats = RollingStats::make("stats", inp, 5);
-    EvalContext ctx;
     feed(inp, stats, {1, 2, 3});
     store.save({stats});
     EXPECT_TRUE(store.hasSavedState());
@@ -538,7 +536,6 @@ TEST(InMemoryStoreTests, Reset) {
 TEST(NodeStateTests, WindowNodeSaveRestore) {
     auto inp  = Input<double>::make("x", 0.0);
     auto win  = WindowNode<double>::make("win", inp, 4);
-    EvalContext ctx;
     feed(inp, win, {10.0, 20.0, 30.0});
 
     InMemoryStateStore store;

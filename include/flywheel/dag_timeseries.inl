@@ -36,9 +36,9 @@ void NodeImpl<Derived>::notifyDownstream(
 template<typename Derived, typename Out, typename In, typename State>
 StatefulNodeBase<Derived, Out, In, State>::StatefulNodeBase(
     std::string name, NodePtr upstream, EqualityPolicyPtr eq)
-    : name_(std::move(name))
-    , upstream_(std::move(upstream))
+    : upstream_(std::move(upstream))
     , eq_(eq ? std::move(eq) : std::make_shared<TypedEqualityPolicy<Out>>())
+    , name_(std::move(name))
 {}
 
 template<typename Derived, typename Out, typename In, typename State>

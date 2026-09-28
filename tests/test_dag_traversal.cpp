@@ -57,13 +57,6 @@ private:
     ValuePtr             cached_;
 };
 
-std::vector<std::string> names_of(const std::vector<NodePtr>& nodes) {
-    std::vector<std::string> out;
-    out.reserve(nodes.size());
-    for (const auto& n : nodes) out.push_back(n->name());
-    return out;
-}
-
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
