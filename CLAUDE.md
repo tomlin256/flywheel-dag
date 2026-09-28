@@ -219,13 +219,14 @@ defines.
 vector inline instead of calling their own helper, which is how one idea drifted
 into four spellings of it.
 
-Overriding `invalidate()` or `dirty()` needs a reason, and only three are known:
+Overriding `dirty()` or `propagate()` — the one override point for invalidation,
+since `invalidate()` and `invalidateMaybe()` are `final` — needs a reason, and
+only two are known:
 
 | Node | Override | Why |
 |---|---|---|
-| `TweakableComputeNode` | `invalidate()` absorbs while frozen | A tweaked value does not depend on its inputs. |
-| `ts::RateLimiterNode` | `invalidate()` absorbs | It re-notifies from inside `eval()` only when the change clears its threshold. |
-| A clock-driven node (application-defined) | `dirty()` is always `true`; `invalidate()` forwards unconditionally | Its output is a function of a clock, so `dirty_` is never cleared and the inherited `dirty_` guard would swallow every invalidation after the first. |
+| `TweakableComputeNode` | `propagate()` absorbs while frozen | A tweaked value does not depend on its inputs. |
+| A clock-driven node (application-defined) | `dirty()` is always `true`; `propagate()` forwards unconditionally | Its output is a function of a clock, so it is never clean, and the inherited `state_` guards in `propagate()` would swallow every invalidation after the first. |
 
 Anything else overriding these is re-implementing the protocol rather than using
 it.

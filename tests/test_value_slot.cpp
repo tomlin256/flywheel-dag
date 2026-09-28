@@ -319,7 +319,7 @@ TEST(ValueSlot, StatefulNodeWithAnUnchangedValueFiresNoCallback) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. RateLimiterNode absorbs invalidation — unaffected by slot recycling.
+// 5. RateLimiterNode suppression — unaffected by slot recycling.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The DAG-level contract, with the consumer Lazy.

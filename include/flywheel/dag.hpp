@@ -328,10 +328,8 @@ public:
 //
 // What a derived class may still override, and the only reasons known today:
 //
-//   • TweakableComputeNode::invalidate() — absorbs while frozen; the tweaked
+//   • TweakableComputeNode::propagate() — absorbs while frozen; the tweaked
 //     value does not depend on inputs.
-//   • RateLimiterNode::invalidate()      — absorbs, and re-notifies from inside
-//     eval() only when the change clears its threshold.
 //   • A clock-driven node (its output is a function of time, not only of its
 //     inputs) — dirty() is always true, so the state_ guards below would swallow
 //     every invalidation; it forwards unconditionally instead.
@@ -371,12 +369,9 @@ protected:
     // breaks no test, and is invisible. Overriding propagate() cannot do it,
     // because both entry points come through here.
     //
-    // The three kinds of override, and what each does with `incoming`:
+    // The two kinds of override, and what each does with `incoming`:
     //   TweakableComputeNode  — ignores it entirely while frozen (a tweaked
     //                           value does not depend on its inputs).
-    //   ts::RateLimiterNode   — marks self, never cascades; it re-notifies from
-    //                           inside eval() only when the change clears its
-    //                           threshold.
     //   a clock-driven node   — always cascades; its output is a function of a
     //                           clock, so it has no clean state for the guards
     //                           below to key off.
@@ -429,9 +424,9 @@ protected:
 
     /// eval() calls this when it is up to date again.
     void markClean() noexcept { state_ = Dirtiness::Clean; }
-    /// Mark self dirty WITHOUT cascading — for sources staging a new value
-    /// (they cascade separately via notifyDownstream()) and for the absorbing
-    /// overrides above.
+    /// Mark self dirty WITHOUT cascading — for sources staging a new value and
+    /// for tweak() publishing a frozen one. Both cascade separately via
+    /// notifyDownstream().
     void markDirty() noexcept { state_ = Dirtiness::Dirty; }
 
     Dirtiness state() const noexcept { return state_; }
