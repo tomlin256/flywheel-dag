@@ -11,10 +11,15 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdint>
+#include <deque>
+#include <functional>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include "flywheel/dag.hpp"
+#include "flywheel/dag_engine.hpp"
 #include "flywheel/dag_state_store.hpp"
 #include "flywheel/dag_timeseries.hpp"
 
@@ -405,6 +410,31 @@ TEST(LatchedDebounceNodeTests, StateSaveRestoreNoSpuriousOnset) {
     EXPECT_EQ(f2.push_false(), std::make_optional(false));
 }
 
+// What an engine output callback receives. A transition fires, and so does the
+// return to nullopt on the next cycle, because that is a change of value too.
+// Nothing fires between them. So a callback must still ignore nullopt, and it
+// runs once per transition rather than once per cycle.
+TEST(LatchedDebounceNodeTests, EngineCallbacksFireOnTransitionsAndOnTheReturnToNullopt) {
+    auto in    = Input<bool>::make("in", false, std::make_shared<AlwaysChangedPolicy>());
+    auto latch = LatchedDebounceNode::make("latch", in, 2);
+
+    async::Engine engine;
+    std::string seen;
+    engine.addOutput<std::optional<bool>>(latch, [&](const std::optional<bool>& t) {
+        seen += !t ? 'n' : (*t ? 'T' : 'F');
+    });
+
+    for (const bool x : {false, true, true, true, true, false, false, false}) {
+        in->set(x);
+        engine.step();
+    }
+
+    // input:     F  T  T  T  T  F  F  F
+    // output:    n  n  T  n  n  F  n  n
+    // delivered: n     T  n     F  n
+    EXPECT_EQ(seen, "nTnFn");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // makeTimeDelayNode<T> — TIME-based delay (value as of now − horizonUs).
 // Two pure inputs: the value series and a monotonic microsecond clock. Warm-up
@@ -728,6 +758,155 @@ TEST(TimeSeries, WindowStatusChangesWhileItsDeclaredInputDoesNot) {
         << "the window filled while the mean stood still — which is precisely "
            "the evaluation a Lazy companion would have skipped";
     EXPECT_EQ(later.capacity, first.capacity);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Every dag::ts node, registered as an engine output: an unchanged value fires
+// no callback.
+//
+// The engine detects change by ValuePtr identity. StatefulNodeBase::eval, and
+// the eval() overrides in ZScoreNode and OutlierGateNode, used to rebind cached_
+// after notifyDownstream() had decided not to, so each of these fired on every
+// dirty cycle: 20 extra callbacks apiece below (flywheel-dag#1).
+//
+// Each node sits on an AlwaysChangedPolicy input, so that every cycle dirties
+// it, and is fed values that leave its output unchanged once warm. It must fire
+// exactly once on the first cycle, which delivers the initial value, and not at
+// all once its value has settled.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+constexpr int kWarmCycles   = 10;   // longer than any node below takes to settle
+constexpr int kSteadyCycles = 20;
+
+struct OutputCallbacks {
+    int first  = 0;   // on the first cycle
+    int warm   = 0;   // over the rest of the warm-up
+    int steady = 0;   // over kSteadyCycles once settled
+};
+
+template <typename T>
+std::shared_ptr<Input<T>> alwaysChangedInput(T initial) {
+    return Input<T>::make("in", std::move(initial), std::make_shared<AlwaysChangedPolicy>());
+}
+
+/// Registers `node` as an engine output, then runs a first cycle, the warm-up
+/// and the steady phase, calling `feed` before every cycle to dirty the node.
+template <typename Out>
+OutputCallbacks countOutputCallbacks(const NodePtr& node, const std::function<void()>& feed) {
+    async::Engine engine;
+    OutputCallbacks n;
+    int* phase = &n.first;
+    engine.addOutput<Out>(node, [&phase](const Out&) { ++*phase; });
+
+    feed();
+    engine.step();
+    phase = &n.warm;
+    for (int i = 0; i < kWarmCycles; ++i) { feed(); engine.step(); }
+    phase = &n.steady;
+    for (int i = 0; i < kSteadyCycles; ++i) { feed(); engine.step(); }
+    return n;
+}
+
+void expectFiresOnlyOnChange(const OutputCallbacks& n) {
+    EXPECT_EQ(n.first, 1) << "the first cycle must deliver the initial value";
+    EXPECT_EQ(n.steady, 0) << "fired " << n.steady << " times in " << kSteadyCycles
+                           << " dirty cycles with an unchanged value";
+}
+
+}  // namespace
+
+TEST(UnchangedStatefulOutput, RollingStats) {
+    auto in = alwaysChangedInput(5.0);
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        RollingStats::make("stats", in, 4), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, RollingSumNode) {
+    auto in = alwaysChangedInput(5.0);   // 5, 10, 15, then 20 for good
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        RollingSumNode::make("sum", in, 4), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, RollingMinMaxNode) {
+    auto in = alwaysChangedInput(5.0);
+    expectFiresOnlyOnChange(countOutputCallbacks<std::pair<double, double>>(
+        RollingMinMaxNode::make("minmax", in, 4), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, EWMANode) {
+    auto in = alwaysChangedInput(5.0);   // alpha 0.5: 0.5*5 + 0.5*5 is exactly 5
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        EWMANode::make("ewma", in, 0.5), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, EWMATickRateNode) {
+    auto in = alwaysChangedInput(5.0);   // alpha 1: the rate is 1.0 from the start
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        EWMATickRateNode::make("rate", in, 1.0), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, DeltaNode) {
+    auto in = alwaysChangedInput(5.0);
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        DeltaNode<double>::make("delta", in), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, DelayNode) {
+    auto in = alwaysChangedInput(5.0);   // 0 while it fills, then 5 for good
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        DelayNode<double>::make("delay", in, 3), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, ThresholdNode) {
+    auto in = alwaysChangedInput(0.0);   // distinct inputs, all below the level
+    int i = 0;
+    expectFiresOnlyOnChange(countOutputCallbacks<bool>(
+        ThresholdNode<double>::make("thr", in, 100.0),
+        [&] { in->set(static_cast<double>(++i)); }));
+}
+
+TEST(UnchangedStatefulOutput, ZScoreNode) {
+    auto in = alwaysChangedInput(5.0);   // no spread, so z is 0
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        ZScoreNode::make("z", in, 8), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, OutlierGateNode) {
+    auto in = alwaysChangedInput(5.0);   // never an outlier, so it passes 5 through
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        OutlierGateNode::make("gate", in, 8, 3.0), [&] { in->set(5.0); }));
+}
+
+TEST(UnchangedStatefulOutput, RateLimiterNode) {
+    auto in = alwaysChangedInput(5.0);   // 5, 6, 7, ...: every change below minDelta
+    int i = 0;
+    expectFiresOnlyOnChange(countOutputCallbacks<double>(
+        RateLimiterNode<double>::make("limiter", in, 10.0),
+        [&] { in->set(5.0 + (i++ % 3)); }));
+}
+
+TEST(UnchangedStatefulOutput, DebounceCountNode) {
+    auto in = alwaysChangedInput(false);
+    expectFiresOnlyOnChange(countOutputCallbacks<bool>(
+        DebounceCountNode::make("debounce", in, 3), [&] { in->set(false); }));
+}
+
+TEST(UnchangedStatefulOutput, LatchedDebounceNode) {
+    auto in = alwaysChangedInput(false);   // nullopt throughout
+    expectFiresOnlyOnChange(countOutputCallbacks<std::optional<bool>>(
+        LatchedDebounceNode::make("latch", in, 3), [&] { in->set(false); }));
+}
+
+// The control. WindowNode's policy is AlwaysChangedPolicy, so an unchanged
+// window still publishes on every evaluation, and its callback still fires.
+TEST(UnchangedStatefulOutput, WindowNodeStillFiresUnderAlwaysChangedPolicy) {
+    auto in = alwaysChangedInput(5.0);
+    const auto n = countOutputCallbacks<std::deque<double>>(
+        WindowNode<double>::make("window", in, 4), [&] { in->set(5.0); });
+    EXPECT_EQ(n.first, 1);
+    EXPECT_EQ(n.steady, kSteadyCycles)
+        << "AlwaysChangedPolicy publishes on every evaluation";
 }
 
 int main(int argc, char **argv) {

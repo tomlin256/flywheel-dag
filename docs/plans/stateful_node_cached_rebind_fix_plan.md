@@ -1,6 +1,6 @@
 # Stateful Nodes: Keep the Cached Value When the Result Is Unchanged
 
-**Status: Proposed (2026-09-27).**
+**Status: In progress (2026-09-28).** Approved 2026-09-27. Step 1 is done.
 
 Closes [flywheel-dag#1](https://github.com/tomlin256/flywheel-dag/issues/1).
 
@@ -71,8 +71,9 @@ What changes for a user:
 
 - One test fails: `ValueSlot.KnownBug_StatefulNodesFireCallbacksOnEveryDirtyCycle`. It pins the
   bug, and its own comment says it will fail once the bug is fixed.
-- The other 19 suites pass, including the allocation tests. `cached_` now holds one `ValueSlot`
-  buffer across unchanged evaluations, which leaves the other free.
+- The other 19 ctest entries that were run pass, including the allocation tests. (The consumer
+  subproject was not run.) `cached_` now holds one `ValueSlot` buffer across unchanged
+  evaluations, which leaves the other free.
 - `quickstart` prints identical output, because its callback already ignores `nullopt`.
 
 ## Steps
@@ -99,7 +100,8 @@ Then delete the three rebinds.
 **Done when:**
 
 - every test in the table fails on today's engine for the stated reason, and passes after the fix;
-- the full build and ctest are green: 20 of 20, including `test_consumer_subproject`;
+- the full build and ctest are green: 21 of 21, including `test_consumer_subproject` and
+  `example_quickstart`;
 - `quickstart` prints the same transitions as before.
 
 Commit: `fix: keep a stateful node's cached value when its result is unchanged`.
@@ -179,6 +181,6 @@ adds no API.
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Not started | |
+| 1 — Tests, then the fix | Done | All 17 new tests failed on v0.1.0 for the stated reason. The 13 per-node outputs each fired on all 20 steady cycles, with first delivery correct. The `ThresholdNode` output fired 21 callbacks where 1 was due, on a new pointer. `SumNode` returned a new pointer every evaluation. The drift published once, and `eval()` read 3 rather than 2.5. The latch delivered `nnTnnFnn`. The `WindowNode` control passed. After deleting the three rebinds: ctest 21 / 21, and `quickstart` output is identical. The plan said 20; the 21st is `example_quickstart` |
 | 2 — Docs | Not started | |
 | 3 — Release v0.1.1 | Not started | |

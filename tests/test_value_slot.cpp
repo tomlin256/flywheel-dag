@@ -283,6 +283,41 @@ TEST(ValueSlot, UnchangedValueKeepsCachedPointerAndFiresNoCallback) {
     EXPECT_EQ(fired, firedAfterFirst + 1);
 }
 
+// The same contract for a stateful node. This was flywheel-dag#1:
+// StatefulNodeBase::eval rebound cached_ after notifyDownstream() had already
+// decided not to, so cached_ changed identity on every eval and this output
+// fired on every dirty cycle — 20 extra callbacks here. It was identical before
+// and after ValueSlot, so slot recycling neither caused nor hid it.
+TEST(ValueSlot, StatefulNodeWithAnUnchangedValueFiresNoCallback) {
+    auto in  = Input<double>::make("in", 0.0);
+    auto thr = ts::ThresholdNode<double>::make("thr", in, 100.0);   // not crossed yet
+
+    async::Engine engine;
+    int fired = 0;
+    engine.addOutput<bool>(thr, [&](const bool&) { ++fired; });
+
+    engine.step();
+    const int firedAfterFirst = fired;
+    EXPECT_EQ(firedAfterFirst, 1) << "first cycle should deliver the initial value";
+
+    EvalContext ctx;
+    const ValuePtr cachedAfterFirst = thr->eval(ctx);
+
+    for (int i = 1; i <= 20; ++i) {   // distinct inputs, output stays false
+        in->set(static_cast<double>(i));
+        engine.step();
+    }
+
+    EXPECT_EQ(fired, firedAfterFirst)
+        << "the output stayed false, so no callback should have fired";
+    EXPECT_EQ(thr->eval(ctx).get(), cachedAfterFirst.get())
+        << "an unchanged stateful node must keep returning the same cached pointer";
+
+    in->set(150.0);         // now it genuinely changes
+    engine.step();
+    EXPECT_EQ(fired, firedAfterFirst + 1);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. RateLimiterNode absorbs invalidation — unaffected by slot recycling.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,39 +427,6 @@ TEST(ValueSlot, RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine) {
     EXPECT_EQ(computes, baseComputes + 1) << "the release must reach it";
     EXPECT_DOUBLE_EQ(sink, 100.0)
         << "this was 0.0 — the release never propagated at all";
-}
-
-// Characterisation test for a PRE-EXISTING bug, not a spec: flywheel-dag#1.
-//
-// StatefulNodeBase::eval assigns cached_ unconditionally after
-// notifyDownstream() has already decided whether to, so cached_ changes
-// identity every eval and the engine's pointer-identity change detection fires
-// on every dirty cycle. Verified identical before and after ValueSlot, so slot
-// recycling neither causes nor hides it.
-//
-// This asserts the CURRENT WRONG behaviour so the fix cannot land silently.
-// When the bug is fixed this test will fail — replace it with the correct
-// expectation (extraCallbacks == 0) rather than adjusting the number.
-TEST(ValueSlot, KnownBug_StatefulNodesFireCallbacksOnEveryDirtyCycle) {
-    auto in  = Input<double>::make("in", 0.0);
-    auto thr = ts::ThresholdNode<double>::make("thr", in, 100.0);   // never crossed
-
-    async::Engine engine;
-    int fired = 0;
-    engine.addOutput<bool>(thr, [&](const bool&) { ++fired; });
-
-    engine.step();
-    const int afterFirst = fired;
-
-    for (int i = 1; i <= 20; ++i) {   // output stays false throughout
-        in->set(static_cast<double>(i));
-        engine.step();
-    }
-
-    EXPECT_EQ(fired - afterFirst, 20)
-        << "the known bug appears to be FIXED — a constant-output stateful node no "
-           "longer fires spuriously. Replace this characterisation test with "
-           "EXPECT_EQ(fired - afterFirst, 0).";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

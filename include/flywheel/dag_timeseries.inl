@@ -57,9 +57,14 @@ ValuePtr StatefulNodeBase<Derived, Out, In, State>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
     const In& inp = get_value<In>(upstream_->eval(ctx));
     Out result = static_cast<Derived*>(this)->doCompute(inp, state_);
-    auto newV = slot_.emit(std::move(result));
-    this->notifyDownstream(newV, eq_);
-    this->cached_ = newV;
+    // notifyDownstream() owns cached_: it rebinds it only when the policy says
+    // the value changed. Rebinding it here as well (flywheel-dag#1) gave cached_
+    // a new identity on every evaluation, so Engine::cycle, which detects change
+    // by pointer identity, fired this node's output callback on every dirty
+    // cycle. It also made the policy compare against the previous evaluation
+    // instead of the last published value, so a drift smaller than a tolerance
+    // per step never published at all.
+    this->notifyDownstream(slot_.emit(std::move(result)), eq_);
     return this->cached_;
 }
 
@@ -566,9 +571,8 @@ inline ValuePtr ZScoreNode::eval(EvalContext& ctx) {
     double mu = stats_->prevMean();
     double sd = stats_->prevStddev();
     double z  = (sd < 1e-12) ? 0.0 : (x - mu) / sd;
-    auto newV = slot_.emit(z);
-    this->notifyDownstream(newV, eq_);
-    this->cached_ = newV;
+    // notifyDownstream() owns cached_ — see StatefulNodeBase::eval.
+    this->notifyDownstream(slot_.emit(z), eq_);
     return this->cached_;
 }
 
@@ -615,9 +619,8 @@ inline ValuePtr OutlierGateNode::eval(EvalContext& ctx) {
     double mu = zNode_->stats().mean();
     state_.lastWasOutlier = std::abs(z) >= threshold_;
     double out = state_.lastWasOutlier ? mu : x;
-    auto newV = slot_.emit(out);
-    this->notifyDownstream(newV, eq_);
-    this->cached_ = newV;
+    // notifyDownstream() owns cached_ — see StatefulNodeBase::eval.
+    this->notifyDownstream(slot_.emit(out), eq_);
     return this->cached_;
 }
 

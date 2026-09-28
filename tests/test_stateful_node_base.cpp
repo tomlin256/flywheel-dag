@@ -19,8 +19,11 @@
 //   4. restoreState marks the node dirty (invalidate() called)
 //   5. eval() after restoreState produces the correct next output
 //   6. Downstream is not notified when output value is unchanged (equality policy)
+//   7. An unchanged value keeps the cached pointer
+//   8. An equality policy compares against the last published value
 
 #include <gtest/gtest.h>
+#include <vector>
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_timeseries.hpp"
 #include "flywheel/dag_state_store.hpp"
@@ -37,8 +40,10 @@ class SumNode : public StatefulNodeBase<SumNode, double, double, SumNodeState> {
 public:
     using State = SumNodeState;
 
-    static std::shared_ptr<SumNode> make(std::string name, NodePtr upstream) {
-        auto self = std::shared_ptr<SumNode>(new SumNode(std::move(name), upstream));
+    static std::shared_ptr<SumNode> make(std::string name, NodePtr upstream,
+                                         EqualityPolicyPtr eq = nullptr) {
+        auto self = std::shared_ptr<SumNode>(
+            new SumNode(std::move(name), std::move(upstream), std::move(eq)));
         wire(self, self->inputs());
         return self;
     }
@@ -57,8 +62,9 @@ public:
     }
 
 private:
-    explicit SumNode(std::string n, NodePtr up)
-        : StatefulNodeBase<SumNode, double, double, SumNodeState>(std::move(n), up)
+    SumNode(std::string n, NodePtr up, EqualityPolicyPtr eq)
+        : StatefulNodeBase<SumNode, double, double, SumNodeState>(
+              std::move(n), std::move(up), std::move(eq))
     {}
 };
 
@@ -199,6 +205,73 @@ TEST(StatefulNodeBase, EqualityPolicySuppressesNotification) {
     sum1->eval(forceCtx);
 
     EXPECT_FALSE(sum2->dirty()); // equality policy suppressed the notification
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 7 — An unchanged value keeps the cached pointer
+//
+// The engine detects change by ValuePtr identity, so a node whose value did not
+// change must return the pointer it returned last time. eval() used to rebind
+// cached_ after notifyDownstream() had decided not to, which gave it a new
+// identity on every evaluation (flywheel-dag#1).
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulNodeBase, UnchangedValueKeepsTheCachedPointer) {
+    // AlwaysChangedPolicy on the input, so that setting an equal value still
+    // dirties the node and it really re-evaluates.
+    auto inp  = Input<double>::make("inp", 0.0, std::make_shared<AlwaysChangedPolicy>());
+    auto node = SumNode::make("sum", inp);
+
+    EvalContext ctx;
+    inp->set(0.0);
+    const ValuePtr first = node->eval(ctx);   // sum = 0
+
+    for (int i = 0; i < 5; ++i) {
+        inp->set(0.0);                         // dirty, but the sum stays 0
+        ASSERT_TRUE(node->dirty());
+        EXPECT_EQ(node->eval(ctx).get(), first.get())
+            << "evaluation " << i << ": an unchanged sum must keep the cached pointer";
+    }
+
+    inp->set(1.0);                             // sum = 1: a real change
+    const ValuePtr changed = node->eval(ctx);
+    EXPECT_NE(changed.get(), first.get());
+    EXPECT_DOUBLE_EQ(get_value<double>(changed), 1.0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 8 — An equality policy compares against the last PUBLISHED value
+//
+// Under a tolerance policy that is the difference between tracking a slow drift
+// and never seeing it. SumNode under EpsilonPolicy(0.6) is fed +0.25 per step.
+// Against the last published value, the sum publishes every third step, once it
+// has moved 0.75. Against the previous evaluation every step is only 0.25 apart,
+// so nothing after the first evaluation would ever publish — which is what
+// rebinding cached_ on every evaluation used to do (flywheel-dag#1).
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulNodeBase, EqualityPolicyComparesAgainstTheLastPublishedValue) {
+    auto inp  = Input<double>::make("inp", 0.0, std::make_shared<AlwaysChangedPolicy>());
+    auto node = SumNode::make("sum", inp, std::make_shared<EpsilonPolicy<double>>(0.6));
+
+    int consumerRuns = 0;
+    auto consumer = ComputeNode<double, double>::make(
+        "consumer", std::make_tuple(std::static_pointer_cast<INode>(node)),
+        [&](const double& v) { ++consumerRuns; return v; },
+        InvalidationMode::Lazy);
+
+    EvalContext ctx;
+    std::vector<double> seen;   // what the consumer read, each time it recomputed
+    for (int step = 1; step <= 12; ++step) {
+        inp->set(0.25);                        // sum = 0.25 * step
+        const int before = consumerRuns;
+        const double v = get_value<double>(consumer->eval(ctx));
+        if (consumerRuns != before) seen.push_back(v);
+    }
+
+    // The first evaluation publishes 0.25; after that, each 0.75 of drift from
+    // the last published value publishes again.
+    EXPECT_EQ(seen, (std::vector<double>{0.25, 1.0, 1.75, 2.5}));
+    EXPECT_DOUBLE_EQ(get_value<double>(node->eval(ctx)), 2.5)
+        << "eval() returns the last published value, not the latest sum (3.0)";
 }
 
 int main(int argc, char **argv) {
