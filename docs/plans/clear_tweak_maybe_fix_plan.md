@@ -1,6 +1,7 @@
 # clearTweak(): Tell Consumers "Maybe", Not "Changed"
 
-**Status: In progress (2026-09-28).** Approved 2026-09-28. Steps 1 and 2 are done.
+**Status: Done (2026-09-28).** Approved 2026-09-28. All three steps landed, and the change was
+released as [v0.1.3](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.1.3).
 
 Closes [flywheel-dag#8](https://github.com/tomlin256/flywheel-dag/issues/8).
 
@@ -125,4 +126,4 @@ Commit: `docs: say what clearTweak() tells consumers`.
 |---|---|---|
 | 1 — Tests, then the fix | Done | Both red tests failed on v0.1.2 with one extra consumer run each: 2 runs where 1 was due. The three guards passed. After the fix all five pass, ctest passes 21 / 21, and `quickstart` output is identical |
 | 2 — Docs | Done | Updated the `ITweakable` comment, the `clearTweak()` doc and the state-machine row. The `CLAUDE.md` "Tweakable nodes" paragraph now covers both tweak fixes in order. ctest 21 / 21 |
-| 3 — Release v0.1.3 | Not started | |
+| 3 — Release v0.1.3 | Done | `d181138` is tagged `v0.1.3`. CI run 36390147347 is green on Linux and macOS. The release is published, and flywheel-dag#8 is closed |
