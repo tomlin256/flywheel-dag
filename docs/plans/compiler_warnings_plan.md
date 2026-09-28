@@ -1,6 +1,8 @@
 # Build the Engine's Own Targets with -Wall -Wextra -Wpedantic
 
-**Status: Approved (2026-09-28).**
+**Status: Done (2026-09-28).** Approved 2026-09-28. All five steps landed, and v0.1.4 is released.
+The project's own targets build with `-Wall -Wextra -Wpedantic`. CI makes every warning an error
+on Linux (GCC 13.3) and macOS (Apple Clang 21).
 
 Closes [flywheel-dag#4](https://github.com/tomlin256/flywheel-dag/issues/4).
 
@@ -60,6 +62,12 @@ build with these flags. GCC's `-Wall` and `-Wextra` differ from Clang's. Two fin
 **The rule for anything GCC finds:** fix the code. A confirmed compiler false positive is
 suppressed as narrowly as possible: one site, one compiler, and a comment naming the compiler bug.
 Turning a warning off for the whole build needs its own approval first.
+
+**Outcome:** GCC 13.3 found both predicted `-Wdangling-reference` sites. It also found one
+unpredicted warning, `-Wmismatched-new-delete` on the counting `operator delete` in the test and
+the benchmark. That is [GCC bug 103993](https://gcc.gnu.org/PR103993), a confirmed false positive,
+suppressed under the rule above. The optimiser-dependent warnings did not appear. Progress has the
+details.
 
 ## Design
 
@@ -279,4 +287,4 @@ Commits: `docs: say what the build warns about`, `build: release v0.1.4` and
 | 2 — Turn the flags on, and guard them | Done locally | The rebuild recompiled all 24 of this project's translation units and none of the dependencies', and printed no warnings. ctest 23 / 23. `test_warning_flags` counts 24 of this project's translation units and 11 of the dependencies'. The three hand-made changes each failed their test with the expected message: "72 warning flags missing", "flywheel::dag passes compile options to its consumer: -Wall", and "changed its consumer's CMAKE_CXX_FLAGS from '' to '-Wall'". An unchanged copy passed both tests. CI run 36418143590 is green on both legs. The macOS leg (AppleClang 21.0.0) printed no warnings. The Linux leg (GCC 13.3) printed 249 from four sites, none of them in a dependency: `-Wdangling-reference` at `dag_timeseries.inl:58` (136) and `tests/test_dag.cpp:999` (1), as predicted, and `-Wmismatched-new-delete` at the counting `operator delete` in `tests/test_value_slot.cpp:43` (67) and `benchmarks/bench_hot_path.cpp:63` (45) |
 | 3 — Fix what CI finds | Done locally | Both `-Wdangling-reference` sites now hold the pulled `ValuePtr` in a local, as `dag::ops` already does. `-Wmismatched-new-delete` is [GCC bug 103993](https://gcc.gnu.org/PR103993): its reproducer is this counting `operator new`/`delete` pair, and a GCC maintainer calls it a false positive. It fires only once GCC inlines the `free()` into a caller. So it is silenced at the two `operator delete` definitions only, for GCC 11 and later only, with a comment naming the bug. The Apple Clang build prints no warnings. ctest 23 / 23. `--invariants` is unchanged. CI run 36418929776 is green. Both legs compiled all 35 translation units, 24 of this project's and 11 of the dependencies', with no warnings, so the pragma holds on GCC 13.3 |
 | 4 — Warnings are errors in CI | Done | CI run 36419379814 is green on both legs, configured with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. Each leg compiled all 35 translation units with no warnings and passed ctest 23 / 23. The only annotation is the `ubuntu-latest` migration notice. Locally, ctest 23 / 23 with the option `ON`, and again with it `OFF`. Both builds recompiled all 24 of this project's translation units, with no warnings. With the option `ON`, `test_warning_flags` finds `-Werror` on all 24, and neither `-Werror` nor `-Wpedantic` on the 11 dependency translation units. The three hand-made changes each failed. Deleting the `-Werror` line gave "24 warning flags missing". Moving the whole block above the `FetchContent` calls gave "22 of this project's warning flags found on dependency translation units". An unused variable in `test_dag.cpp` gave "error: unused variable … [-Werror,-Wunused-variable]". A first attempt at the block move showed that moving the block could unregister the test instead of failing it: step 2 registered the test from a variable that the flags block itself set. The test is now registered wherever the root promises the flags (top level, GCC or Clang), and the move fails it. `actions/checkout@v6` stays: it runs on node24 like v7, v6.1.0 shipped the same day as v7.0.1, and no run shows a deprecation annotation |
-| 5 — Docs and release | Not started | |
+| 5 — Docs and release | Done | The README says what the build warns about, and `CLAUDE.md` has the rules. CI run 36419850752 on the release commit is green on both legs, with no warnings. `v0.1.4` is tagged and released. ctest 23 / 23. flywheel-dag#4 is closed |
