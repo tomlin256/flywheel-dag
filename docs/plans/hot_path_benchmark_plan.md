@@ -235,5 +235,5 @@ Commit: `docs: describe the benchmark`.
 | Step | Status | Notes |
 |---|---|---|
 | 1 — The benchmark and its report format | Done | ctest 22 / 22. The 10 `test_bench_report` tests pass; printing allocs/cycle at `%.1f` and doubles at `%.15g` turns two of them red. Building `all` does not produce `bench_hot_path`. Every row reads 0 allocs/cycle at 1,000, 10,000 and 200,000 cycles. Two runs and a `Debug` build print identical `--invariants`. At 200,000 cycles on an M4 Pro: `chain` 338.6, `idle-queues` 248.8, `ingest` 108.8 ns/cycle |
-| 2 — CI gates the exact columns | Not started | |
+| 2 — CI gates the exact columns | In progress | Locally the gate's commands exit 0, and 1 against a copy of the file with one checksum digit changed. ctest 22 / 22. The last run carries no deprecation annotation. `actions/checkout@v6` stays: v6.1.0 shipped the same day as v7.0.1, so v6 is still maintained. The run's only annotation is a notice that `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19. That brings a new GCC and libstdc++, so the gate will meet them then |
 | 3 — Docs | Not started | |

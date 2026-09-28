@@ -1,0 +1,4 @@
+cycles=200000
+chain allocs/cycle=0 callbacks=415725 checksum=69780.955311892729
+idle-queues allocs/cycle=0 callbacks=0 checksum=0
+ingest allocs/cycle=0 callbacks=200000 checksum=1292390400000

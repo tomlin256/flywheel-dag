@@ -39,3 +39,15 @@ jobs:
     - name: Test
       working-directory: build
       run: ctest --output-on-failure --timeout 120
+
+    # The benchmark is EXCLUDE_FROM_ALL, so this step is what keeps it
+    # compiling. Its timings are printed and never compared: a shared runner's
+    # clock proves nothing. Its exact columns (allocs/cycle, callbacks and
+    # checksum) must match the committed file. The output goes to a file first,
+    # so a crash fails the step rather than feeding diff a short input.
+    - name: Benchmark
+      run: |
+        cmake --build build --target bench_hot_path
+        ./build/bin/bench_hot_path
+        ./build/bin/bench_hot_path --invariants > bench_invariants.txt
+        diff -u benchmarks/expected_invariants.txt bench_invariants.txt
