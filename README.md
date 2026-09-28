@@ -148,8 +148,37 @@ cmake --build build
 cd build && ctest
 ```
 
-`FLYWHEEL_DAG_BUILD_TESTS` and `FLYWHEEL_DAG_BUILD_EXAMPLES` are on when flywheel-dag is the
-top-level project and off when it is a subproject.
+`FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES` and `FLYWHEEL_DAG_BUILD_BENCHMARKS` are
+on when flywheel-dag is the top-level project and off when it is a subproject.
+
+## Benchmark
+
+[`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle
+costs on three generic workloads:
+
+| Row | Workload |
+|---|---|
+| `chain` | An `AsyncInput<double>` feeding 11 compute and time-series nodes, with 4 registered outputs |
+| `idle-queues` | 32 `AsyncQueue`s, stepped with nothing posted |
+| `ingest` | A heap-owning value, with one `post()` and one `flush()` per cycle |
+
+It is built on demand and is not a ctest test:
+
+```bash
+cmake --build build --target bench_hot_path
+./build/bin/bench_hot_path                # 200000 measured cycles per row
+./build/bin/bench_hot_path --invariants   # the exact columns only
+```
+
+`ns/cycle` depends on the machine and its load, so compare it only with another run on the same
+machine. The other columns are exact, and the same on every platform:
+
+- `allocs/cycle` is 0 in every row;
+- `callbacks` counts the output callbacks that fired;
+- `checksum` is the sum of the values they received.
+
+CI prints the timings and fails if `--invariants` differs from
+[`benchmarks/expected_invariants.txt`](benchmarks/expected_invariants.txt).
 
 ## Documentation
 

@@ -35,6 +35,27 @@ defined in the default build, so `assert()` does not run.** Any validation that
 must survive has to throw — see the `alpha` range checks in `EWMANode::make` /
 `EWMATickRateNode::make`.
 
+**The benchmark** — `benchmarks/bench_hot_path` is `EXCLUDE_FROM_ALL` and not a
+ctest test. Time a change by running it before and after, on the same machine:
+
+```bash
+cmake --build build --target bench_hot_path && ./build/bin/bench_hot_path
+```
+
+Its exact columns — `allocs/cycle`, `callbacks` and `checksum` — show that a
+speed-up did not come from doing less work. CI diffs them (`--invariants`)
+against `benchmarks/expected_invariants.txt`:
+
+- A non-zero `allocs/cycle` is an engine regression. Fix the engine; never
+  regenerate the file to make CI pass.
+- A changed `callbacks` or `checksum` means the graph did different work.
+  Regenerate the file (`./build/bin/bench_hot_path --invariants >
+  benchmarks/expected_invariants.txt`) only when that is the point of the
+  change, and say why in the commit.
+- The checksum is identical on every platform only because the target builds
+  with `-ffp-contract=off` and the rows use nothing but `+ − × ÷` and `sqrt`.
+  Keep them that way: `exp`, `log` and `pow` differ between math libraries.
+
 ---
 
 ## Key Patterns
