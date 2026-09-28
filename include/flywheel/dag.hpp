@@ -653,7 +653,9 @@ using InPlaceComputeNodePtr = std::shared_ptr<InPlaceComputeNode<Out, Ins...>>;
 //     identity, so nothing downstream or at the output sees anything.
 //
 // Clearing a tweak:
-//   • Marks the node dirty and notifies downstream.
+//   • Marks the node dirty and its consumers Maybe. Whether its value changes
+//     is known only once it recomputes: its eval() then tells them Dirty if the
+//     value moved, and a Lazy consumer skips if it did not.
 //   • On the next eval() the functor runs normally from current inputs.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
@@ -669,8 +671,9 @@ public:
     /// freezes.
     virtual void tweak(T val) = 0;
 
-    /// Remove the freeze. Marks the node dirty and notifies downstream so they
-    /// will re-pull on the next eval pass. Normal computation resumes.
+    /// Remove the freeze. Marks the node dirty and its consumers Maybe, so they
+    /// re-pull on the next eval pass and learn there whether the value changed.
+    /// Normal computation resumes.
     virtual void clearTweak() = 0;
 
     /// True while a tweak is active.
@@ -697,7 +700,7 @@ public:
 //   │                                                              │
 //   │  ─── tweak(v) ──►  freeze; if v is new, markDirty() and      │
 //   │                    notify downstream                         │
-//   │  ◄── clearTweak() ─  markDirty(), notify downstream          │
+//   │  ◄── clearTweak() ─  self Dirty, downstream Maybe            │
 //   └──────────────────────────────────────────────────────────────┘
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
