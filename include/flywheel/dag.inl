@@ -470,8 +470,15 @@ template<typename Out, typename... Ins>
 void TweakableComputeNode<Out, Ins...>::clearTweak() {
     if (!tweaked_) return;
     tweaked_ = false;
-    markDirty();        // must recompute from inputs on next eval
-    notifyDownstream(); // tell downstream to re-pull
+    // The frozen value no longer applies, but whether the recomputed one
+    // differs is not known until the node recomputes. invalidate() says exactly
+    // that (flywheel-dag#8). This node goes Dirty, so it recomputes, even when
+    // it is Lazy, and its consumers go Maybe. Its eval() then tells them Dirty
+    // only if the value moved, and a Lazy consumer skips when it did not.
+    // Marking them Dirty here made every Lazy consumer rerun regardless. If a
+    // changed tweak is still pending, the node is already Dirty, and the tweak
+    // has already told its consumers.
+    invalidate();
 }
 
 template<typename Out, typename... Ins>

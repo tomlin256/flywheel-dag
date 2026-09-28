@@ -488,6 +488,113 @@ TEST(TweakExampleTest, TweakedOutputAndItsConsumerDeliverInOneCycle) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Clearing a tweak (flywheel-dag#8)
+//
+// clearTweak() used to mark every consumer Dirty before the node knew whether
+// its value had changed, so a Lazy consumer reran even when the node recomputed
+// the very value it had been frozen at. Clearing now marks the node Dirty and
+// its consumers Maybe. The node's own eval() says "changed" only if it did.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+/// Input (2) → TweakableComputeNode (x * 10) → Lazy consumer (v + 1), counting
+/// the consumer's functor runs.
+struct TweakedChain {
+    std::shared_ptr<Input<double>> in = Input<double>::make("in", 2.0);
+    std::shared_ptr<TweakableComputeNode<double, double>> node;
+    std::shared_ptr<ComputeNode<double, double>> consumer;
+    int runs = 0;
+
+    explicit TweakedChain(InvalidationMode nodeMode = InvalidationMode::Eager) {
+        node = TweakableComputeNode<double, double>::make(
+            "x10", std::make_tuple(std::static_pointer_cast<INode>(in)),
+            [](const double& x) { return x * 10.0; }, nodeMode);
+        consumer = ComputeNode<double, double>::make(
+            "plus_one", std::make_tuple(std::static_pointer_cast<INode>(node)),
+            [this](const double& v) { ++runs; return v + 1.0; },
+            InvalidationMode::Lazy);
+    }
+
+    double pull() {
+        EvalContext ctx;
+        return get_value<double>(consumer->eval(ctx));
+    }
+};
+
+}  // namespace
+
+TEST(TweakExampleTest, ClearingAnEqualTweakSkipsALazyConsumer) {
+    TweakedChain c;
+    ASSERT_EQ(c.pull(), 21.0);
+    c.node->tweak(20.0);    // equal: freeze only
+    ASSERT_EQ(c.pull(), 21.0);
+    const int before = c.runs;
+
+    c.node->clearTweak();   // recomputes 20, the value it was frozen at
+    EXPECT_EQ(c.pull(), 21.0);
+    EXPECT_EQ(c.runs, before)
+        << "nothing the consumer depends on changed, so a Lazy consumer must skip";
+}
+
+TEST(TweakExampleTest, ClearingAnEqualTweakSkipsALazyOutputThroughTheEngine) {
+    TweakedChain c;
+    async::Engine engine;
+    int callbacks = 0;
+    engine.addOutput<double>(c.consumer, [&](const double&) { ++callbacks; });
+    engine.step();          // the first delivery: 21
+    const int runsBefore = c.runs;
+    callbacks = 0;
+
+    c.node->tweak(20.0);
+    engine.step();
+    c.node->clearTweak();
+    engine.step();
+
+    EXPECT_EQ(c.runs, runsBefore) << "the consumer's functor must not rerun";
+    EXPECT_EQ(callbacks, 0);
+}
+
+TEST(TweakExampleTest, ClearingAChangedTweakStillReachesALazyConsumer) {
+    TweakedChain c;
+    ASSERT_EQ(c.pull(), 21.0);
+    c.node->tweak(99.0);
+    ASSERT_EQ(c.pull(), 100.0);
+    const int before = c.runs;
+
+    c.node->clearTweak();   // recomputes 20: a real change
+    EXPECT_EQ(c.pull(), 21.0);
+    EXPECT_EQ(c.runs, before + 1);
+}
+
+// The node itself must go Dirty, not Maybe. Left Maybe, a Lazy tweakable node
+// would resolve against inputs that never called its invalidate(), skip, and
+// keep returning the value it was frozen at.
+TEST(TweakExampleTest, ClearingRecomputesALazyTweakableNode) {
+    TweakedChain c(InvalidationMode::Lazy);
+    ASSERT_EQ(c.pull(), 21.0);
+    c.node->tweak(99.0);
+    ASSERT_EQ(c.pull(), 100.0);
+
+    c.node->clearTweak();
+    EvalContext ctx;
+    EXPECT_EQ(get_value<double>(c.node->eval(ctx)), 20.0);
+    EXPECT_EQ(c.pull(), 21.0);
+}
+
+// With no pull between the tweak and the clear, the node is still Dirty from
+// the tweak, so clearing cascades nothing: the tweak already told the consumer
+// Dirty. The consumer recomputes, conservatively (an Input going A→B→A between
+// pulls does the same), and must read the recomputed value, not the tweak.
+TEST(TweakExampleTest, ClearingBeforeTheTweakIsPulledGivesTheRecomputedValue) {
+    TweakedChain c;
+    ASSERT_EQ(c.pull(), 21.0);
+
+    c.node->tweak(99.0);
+    c.node->clearTweak();
+    EXPECT_EQ(c.pull(), 21.0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Input<T> — wake-hook behaviour (engine integration)
 // ─────────────────────────────────────────────────────────────────────────────
 
