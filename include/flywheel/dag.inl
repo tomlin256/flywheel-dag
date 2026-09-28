@@ -406,7 +406,9 @@ std::shared_ptr<TweakableComputeNode<Out, Ins...>> TweakableComputeNode<Out, Ins
 template<typename Out, typename... Ins>
 ValuePtr TweakableComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (tweaked_) {
-        // Always clean while tweaked; return frozen value without touching inputs.
+        // Return the frozen value without touching the inputs. Marking clean
+        // completes the delivery of a new tweak, which tweak() leaves dirty for
+        // the engine to collect.
         markClean();
         return cached_;
     }
@@ -445,17 +447,23 @@ template<typename Out, typename... Ins>
 void TweakableComputeNode<Out, Ins...>::tweak(Out val) {
     auto newV = make_value(std::move(val));
     tweaked_  = true;
-    markClean();
 
-    // Notify downstream only if the frozen value actually differs from what
-    // we last emitted — respects the equality policy.
-    if (!eq_->equal(cached_, newV)) {
-        cached_ = newV;
-        notifyDownstream();
-    } else {
-        // Same value: still freeze (inputs now ignored) but no churn downstream.
-        cached_ = newV;
-    }
+    // An equal tweak only freezes. cached_ keeps its identity, because the
+    // engine detects change by pointer identity and a new pointer for the same
+    // value reads as a change (flywheel-dag#5, the contract flywheel-dag#1 set
+    // for stateful nodes). The state is left alone too. A delivery still
+    // pending from an earlier tweak must survive, and an input change pending
+    // from before the freeze is harmless: eval() now returns the frozen value.
+    if (eq_->equal(cached_, newV)) return;
+
+    // A new value is published as an evaluation would publish it. Downstream is
+    // notified. This node stays dirty until it is evaluated, which propagate()
+    // preserves by absorbing everything while frozen, so the engine evaluates
+    // it once more and delivers the tweak to its own output. Left clean, it was
+    // never evaluated again while frozen, and its callback never saw the tweak.
+    cached_ = std::move(newV);
+    markDirty();
+    notifyDownstream();
 }
 
 template<typename Out, typename... Ins>

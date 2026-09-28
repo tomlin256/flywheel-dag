@@ -235,6 +235,10 @@ TEST(LazyInvalidation, TweakedNodeAbsorbsTheTransitiveCascadeNotJustTheDirectHop
     consumer->eval(ctx);
     consumer->settle();
     frozen->tweak(99.0);
+    // Deliver the tweak, as the engine would. A new tweak leaves the node dirty
+    // until it is evaluated (flywheel-dag#5), and the assertion below is about
+    // the cascade, not that pending delivery.
+    frozen->eval(ctx);
     consumer->settle();
 
     // src → mid is the DIRECT hop; mid → frozen is the transitive cascade, which

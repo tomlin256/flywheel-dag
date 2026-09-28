@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 #include "flywheel/dag.hpp"
+#include "flywheel/dag_engine.hpp"
 #include "flywheel/dag_ops.hpp"
 
 using namespace dag;
@@ -377,6 +378,113 @@ TEST(TweakExampleTest, Retweaking) {
     node->clearTweak();
     EXPECT_FALSE(node->tweakValue().has_value());
     EXPECT_EQ(get_value<double>(node->eval(ctx)), 10.0); // a=1 → 10
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A tweak and the engine (flywheel-dag#5)
+//
+// Both halves concern what a registered output sees. An equal tweak used to
+// rebind cached_, giving the same value a new identity, so after clearTweak()
+// the engine delivered the unchanged value again. That is the pattern
+// flywheel-dag#1 fixed for stateful nodes. And tweak() left the node clean while
+// propagate() absorbed every invalidation, so the engine never evaluated it
+// again while it was frozen: downstream nodes saw the tweak, but the node's own
+// callback never did.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+/// Input (2) → TweakableComputeNode (x * 10), registered as an engine output.
+struct TweakedOutput {
+    std::shared_ptr<Input<double>> in = Input<double>::make("in", 2.0);
+    std::shared_ptr<TweakableComputeNode<double, double>> node =
+        TweakableComputeNode<double, double>::make(
+            "x10", std::make_tuple(std::static_pointer_cast<INode>(in)),
+            [](const double& x) { return x * 10.0; });
+    async::Engine engine;
+    std::vector<double> delivered;
+
+    TweakedOutput() {
+        engine.addOutput<double>(node, [this](const double& v) { delivered.push_back(v); });
+        engine.step();   // delivers the computed 20
+    }
+
+    /// Everything delivered since the last call.
+    std::vector<double> take() { return std::exchange(delivered, {}); }
+};
+
+}  // namespace
+
+TEST(TweakExampleTest, EqualTweakKeepsTheCachedPointer) {
+    auto a    = Input<double>::make("a", 2.0);
+    auto node = TweakableComputeNode<double, double>::make(
+        "x10", std::make_tuple(std::static_pointer_cast<INode>(a)),
+        [](const double& x) { return x * 10.0; });
+
+    EvalContext ctx;
+    const ValuePtr before = node->eval(ctx);   // 20
+    node->tweak(20.0);                         // equal: freeze only
+    EXPECT_TRUE(node->isTweaked());
+    EXPECT_EQ(node->eval(ctx).get(), before.get())
+        << "an equal tweak must keep the cached pointer; the engine reads a new one "
+           "as a change";
+}
+
+TEST(TweakExampleTest, EqualTweakThenClearFiresNoExtraCallback) {
+    TweakedOutput t;
+    ASSERT_EQ(t.take(), (std::vector<double>{20.0}));
+
+    t.node->tweak(20.0);    // equal to what the output already has
+    t.engine.step();
+    t.node->clearTweak();   // recomputes 20
+    t.engine.step();
+
+    EXPECT_TRUE(t.take().empty()) << "the output's value never changed";
+}
+
+TEST(TweakExampleTest, TweakedOutputDeliversItsValueOnce) {
+    TweakedOutput t;
+    ASSERT_EQ(t.take(), (std::vector<double>{20.0}));
+
+    t.node->tweak(99.0);
+    t.engine.step();
+    EXPECT_EQ(t.take(), (std::vector<double>{99.0}))
+        << "the node's own output must see its tweak";
+
+    t.engine.step();
+    EXPECT_TRUE(t.take().empty()) << "and see it once";
+
+    t.node->clearTweak();
+    t.engine.step();
+    EXPECT_EQ(t.take(), (std::vector<double>{20.0})) << "clearing resumes the computed value";
+}
+
+// An equal re-tweak must not cancel a delivery still pending from the first
+// tweak. Marking the node clean there would lose the 99 altogether.
+TEST(TweakExampleTest, EqualRetweakKeepsAPendingDelivery) {
+    TweakedOutput t;
+    ASSERT_EQ(t.take(), (std::vector<double>{20.0}));
+
+    t.node->tweak(99.0);
+    t.node->tweak(99.0);
+    t.engine.step();
+    EXPECT_EQ(t.take(), (std::vector<double>{99.0}));
+}
+
+TEST(TweakExampleTest, TweakedOutputAndItsConsumerDeliverInOneCycle) {
+    TweakedOutput t;
+    auto plusOne = ComputeNode<double, double>::make(
+        "plus_one", std::make_tuple(std::static_pointer_cast<INode>(t.node)),
+        [](const double& v) { return v + 1.0; });
+    std::vector<double> consumer;
+    t.engine.addOutput<double>(plusOne, [&](const double& v) { consumer.push_back(v); });
+    t.engine.step();        // delivers the consumer's initial 21
+    t.take();
+    consumer.clear();
+
+    t.node->tweak(99.0);
+    t.engine.step();
+    EXPECT_EQ(t.take(), (std::vector<double>{99.0}));
+    EXPECT_EQ(consumer, (std::vector<double>{100.0}));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
