@@ -35,6 +35,25 @@ defined in the default build, so `assert()` does not run.** Any validation that
 must survive has to throw — see the `alpha` range checks in `EWMANode::make` /
 `EWMATickRateNode::make`.
 
+**The build is warning-free, and CI keeps it so** (flywheel-dag#4). The tests,
+the example and the benchmark compile with `-Wall -Wextra -Wpedantic` on GCC and
+Clang, and CI configures with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so any
+warning fails it. Turn the option on locally to see what CI will see.
+
+- **Fix a warning; do not silence it.** The one exception is a confirmed
+  compiler false positive. Silence that at the one site, for the one compiler,
+  with a comment naming the compiler bug. The counting `operator delete` in
+  `test_value_slot.cpp` and `bench_hot_path.cpp` does this for GCC bug 103993.
+- **Hold an evaluated `ValuePtr` in a local before binding a reference into it:**
+  `const ValuePtr v = node->eval(ctx); const T& x = get_value<T>(v);`. A
+  reference bound to `get_value()` of the temporary relies on the producer's
+  `cached_` alone, and GCC's `-Wdangling-reference` rejects it.
+- **The flags are the top level's alone.** Never put a flag on `flywheel_dag`'s
+  `INTERFACE` or in the cache: a consumer's flags are its own.
+  `test_warning_flags` checks that every translation unit of this project gets
+  the flags and no dependency's does. `test_consumer_subproject` checks that a
+  consumer gets none.
+
 **The benchmark** — `benchmarks/bench_hot_path` is `EXCLUDE_FROM_ALL` and not a
 ctest test. Time a change by running it before and after, on the same machine:
 

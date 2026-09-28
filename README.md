@@ -151,6 +151,11 @@ cd build && ctest
 `FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES` and `FLYWHEEL_DAG_BUILD_BENCHMARKS` are
 on when flywheel-dag is the top-level project and off when it is a subproject.
 
+The tests, the example and the benchmark compile the engine's headers with `-Wall -Wextra
+-Wpedantic` on GCC and Clang. CI also sets `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so any warning
+fails the build. None of these flags reaches a consumer or a dependency. They are set only when
+flywheel-dag is the top-level project, and never on `flywheel::dag`.
+
 ## Benchmark
 
 [`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle
