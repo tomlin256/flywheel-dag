@@ -42,3 +42,18 @@ add_test(NAME test_consumer_subproject
                     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
     --test-command consumer)
 set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)
+
+# The warning flags reach every translation unit of this project and none of
+# its dependencies' (flywheel-dag#4). The check reads compile_commands.json,
+# which only the Makefile and Ninja generators write, using string(JSON), which
+# needs CMake 3.19.
+if(_flywheel_dag_warning_flags
+   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja")
+   AND NOT CMAKE_VERSION VERSION_LESS 3.19)
+  add_test(NAME test_warning_flags
+    COMMAND ${CMAKE_COMMAND}
+      -DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DBINARY_DIR=${CMAKE_BINARY_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_warning_flags.cmake)
+endif()

@@ -101,11 +101,20 @@ target_compile_features(flywheel_dag INTERFACE cxx_std_17)
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests, examples and benchmarks (top-level by default).
 # ─────────────────────────────────────────────────────────────────────────────
+set(_flywheel_dag_warning_flags OFF)
 if(_flywheel_dag_top_level)
-    # Any use of a [[deprecated]] API is an error in this project's own code.
-    # After every FetchContent dependency, so third-party sources are unaffected.
+    # This project's own targets build with -Wall -Wextra -Wpedantic, and any
+    # use of a [[deprecated]] API is an error (flywheel-dag#4). Those targets
+    # are the tests, the example and the benchmark: they are what compile the
+    # engine's headers. add_compile_options reaches only the targets created
+    # after it, here and below, so placing it after every FetchContent
+    # dependency leaves third-party sources unaffected. Nothing goes on
+    # flywheel_dag's INTERFACE, and a subproject sets none of this, so a
+    # consumer's flags stay its own. test_warning_flags and
+    # test_consumer_subproject hold both halves.
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        add_compile_options(-Werror=deprecated-declarations)
+        add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
+        set(_flywheel_dag_warning_flags ON)
     endif()
 
     # List each static library once on a link line where the linker allows it.

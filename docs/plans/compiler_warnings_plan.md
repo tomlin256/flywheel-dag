@@ -276,7 +276,7 @@ Commits: `docs: say what the build warns about`, `build: release v0.1.4` and
 | Step | Status | Notes |
 |---|---|---|
 | 1 — Fix what Clang finds | Done | All ten sites are fixed. A clean probe build (flags added by hand, Apple Clang 21, `bench_hot_path` included) prints no warnings, down from 145. ctest 22 / 22. `--invariants` matches the committed file |
-| 2 — Turn the flags on, and guard them | Not started | |
+| 2 — Turn the flags on, and guard them | Done locally | The rebuild recompiled all 24 of this project's translation units and none of the dependencies', and printed no warnings. ctest 23 / 23. `test_warning_flags` counts 24 of this project's translation units and 11 of the dependencies'. The three hand-made changes each failed their test with the expected message: "72 warning flags missing", "flywheel::dag passes compile options to its consumer: -Wall", and "changed its consumer's CMAKE_CXX_FLAGS from '' to '-Wall'". An unchanged copy passed both tests |
 | 3 — Fix what CI finds | Not started | |
 | 4 — Warnings are errors in CI | Not started | |
 | 5 — Docs and release | Not started | |
