@@ -149,7 +149,7 @@ exercise. `bench_report` gets a new ctest suite, `benchmarks/test_bench_report.c
 | `BenchArgs.TakesACycleCount` | `5000` sets the cycle count |
 | `BenchArgs.TakesInvariantsBeforeOrAfterTheCount` | `--invariants 5000` and `5000 --invariants` agree |
 | `BenchArgs.RejectsAnUnknownFlag` | `--json` is an error |
-| `BenchArgs.RejectsABadCycleCount` | `0`, `-5`, `12x` and `abc` are errors |
+| `BenchArgs.RejectsABadCycleCount` | `0`, `-5`, `12x`, `abc`, an empty string and an out-of-range count are errors |
 | `BenchArgs.RejectsASecondCycleCount` | `100 200` is an error |
 | `BenchReport.InvariantsRoundTripEveryDouble` | Checksums such as `0.1 + 0.2` and `1e-300`, printed and parsed back, are bit-identical |
 | `BenchReport.InvariantsIgnoreTiming` | Rows that differ only in ns/cycle print the same invariants |
@@ -234,6 +234,6 @@ Commit: `docs: describe the benchmark`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — The benchmark and its report format | Not started | |
+| 1 — The benchmark and its report format | Done | ctest 22 / 22. The 10 `test_bench_report` tests pass; printing allocs/cycle at `%.1f` and doubles at `%.15g` turns two of them red. Building `all` does not produce `bench_hot_path`. Every row reads 0 allocs/cycle at 1,000, 10,000 and 200,000 cycles. Two runs and a `Debug` build print identical `--invariants`. At 200,000 cycles on an M4 Pro: `chain` 338.6, `idle-queues` 248.8, `ingest` 108.8 ns/cycle |
 | 2 — CI gates the exact columns | Not started | |
 | 3 — Docs | Not started | |

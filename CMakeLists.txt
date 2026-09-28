@@ -19,9 +19,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level or subproject.
 #
-# Tests, examples and every build-wide setting below apply only when this is
-# the top-level project. A consumer's build settings are its own, and it never
-# inherits the engine's test targets or googletest.
+# Tests, examples, benchmarks and every build-wide setting below apply only when
+# this is the top-level project. A consumer's build settings are its own, and it
+# never inherits the engine's test targets or googletest.
 # ─────────────────────────────────────────────────────────────────────────────
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_flywheel_dag_top_level ON)
@@ -29,8 +29,9 @@ else()
     set(_flywheel_dag_top_level OFF)
 endif()
 
-option(FLYWHEEL_DAG_BUILD_TESTS    "Build the engine's tests" ${_flywheel_dag_top_level})
-option(FLYWHEEL_DAG_BUILD_EXAMPLES "Build the examples"       ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_TESTS      "Build the engine's tests"                  ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                        ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand" ${_flywheel_dag_top_level})
 
 if(_flywheel_dag_top_level)
     # RelWithDebInfo (-O2 -g -DNDEBUG) unless a build type was asked for: an
@@ -98,7 +99,7 @@ target_link_libraries(flywheel_dag INTERFACE spdlog::spdlog nlohmann_json::nlohm
 target_compile_features(flywheel_dag INTERFACE cxx_std_17)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests and examples (top-level by default).
+# Tests, examples and benchmarks (top-level by default).
 # ─────────────────────────────────────────────────────────────────────────────
 if(_flywheel_dag_top_level)
     # Any use of a [[deprecated]] API is an error in this project's own code.
@@ -130,4 +131,8 @@ endif()
 
 if(FLYWHEEL_DAG_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(FLYWHEEL_DAG_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
