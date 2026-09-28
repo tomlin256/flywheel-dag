@@ -59,8 +59,19 @@ void* operator new(std::size_t n) {
     if (!p) throw std::bad_alloc();
     return p;
 }
+// GCC bug 103993 (https://gcc.gnu.org/PR103993): inlined into a caller, these
+// show GCC free() given memory from operator new, and -Wmismatched-new-delete
+// fires. It does not look through the replacement above to its malloc(). The
+// pairing is correct, so the warning is off here, for GCC (11 on) only.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void operator delete(void* p) noexcept              { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
+#pragma GCC diagnostic pop
+#endif
 
 #include "bench_report.hpp"
 

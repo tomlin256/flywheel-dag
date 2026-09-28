@@ -996,7 +996,8 @@ TEST(ApplyInputs, ContainerInputIsPassedByReferenceNotCopied) {
     ASSERT_EQ(get_value<int>(consumer->eval(ctx)), 3);
 
     // The address the producer stores its vector's buffer at.
-    const std::vector<int>& stored = get_value<std::vector<int>>(src->eval(ctx));
+    const ValuePtr produced = src->eval(ctx);
+    const std::vector<int>& stored = get_value<std::vector<int>>(produced);
     EXPECT_EQ(seenData, stored.data())
         << "the functor received a copy of the input container, not a reference "
            "to the one the producing node holds";

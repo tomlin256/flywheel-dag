@@ -55,7 +55,13 @@ ValuePtr StatefulNodeBase<Derived, Out, In, State>::eval(EvalContext& ctx) {
         decltype(&Derived::doCompute), Derived*, const In&, State&>,
         "Derived must implement Out doCompute(const In&, State&)");
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
-    const In& inp = get_value<In>(upstream_->eval(ctx));
+    // Hold the pulled value while doCompute() reads it, as the ops do: inp
+    // refers into it, and the ValuePtr is what keeps the producer's ValueSlot
+    // buffer from being recycled underneath. Bound straight to get_value() of
+    // the temporary, inp was kept valid only by the producer's own cached_
+    // (flywheel-dag#4).
+    const ValuePtr uv = upstream_->eval(ctx);
+    const In& inp = get_value<In>(uv);
     Out result = static_cast<Derived*>(this)->doCompute(inp, state_);
     // notifyDownstream() owns cached_: it rebinds it only when the policy says
     // the value changed. Rebinding it here as well (flywheel-dag#1) gave cached_
