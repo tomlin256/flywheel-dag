@@ -27,10 +27,12 @@ jobs:
     - uses: actions/checkout@v6
 
     # -Werror=dev -Werror=deprecated: any CMake developer or deprecation warning,
-    # ours or a dependency's, fails the run. The build type is left to the
+    # ours or a dependency's, fails the run. FLYWHEEL_DAG_WARNINGS_AS_ERRORS
+    # makes any compiler warning in this project's own code fail it too; the
+    # dependencies' sources keep their own flags. The build type is left to the
     # project's own default (RelWithDebInfo), the configuration consumers get.
     - name: Configure
-      run: cmake -B build -Werror=dev -Werror=deprecated
+      run: cmake -B build -Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
 
     - name: Build
       run: cmake --build build --parallel 4

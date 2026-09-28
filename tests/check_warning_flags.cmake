@@ -5,7 +5,7 @@
 # Run by ctest as
 #
 #   cmake -DCOMPILE_COMMANDS=<build>/compile_commands.json -DSOURCE_DIR=<source>
-#         -DBINARY_DIR=<build> -P check_warning_flags.cmake
+#         -DBINARY_DIR=<build> [-DWARNINGS_AS_ERRORS=ON] -P check_warning_flags.cmake
 #
 # and registered only where the root CMakeLists.txt sets the flags (the top
 # level, GCC or Clang) under a generator that writes compile_commands.json.
@@ -14,20 +14,26 @@
 #
 # A translation unit under SOURCE_DIR but outside BINARY_DIR is this project's.
 # Anything else, such as a FetchContent dependency under <build>/_deps, is a
-# dependency's. No dependency sets -Wpedantic for itself, so finding it on one
-# means the flags leaked.
+# dependency's. With WARNINGS_AS_ERRORS, every translation unit of this project
+# must also have -Werror, and no dependency's may: there, a warning of the
+# dependency's own would fail this project's build. No dependency sets
+# -Wpedantic for itself, so finding it on one means the flags leaked.
 
 cmake_minimum_required(VERSION 3.19)   # string(JSON)
 
 foreach(var IN ITEMS COMPILE_COMMANDS SOURCE_DIR BINARY_DIR)
     if(NOT ${var})
         message(FATAL_ERROR "usage: cmake -DCOMPILE_COMMANDS=<file> -DSOURCE_DIR=<dir> "
-                            "-DBINARY_DIR=<dir> -P check_warning_flags.cmake")
+                            "-DBINARY_DIR=<dir> [-DWARNINGS_AS_ERRORS=ON] "
+                            "-P check_warning_flags.cmake")
     endif()
 endforeach()
 
 set(required -Wall -Wextra -Wpedantic)
-set(forbidden_in_dependencies -Wpedantic)
+if(WARNINGS_AS_ERRORS)
+    list(APPEND required -Werror)
+endif()
+set(forbidden_in_dependencies -Wpedantic -Werror)
 
 file(READ "${COMPILE_COMMANDS}" db)
 string(JSON count LENGTH "${db}")
@@ -85,10 +91,11 @@ endif()
 if(leaked)
     list(LENGTH leaked n)
     list(JOIN leaked "\n  " report)
-    message(FATAL_ERROR "this project's warning flags reached ${n} dependency "
+    message(FATAL_ERROR "${n} of this project's warning flags found on dependency "
                         "translation units:\n  ${report}")
 endif()
 
 list(JOIN required " " flags)
+list(JOIN forbidden_in_dependencies " " unwanted)
 message(STATUS "${ours} translation units of this project compile with ${flags}; "
-               "${theirs} of its dependencies' do not")
+               "none of the ${theirs} of its dependencies' has ${unwanted}")

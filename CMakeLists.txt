@@ -101,7 +101,6 @@ target_compile_features(flywheel_dag INTERFACE cxx_std_17)
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests, examples and benchmarks (top-level by default).
 # ─────────────────────────────────────────────────────────────────────────────
-set(_flywheel_dag_warning_flags OFF)
 if(_flywheel_dag_top_level)
     # This project's own targets build with -Wall -Wextra -Wpedantic, and any
     # use of a [[deprecated]] API is an error (flywheel-dag#4). Those targets
@@ -112,9 +111,17 @@ if(_flywheel_dag_top_level)
     # flywheel_dag's INTERFACE, and a subproject sets none of this, so a
     # consumer's flags stay its own. test_warning_flags and
     # test_consumer_subproject hold both halves.
+    #
+    # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes every warning an error, and CI
+    # turns it on. It is off by default, so a newer compiler's new warning
+    # does not stop a contributor's build; CI still refuses it.
+    option(FLYWHEEL_DAG_WARNINGS_AS_ERRORS
+           "Make every compiler warning an error in this project's own targets" OFF)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
-        set(_flywheel_dag_warning_flags ON)
+        if(FLYWHEEL_DAG_WARNINGS_AS_ERRORS)
+            add_compile_options(-Werror)
+        endif()
     endif()
 
     # List each static library once on a link line where the linker allows it.
