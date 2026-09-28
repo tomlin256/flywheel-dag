@@ -186,6 +186,13 @@ private:
 // DAGTests.EqualityPolicyOnIntermediateNodeDoesNotSuppressDownstreamEval and its
 // ...DoesSuppress... sibling, which assert opposite outcomes on the same graph
 // and are both correct.
+//
+// WHAT IT COMPARES. The new value against the last one the node PUBLISHED, which
+// is cached_, not against the last one it computed. Only an "unequal" verdict
+// rebinds cached_. Under a tolerance policy this is the difference between
+// publishing a slow drift once it has moved the tolerance in total and never
+// publishing it at all. Held for stateful nodes by
+// StatefulNodeBase.EqualityPolicyComparesAgainstTheLastPublishedValue.
 // ─────────────────────────────────────────────────────────────────────────────
 class IEqualityPolicy {
 public:

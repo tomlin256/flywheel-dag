@@ -585,7 +585,9 @@ private:
 // Output: std::optional<bool>
 //           true    — onset:    N consecutive true ticks confirmed; latch was clear
 //           false   — resolved: upstream went false; latch was set
-//           nullopt — no transition (DAG equality suppresses propagation)
+//           nullopt — no transition. The first nullopt after a transition is a
+//                     change of value, so it propagates and reaches an output
+//                     callback. Later ones are equal, and are suppressed.
 //
 // Combines debounce counting and edge detection in a single stateful node.
 // Resolved transitions are immediate (no debounce on the falling edge) — the

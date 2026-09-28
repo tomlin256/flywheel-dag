@@ -105,6 +105,14 @@ node sits **and on its consumers' `InvalidationMode`**:
 The last two rows are the same node with different consumers, which is why this
 is a per-node judgement rather than a rule.
 
+A policy compares the new value against the last one the node **published**,
+not the last one it computed. Only an "unequal" verdict rebinds `cached_`, and
+`eval()` returns what `cached_` holds. Under a tolerance policy, a slow drift
+therefore publishes once it has moved the tolerance in total. Comparing against
+the previous evaluation instead would never publish it at all.
+`StatefulNodeBase.EqualityPolicyComparesAgainstTheLastPublishedValue` holds this
+for stateful nodes (flywheel-dag#1).
+
 Both halves are pinned, on the same graph, by tests that assert opposite outcomes
 and are both correct:
 `DAGTests.EqualityPolicyOnIntermediateNodeDoesNotSuppressDownstreamEval` (Eager,
@@ -284,11 +292,15 @@ one at resolution — not a continuous `true` signal for every tick the conditio
 |---|---|
 | `true` | Onset: N consecutive `true` ticks confirmed; latch was previously clear |
 | `false` | Resolved: upstream went `false`; latch was previously set |
-| `nullopt` | No transition — DAG equality policy suppresses propagation |
+| `nullopt` | No transition |
 
-The default `TypedEqualityPolicy<std::optional<bool>>` handles suppression automatically:
-`nullopt == nullopt` blocks downstream propagation, so `addOutput` callbacks only fire
-on actual `true` or `false` transitions.
+The default `TypedEqualityPolicy<std::optional<bool>>` handles suppression:
+`nullopt == nullopt`, so a run of non-transitions neither notifies downstream nor
+fires an `addOutput` callback. The exception is the tick straight after a
+transition. Going from `true` or `false` back to `nullopt` is a change of value,
+so a callback runs once per transition and then once more with `nullopt`. It
+must ignore the `nullopt`. Pinned by
+`LatchedDebounceNodeTests.EngineCallbacksFireOnTransitionsAndOnTheReturnToNullopt`.
 
 **State** (`LatchedDebounceNodeState`):
 
@@ -312,7 +324,7 @@ a restart without replaying history.
 auto alert = ThresholdNode<double>::make(name, upstream, level, Direction::Above, hys);
 auto latch  = LatchedDebounceNode::make(name + "_latch", alert, debounce_ticks);
 engine.addOutput(latch, [](const std::optional<bool>& t) {
-    if (!t) return;           // nullopt — no transition, should not fire but guard anyway
+    if (!t) return;           // nullopt — the tick after a transition
     const char* state = *t ? "active" : "resolved";
     // ...
 });

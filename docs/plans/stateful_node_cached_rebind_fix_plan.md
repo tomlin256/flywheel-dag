@@ -1,6 +1,6 @@
 # Stateful Nodes: Keep the Cached Value When the Result Is Unchanged
 
-**Status: In progress (2026-09-28).** Approved 2026-09-27. Step 1 is done.
+**Status: In progress (2026-09-28).** Approved 2026-09-27. Steps 1 and 2 are done.
 
 Closes [flywheel-dag#1](https://github.com/tomlin256/flywheel-dag/issues/1).
 
@@ -182,5 +182,5 @@ adds no API.
 | Step | Status | Notes |
 |---|---|---|
 | 1 — Tests, then the fix | Done | All 17 new tests failed on v0.1.0 for the stated reason. The 13 per-node outputs each fired on all 20 steady cycles, with first delivery correct. The `ThresholdNode` output fired 21 callbacks where 1 was due, on a new pointer. `SumNode` returned a new pointer every evaluation. The drift published once, and `eval()` read 3 rather than 2.5. The latch delivered `nnTnnFnn`. The `WindowNode` control passed. After deleting the three rebinds: ctest 21 / 21, and `quickstart` output is identical. The plan said 20; the 21st is `example_quickstart` |
-| 2 — Docs | Not started | |
+| 2 — Docs | Done | `CLAUDE.md`, `dag.hpp` and `dag_timeseries.hpp` as listed; the README is unchanged. ctest 21 / 21 |
 | 3 — Release v0.1.1 | Not started | |
