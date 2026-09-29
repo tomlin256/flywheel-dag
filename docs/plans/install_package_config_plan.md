@@ -1,6 +1,9 @@
 # Install Rules and a `find_package(flywheel_dag)` Package Config
 
-**Status: Approved (2026-09-29).**
+**Status: Done (2026-09-29).** Approved 2026-09-29. All four steps landed, and v0.1.5 is released.
+`cmake --install` puts the engine alone into the prefix. `find_package(flywheel_dag)` finds it
+there, with spdlog and nlohmann/json either as installed packages or as the consumer's own
+FetchContent copies. CI runs both consumers on Linux (GCC 13) and macOS (Apple Clang 21).
 
 Closes [flywheel-dag#2](https://github.com/tomlin256/flywheel-dag/issues/2).
 
@@ -183,7 +186,9 @@ should catch.
   an `EWMANode` through `JsonFileStateStore`, which is the engine code that uses both: nlohmann/json writes the
   snapshot and spdlog logs the save. The program exits non-zero unless the restored node computes
   the same value as the original. It gives the snapshot an absolute path under its working
-  directory, because a bare filename trips flywheel-dag#9.
+  directory, because a bare filename trips flywheel-dag#9. *As built:* the snapshot goes beside
+  the executable instead, so the three consumer builds never share one, whichever directory ctest
+  runs them from. The flywheel-dag#9 fix later removed the other reason.
 - **The package consumers search only the prefixes they are given.** They turn `CMAKE_FIND_USE_*`
   off for the system paths, the environment and the package registries, which leaves only
   `CMAKE_PREFIX_PATH`. A package installed on the machine therefore cannot stand in for the one the
@@ -374,4 +379,4 @@ Commits: `docs: say how to install the engine and find it`, `build: release v0.1
 | 1 — Install the engine | Done | ctest 24 / 24, and `--invariants` is unchanged. `test_install` finds the engine alone: 27 files. A fresh configure with CI's flags prints no warnings. `cmake --install` of that tree, configured and never built, installs the same 27 files. Both hand-made changes failed their test. `include/flywheel/extra.h` gave "Not installed: include/flywheel/extra.h". An `ON` default gave "flywheel-dag turned on its install rules in its consumer". For that second check, the local consumer build directory had to be removed first: its cache keeps the option's first value. CI always configures fresh. CI run 36536165749 is green on both legs, at 24 / 24 with no compiler warnings |
 | 2 — A consumer finds the package and its dependencies | Done | ctest 26 / 26, and `--invariants` is unchanged. `test_consumer_package` finds `flywheel_dag` in the engine's prefix, and spdlog and nlohmann/json in the dependencies' prefix. `CMAKE_PREFIX_PATH` arrives as a two-entry list. The round trip restores the EWMA exactly: 22.5 against 22.5. `install_dependencies` takes 5 s from cold here, and 0.3 s once its build directories exist. The three hand-made changes each failed as stated. `find_dependency(spdlogg)` gave "Could not find a package configuration file provided by "spdlogg"". Without the config's `set_property`, the consumer's compile gave "'nlohmann/json.hpp' file not found". A restore into a renamed node started cold (30 against 22.5), and both consumer tests failed. CI run 36536752352 is green on both legs, at 26 / 26 with no compiler warnings. `test_consumer_package` took 9.8 s on Ubuntu and 4.6 s on macOS, and `install_dependencies` took 17 s and 11 s. That run already installs the engine into a prefix and builds a consumer against it with `find_package` |
 | 3 — A consumer that fetches its own dependencies | Done | ctest 27 / 27, and `--invariants` is unchanged. `test_consumer_package_own_dependencies` finds `flywheel_dag` in the engine's prefix. Its cache holds no `spdlog_DIR` and no `nlohmann_json_DIR`: the config never looked for either package. Both hand-made changes failed as stated. Without the guards, the config's search gave "Could not find a package configuration file provided by "spdlog"". Without the `set_property`, the compile gave "'nlohmann/json.hpp' file not found". One extra check shows that the confined search holds. Homebrew's `nlohmann_jsonConfig.cmake` is installed on this Mac, under `/opt/homebrew/share/cmake/`. With only nlohmann/json's guard removed, the search still failed ("Could not find a package configuration file provided by "nlohmann_json"") instead of finding it. CI run 36537349936 is green on both legs, at 27 / 27 with no compiler warnings. `test_consumer_package_own_dependencies` took 27 s on Ubuntu and 19 s on macOS. The four new tests together add about 55 s to the Ubuntu leg and 44 s to the macOS leg. That is more than the 20–40 s estimated in Self-review, which counted only the two spdlog builds |
-| 4 — Docs and release | Not started | |
+| 4 — Docs and release | Done | The README has an install section, and `CLAUDE.md` has the rules. The root `CMakeLists.txt` header shows the `find_package` form. The fix for flywheel-dag#9 landed before the release (`bfab6ab`, CI run 36538219012), so v0.1.5 carries it too; the Release section records the change of plan. CI run 36538668734 on the release commit is green on both legs, at 27 / 27 with no compiler warnings. `v0.1.5` is tagged and released. flywheel-dag#2 and flywheel-dag#9 are closed |
