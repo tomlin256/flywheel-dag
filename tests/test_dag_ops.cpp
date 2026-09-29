@@ -11,6 +11,8 @@
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_ops.hpp"
 #include <cmath>
+#include <limits>
+#include <vector>
 
 using namespace dag;
 
@@ -430,6 +432,156 @@ TEST(DagOpsTests, SqrtOfNegativeIsNan) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Trigonometric ops: SinNode, CosNode, TanNode, AsinNode, AcosNode, AtanNode,
+// Atan2Node (flywheel-dag#14)
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// M_PI is POSIX, not standard C++.
+const double kPi = std::acos(-1.0);
+
+} // namespace
+
+// Each node calls its std:: function, but a test's own call can be folded at
+// compile time: GCC evaluates a constant std::sin(1.2) correctly rounded, and
+// the library the node calls at run time need not be. Hence 4 ulp, not exact.
+TEST(DagOpsTests, TrigOpsMatchStd) {
+    // Inside asin's and acos's domain, and in three of atan2's quadrants.
+    struct Point { double a, b; };
+    for (const Point& p : {Point{-0.8, -1.7}, Point{0.3, 2.2}, Point{0.9, -0.4}}) {
+        SCOPED_TRACE(testing::Message() << "at " << p.a << ", " << p.b);
+        auto a = Input<double>::make("a", p.a);
+        auto b = Input<double>::make("b", p.b);
+        auto sinNode   = ops::SinNode<double>::make("sin", a);
+        auto cosNode   = ops::CosNode<double>::make("cos", a);
+        auto tanNode   = ops::TanNode<double>::make("tan", a);
+        auto asinNode  = ops::AsinNode<double>::make("asin", a);
+        auto acosNode  = ops::AcosNode<double>::make("acos", a);
+        auto atanNode  = ops::AtanNode<double>::make("atan", a);
+        auto atan2Node = ops::Atan2Node<double>::make("atan2", a, b);
+
+        EXPECT_DOUBLE_EQ(evalAs<double>(sinNode), std::sin(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(cosNode), std::cos(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(tanNode), std::tan(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(asinNode), std::asin(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(acosNode), std::acos(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(atanNode), std::atan(p.a));
+        EXPECT_DOUBLE_EQ(evalAs<double>(atan2Node), std::atan2(p.a, p.b));
+    }
+}
+
+TEST(DagOpsTests, TrigOpsRecomputeOnInputChange) {
+    auto a = Input<double>::make("a", 0.25);
+    auto b = Input<double>::make("b", 2.0);
+    const std::vector<NodePtr> unary = {
+        ops::SinNode<double>::make("sin", a),   ops::CosNode<double>::make("cos", a),
+        ops::TanNode<double>::make("tan", a),   ops::AsinNode<double>::make("asin", a),
+        ops::AcosNode<double>::make("acos", a), ops::AtanNode<double>::make("atan", a),
+    };
+    auto atan2Node = ops::Atan2Node<double>::make("atan2", a, b);
+
+    for (const double x : {0.25, -0.5}) {
+        a->set(x);
+        const double want[] = {std::sin(x),  std::cos(x),  std::tan(x),
+                               std::asin(x), std::acos(x), std::atan(x)};
+        for (std::size_t i = 0; i < unary.size(); ++i)
+            EXPECT_DOUBLE_EQ(evalAs<double>(unary[i]), want[i]) << unary[i]->name() << " at " << x;
+        EXPECT_DOUBLE_EQ(evalAs<double>(atan2Node), std::atan2(x, 2.0)) << "at " << x;
+    }
+
+    // b moves atan2 alone.
+    b->set(-3.0);
+    for (const auto& n : unary) EXPECT_FALSE(n->dirty()) << n->name();
+    EXPECT_DOUBLE_EQ(evalAs<double>(atan2Node), std::atan2(-0.5, -3.0));
+}
+
+// y first, in std::atan2's order. Swapped, the answers at (1, −1) and (−1, 1)
+// would trade places.
+TEST(DagOpsTests, Atan2TakesYThenX) {
+    auto y = Input<double>::make("y", 1.0);
+    auto x = Input<double>::make("x", 1.0);
+    auto angle = ops::Atan2Node<double>::make("angle", y, x);
+
+    struct Case { double y, x, angle; };
+    for (const Case& c : {Case{1.0, 1.0, kPi / 4}, Case{1.0, -1.0, 3 * kPi / 4},
+                          Case{-1.0, -1.0, -3 * kPi / 4}, Case{-1.0, 1.0, -kPi / 4}}) {
+        y->set(c.y);
+        x->set(c.x);
+        EXPECT_DOUBLE_EQ(evalAs<double>(angle), c.angle) << "at y = " << c.y << ", x = " << c.x;
+    }
+}
+
+TEST(DagOpsTests, AsinAndAcosOutsideTheirDomainAreNan) {
+    auto a = Input<double>::make("a", 1.5);
+    auto asinNode = ops::AsinNode<double>::make("asin", a);
+    auto acosNode = ops::AcosNode<double>::make("acos", a);
+    EXPECT_TRUE(std::isnan(evalAs<double>(asinNode)));
+    EXPECT_TRUE(std::isnan(evalAs<double>(acosNode)));
+
+    a->set(-1.5);
+    EXPECT_TRUE(std::isnan(evalAs<double>(asinNode)));
+    EXPECT_TRUE(std::isnan(evalAs<double>(acosNode)));
+
+    // The edges themselves are inside.
+    a->set(1.0);
+    EXPECT_DOUBLE_EQ(evalAs<double>(asinNode), kPi / 2);
+    EXPECT_EQ(evalAs<double>(acosNode), 0.0);
+    a->set(-1.0);
+    EXPECT_DOUBLE_EQ(evalAs<double>(asinNode), -kPi / 2);
+    EXPECT_DOUBLE_EQ(evalAs<double>(acosNode), kPi);
+}
+
+TEST(DagOpsTests, SinCosTanOfInfinityAreNan) {
+    const double inf = std::numeric_limits<double>::infinity();
+    auto a = Input<double>::make("a", inf);
+    auto sinNode = ops::SinNode<double>::make("sin", a);
+    auto cosNode = ops::CosNode<double>::make("cos", a);
+    auto tanNode = ops::TanNode<double>::make("tan", a);
+    for (const double x : {inf, -inf}) {
+        a->set(x);
+        EXPECT_TRUE(std::isnan(evalAs<double>(sinNode))) << "at " << x;
+        EXPECT_TRUE(std::isnan(evalAs<double>(cosNode))) << "at " << x;
+        EXPECT_TRUE(std::isnan(evalAs<double>(tanNode))) << "at " << x;
+    }
+}
+
+// π/2 is not a double, so no input is a pole: next to it, tan is large but
+// finite.
+TEST(DagOpsTests, TanIsFiniteAtTheDoubleNearestHalfPi) {
+    auto a = Input<double>::make("a", kPi / 2);
+    auto tanNode = ops::TanNode<double>::make("tan", a);
+    const double t = evalAs<double>(tanNode);
+    EXPECT_TRUE(std::isfinite(t));
+    EXPECT_GT(t, 1.6e16);
+}
+
+TEST(DagOpsTests, AsinSinRoundTrip) {
+    auto a = Input<double>::make("a", 0.7);
+    auto sinNode = ops::SinNode<double>::make("sin", a);
+    auto asinNode = ops::AsinNode<double>::make("asin", sinNode);
+    EXPECT_NEAR(evalAs<double>(asinNode), 0.7, 1e-15); // asin(sin(x)) == x for |x| <= π/2
+}
+
+// The second quadrant, which the atan of a ratio cannot reach.
+TEST(DagOpsTests, Atan2SinCosRoundTrip) {
+    auto a = Input<double>::make("a", 2.5);
+    auto sinNode = ops::SinNode<double>::make("sin", a);
+    auto cosNode = ops::CosNode<double>::make("cos", a);
+    auto angle = ops::Atan2Node<double>::make("angle", sinNode, cosNode);
+    EXPECT_NEAR(evalAs<double>(angle), 2.5, 1e-15);
+}
+
+TEST(DagOpsTests, TrigOpsWorkAtFloat) {
+    auto a = Input<float>::make("a", 0.5f);
+    auto b = Input<float>::make("b", -2.0f);
+    auto sinNode = ops::SinNode<float>::make("sin", a);
+    auto angle = ops::Atan2Node<float>::make("angle", a, b);
+    EXPECT_FLOAT_EQ(evalAs<float>(sinNode), std::sin(0.5f));
+    EXPECT_FLOAT_EQ(evalAs<float>(angle), std::atan2(0.5f, -2.0f));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cross-op composition + inputs() round-trip
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -498,6 +650,27 @@ TEST(DagOpsTests, AllOpsInputsReturnUpstreamNodes) {
 
     auto sqrtNode = ops::SqrtNode<double>::make("sqrt", a);
     EXPECT_EQ(sqrtNode->inputs(), aOnly);
+
+    auto sinNode = ops::SinNode<double>::make("sin", a);
+    EXPECT_EQ(sinNode->inputs(), aOnly);
+
+    auto cosNode = ops::CosNode<double>::make("cos", a);
+    EXPECT_EQ(cosNode->inputs(), aOnly);
+
+    auto tanNode = ops::TanNode<double>::make("tan", a);
+    EXPECT_EQ(tanNode->inputs(), aOnly);
+
+    auto asinNode = ops::AsinNode<double>::make("asin", a);
+    EXPECT_EQ(asinNode->inputs(), aOnly);
+
+    auto acosNode = ops::AcosNode<double>::make("acos", a);
+    EXPECT_EQ(acosNode->inputs(), aOnly);
+
+    auto atanNode = ops::AtanNode<double>::make("atan", a);
+    EXPECT_EQ(atanNode->inputs(), aOnly);
+
+    auto atan2Node = ops::Atan2Node<double>::make("atan2", a, b);
+    EXPECT_EQ(atan2Node->inputs(), ab);
 }
 
 int main(int argc, char** argv) {

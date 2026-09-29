@@ -8,7 +8,7 @@
 // =============================================================================
 
 #pragma once
-// dag_ops.hpp — basic arithmetic op primitives built on dag.hpp
+// dag_ops.hpp — arithmetic and trigonometric op primitives built on dag.hpp
 //
 // Each op below is its own concrete C++ type — not a generic ComputeNode
 // wrapping an opaque lambda — so that inputs() plus the op's identity are
@@ -35,6 +35,13 @@
 //  LnNode<T>       — unary:          out = ln(a)   (floating-point T only; unguarded)
 //  PowerNode<T>    — binary:         out = a ^ b   (floating-point T only; unguarded)
 //  SqrtNode<T>     — unary:          out = sqrt(a) (floating-point T only; unguarded)
+//  SinNode<T>      — unary:          out = sin(a)  (floating-point T only; unguarded)
+//  CosNode<T>      — unary:          out = cos(a)  (floating-point T only; unguarded)
+//  TanNode<T>      — unary:          out = tan(a)  (floating-point T only; unguarded)
+//  AsinNode<T>     — unary:          out = asin(a) (floating-point T only; unguarded)
+//  AcosNode<T>     — unary:          out = acos(a) (floating-point T only; unguarded)
+//  AtanNode<T>     — unary:          out = atan(a) (floating-point T only)
+//  Atan2Node<T>    — binary:         out = atan2(a, b) (floating-point T only; a is y, b is x)
 
 #include "dag.hpp"
 #include <cmath>
@@ -203,6 +210,45 @@ struct SqrtOp {
     T operator()(const T& a) const { return std::sqrt(a); }
 };
 
+// The trigonometric Ops wrap <cmath> for the same reason, in radians. None
+// needs an identity: Atan2Op is binary but fixed-arity, and the rest are
+// unary.
+template<typename T>
+struct SinOp {
+    T operator()(const T& a) const { return std::sin(a); }
+};
+
+template<typename T>
+struct CosOp {
+    T operator()(const T& a) const { return std::cos(a); }
+};
+
+template<typename T>
+struct TanOp {
+    T operator()(const T& a) const { return std::tan(a); }
+};
+
+template<typename T>
+struct AsinOp {
+    T operator()(const T& a) const { return std::asin(a); }
+};
+
+template<typename T>
+struct AcosOp {
+    T operator()(const T& a) const { return std::acos(a); }
+};
+
+template<typename T>
+struct AtanOp {
+    T operator()(const T& a) const { return std::atan(a); }
+};
+
+// In std::atan2's order: a is y and b is x.
+template<typename T>
+struct Atan2Op {
+    T operator()(const T& a, const T& b) const { return std::atan2(a, b); }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Derivative<Op> — an Op's local partial derivatives, specialised per Op.
 //
@@ -357,6 +403,46 @@ using PowerNode = BinaryOpNode<T, PowOp<T>>;
 // Unguarded at the domain edge: a < 0 propagates NaN.
 template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
 using SqrtNode = UnaryOpNode<T, SqrtOp<T>>;
+
+// SinNode<T>, CosNode<T>, TanNode<T> — unary: out = sin(a), cos(a), tan(a),
+// with a in radians.
+//
+// Same floating-point-only constraint as ExpNode, same rationale. Unguarded:
+// an infinite a propagates NaN. TanNode has no pole at any double, because
+// π/2 is not one: at the double nearest it, tan is about 1.6e16.
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using SinNode = UnaryOpNode<T, SinOp<T>>;
+
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using CosNode = UnaryOpNode<T, CosOp<T>>;
+
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using TanNode = UnaryOpNode<T, TanOp<T>>;
+
+// AsinNode<T>, AcosNode<T>, AtanNode<T> — unary: out = asin(a), acos(a),
+// atan(a), in radians.
+//
+// Same floating-point-only constraint as ExpNode, same rationale. Unguarded
+// at the domain edge: |a| > 1 propagates NaN from AsinNode and AcosNode.
+// AtanNode is defined everywhere, and gives ±π/2 for an infinite a.
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using AsinNode = UnaryOpNode<T, AsinOp<T>>;
+
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using AcosNode = UnaryOpNode<T, AcosOp<T>>;
+
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using AtanNode = UnaryOpNode<T, AtanOp<T>>;
+
+// Atan2Node<T> — binary: out = atan2(a, b), the angle of the point (b, a), in
+// radians, in [−π, π].
+//
+// Y COMES FIRST, in std::atan2's order: make(name, y, x). A swapped pair is
+// the classic atan2 mistake, and it compiles. Same floating-point-only
+// constraint as ExpNode, same rationale. Defined everywhere, the origin
+// included, where the signs of the two zeros choose ±0 or ±π.
+template<typename T = double, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+using Atan2Node = BinaryOpNode<T, Atan2Op<T>>;
 
 } // namespace dag::ops
 

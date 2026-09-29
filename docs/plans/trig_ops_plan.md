@@ -307,7 +307,7 @@ Commits: `docs: describe the trigonometric ops`, `build: release v0.1.7` and
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — The seven ops | Not started | |
+| 1 — The seven ops | Done | ctest 33 / 33, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_ops` has 54 tests: the 45 it had, nine new, and `AllOpsInputsReturnUpstreamNodes` extended to the seven. Swapping `Atan2Op`'s arguments broke `Atan2TakesYThenX` and `TrigOpsMatchStd`, as planned, and also `TrigOpsRecomputeOnInputChange`, `Atan2SinCosRoundTrip` and `TrigOpsWorkAtFloat` |
 | 2 — Their closed-form partials | Not started | |
 | 3 — Dual numbers | Not started | |
 | 4 — Docs and release | Not started | |
