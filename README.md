@@ -49,6 +49,33 @@ The engine depends on [spdlog](https://github.com/gabime/spdlog) and
 already provides `spdlog::spdlog` and `nlohmann_json::nlohmann_json`. Its tests and examples build
 only when flywheel-dag is the top-level project.
 
+### Or install it and find it with `find_package`
+
+From a checkout, configure and install. Nothing needs building first:
+
+```bash
+cmake -B build
+cmake --install build --prefix /opt/flywheel-dag
+```
+
+The prefix holds the engine alone: its headers, a `find_package` config and the LICENSE file.
+Configure your project with `-DCMAKE_PREFIX_PATH=/opt/flywheel-dag`, and find it:
+
+```cmake
+find_package(flywheel_dag 0.1 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE flywheel::dag)
+```
+
+Your project provides spdlog and nlohmann/json, in one of two ways:
+
+- **As installed packages.** The engine's config finds them with `find_package`.
+- **Through your own FetchContent**, made available before `find_package(flywheel_dag)`. The
+  config uses a `spdlog::spdlog` or `nlohmann_json::nlohmann_json` target that already exists,
+  and looks for a package only when there is none, so your build holds one copy of each.
+
+The engine is tested with spdlog 1.17.0 and nlohmann/json 3.12.0. Before 1.0 a minor release may
+break the API, so `find_package(flywheel_dag 0.1)` accepts any 0.1.z release and nothing newer.
+
 ### A first graph
 
 ```cpp
@@ -148,8 +175,16 @@ cmake --build build
 cd build && ctest
 ```
 
-`FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES` and `FLYWHEEL_DAG_BUILD_BENCHMARKS` are
-on when flywheel-dag is the top-level project and off when it is a subproject.
+`FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES`, `FLYWHEEL_DAG_BUILD_BENCHMARKS` and
+`FLYWHEEL_DAG_INSTALL` are on when flywheel-dag is the top-level project and off when it is a
+subproject. A project that pulls the engine in as a subproject, and wants it in its own install,
+sets `FLYWHEEL_DAG_INSTALL` itself.
+
+ctest also installs the engine into a prefix under the build directory. It then builds a small
+consumer against that prefix with `find_package` twice. The first build finds spdlog and
+nlohmann/json as installed packages, and the second fetches the consumer's own copies. The
+consumer searches only the prefixes it is given, so a package already installed on the machine
+cannot stand in for one of them.
 
 The tests, the example and the benchmark compile the engine's headers with `-Wall -Wextra
 -Wpedantic` on GCC and Clang. CI also sets `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so any warning

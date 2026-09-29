@@ -75,6 +75,28 @@ against `benchmarks/expected_invariants.txt`:
   with `-ffp-contract=off` and the rows use nothing but `+ − × ÷` and `sqrt`.
   Keep them that way: `exp`, `log` and `pow` differ between math libraries.
 
+**The install is the engine alone** (flywheel-dag#2): the headers, a
+`find_package(flywheel_dag)` config and the LICENSE file. `FLYWHEEL_DAG_INSTALL`
+turns the rules on, and it is on at the top level only.
+
+- **The export names no dependency.** The copies of spdlog and nlohmann/json
+  that the build fetches are its own targets and in no export set, so
+  `install(EXPORT)` refuses to export a link to them. The build therefore links
+  them through `$<BUILD_INTERFACE:…>`. `cmake/flywheel_dagConfig.cmake.in` links
+  them after finding them, and looks for a dependency only when the consumer
+  has no target for it yet. Never make the export name them, and never install
+  them: an install into `/usr/local` would overwrite any copies already there.
+- **A new dependency goes in three places:** the root's FetchContent block and
+  its `$<BUILD_INTERFACE:…>` link; the config's guarded `find_dependency()` and
+  its `set_property` link; and the tests, in `tests/install_dependencies.cmake`
+  and the consumer's `CONSUMER_FETCHES_DEPENDENCIES` block.
+- **A new header needs nothing more,** as long as it is a `.hpp` or an `.inl`.
+  `test_install` fails on any header that is not installed.
+- **The version file uses `SameMinorVersion`** until 1.0, and
+  `SameMajorVersion` after that.
+- **The package consumers search `CMAKE_PREFIX_PATH` alone,** so a package
+  installed on the machine cannot stand in for one a test installed.
+
 ---
 
 ## Key Patterns

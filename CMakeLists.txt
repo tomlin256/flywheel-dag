@@ -8,6 +8,12 @@
 #   FetchContent_MakeAvailable(flywheel_dag)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
+# or install it (cmake --install <build> --prefix <prefix>) and find it. The
+# consumer then provides spdlog and nlohmann/json itself:
+#
+#   find_package(flywheel_dag 0.1 CONFIG REQUIRED)
+#   target_link_libraries(my_app PRIVATE flywheel::dag)
+#
 # 3.18 is a plain minimum, not a <min>...<max> range: a range flips every policy
 # up to <max> to NEW, which needs its own audit.
 cmake_minimum_required(VERSION 3.18)
