@@ -345,10 +345,12 @@ Tests: a new suite, `tests/test_aad_reverse.cpp`.
 | `AadReverse.ARootCanBeALeaf` | ∂x/∂x is 1 |
 | `AadReverse.RejectsADirtyRoot` | `std::invalid_argument` after `Input::set()` and before `eval()` |
 | `AadReverse.RejectsARootOrWrtThatIsNotADouble` | An `Input<int>` root. An `Input<float>` as `wrt`, put on the tape by a test-local node whose partials name it |
+| `AadReverse.RejectsARootThatIsNotOneOfTheTapes` | *Added as built.* Sweeping a tape for a node that is not one of its roots throws `std::invalid_argument` |
 | `AadReverse.ABarrierWithAWrtUpstreamThrows` | A `ComputeNode` between x and the root: `std::domain_error`, with both names in the message |
 | `AadReverse.ABarrierIsAConstantOrAWrt` | With no `wrt` upstream it is a constant. As a `wrt` it has its adjoint |
 | `AadReverse.OnlyBarriersUpstreamOfTheRootCount` | A tape with two roots and a barrier under one: the other root's sweep does not throw |
-| `AadReverse.AZeroAdjointPropagatesNothing` | `PowerNode` at a = −2 with a constant exponent: ∂/∂a = 12, and ∂/∂n is NaN |
+| `AadReverse.AZeroAdjointPropagatesNothing` | z·√x at z = 0 and x = 0: ∂/∂x is 0, where 0·∞ would make it NaN. *Changed as built:* the plan's case, `PowerNode` at a = −2, cannot catch a missing skip in reverse mode, because the adjoint it multiplies is the root's 1, not 0. It moved to `ATrueNaNIsKept` |
+| `AadReverse.ATrueNaNIsKept` | *Added as built.* `PowerNode` at a = −2 with a constant exponent: ∂/∂a = 12, and ∂/∂n is NaN |
 | `AadReverse.APassEvaluatesNothing` | Every node's `ValuePtr` identity and every functor's count are unchanged across a pass |
 | `AadReverse.APassDoesNotAdvanceAStatefulNode` | An `EWMANode` as `wrt` gets its adjoint and matches a control fed the same values |
 | `AadReverse.InsideAnEngineCallback` | An `AsyncInput` driven by `Engine::step()`: the callback's pass gives ∂(s·s)/∂s = 2s on each cycle |
@@ -517,8 +519,8 @@ Commits: `docs: add an example that checks a call's sensitivities both ways`,
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — The contract, and partials | Done locally | ctest 28 / 28, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_partials` has 13 tests: the plan's 10 and three added as built. Writing `Derivative<PowOp<double>>` found a second flat case: at b = 0, b·a^(b−1) is NaN at a = 0, where a^0 is flat. The three hand-made changes each failed as stated. `product / x_i` gave NaN against 12 at (0, 3, 4). Without their flat cases, both `PowerNode` tests read NaN against 0. Pulling both branches ran the other branch's functor once and left it clean. Interleaved on this Mac, `chain` read 250.2–254.3 ns/cycle before and 250.4–254.3 after |
-| 2 — The tape and the reverse sweep | Not started | |
+| 1 — The contract, and partials | Done locally | ctest 28 / 28, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_partials` has 13 tests: the plan's 10 and three added as built. Writing `Derivative<PowOp<double>>` found a second flat case: at b = 0, b·a^(b−1) is NaN at a = 0, where a^0 is flat. The three hand-made changes each failed as stated. `product / x_i` gave NaN against 12 at (0, 3, 4). Without their flat cases, both `PowerNode` tests read NaN against 0. Pulling both branches ran the other branch's functor once and left it clean. Interleaved on this Mac, `chain` read 250.2–254.3 ns/cycle before and 250.4–254.3 after. CI run 36615115643 is green on both legs, at 28 / 28 with no compiler warnings |
+| 2 — The tape and the reverse sweep | Done locally | ctest 29 / 29, and `--invariants` is unchanged. `test_install` installs the new header and its `.inl` with no change to the install rules. `test_aad_reverse` has 19 tests: the plan's 17, with `AZeroAdjointPropagatesNothing` given a case that can fail, and two added as built. The four hand-made changes each failed as stated. Without the zero-adjoint skip, z·√x at 0 gave NaN against 0. Without the clean-root check, the tape evaluated the dirty root and threw nothing. Without the barrier check, the tests that expect `std::domain_error` got none. Checking every barrier on the tape made the clean root's sweep throw. One test was wrong as first written: it asked for ∂/∂y through an opaque `ComputeNode` in a test of "a pass evaluates nothing", and the tape rightly threw |
 | 3 — The forward sweep | Not started | |
 | 4 — Dual numbers | Not started | |
 | 5 — `aad::DifferentiableNode<N>` | Not started | |
