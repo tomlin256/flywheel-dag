@@ -398,4 +398,98 @@ template<std::size_t N> Dual<N> max(const Dual<N>& a, const Dual<N>& b) {
 template<std::size_t N> Dual<N> max(const Dual<N>& a, double b) { return max(a, Dual<N>(b)); }
 template<std::size_t N> Dual<N> max(double a, const Dual<N>& b) { return max(Dual<N>(a), b); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DifferentiableNode<N>
+// ─────────────────────────────────────────────────────────────────────────────
+
+template<std::size_t N>
+template<typename F>
+DifferentiableNodePtr<N> DifferentiableNode<N>::make(
+    std::string name, Inputs inNodes, F fn, EqualityPolicyPtr eq)
+{
+    return make(std::move(name), std::move(inNodes), std::move(fn), std::move(eq),
+                InvalidationMode::Eager);
+}
+
+template<std::size_t N>
+template<typename F>
+DifferentiableNodePtr<N> DifferentiableNode<N>::make(
+    std::string name, Inputs inNodes, F fn, InvalidationMode mode)
+{
+    return make(std::move(name), std::move(inNodes), std::move(fn), nullptr, mode);
+}
+
+// The one functor becomes two std::functions, one for each type it runs at, and
+// each holds its own copy of it.
+template<std::size_t N>
+template<typename F>
+DifferentiableNodePtr<N> DifferentiableNode<N>::make(
+    std::string name, Inputs inNodes, F fn, EqualityPolicyPtr eq, InvalidationMode mode)
+{
+    if (!eq) eq = std::make_shared<TypedEqualityPolicy<double>>();
+    Fn     evaluate(fn);
+    DualFn differentiate(std::move(fn));
+    auto self = std::shared_ptr<DifferentiableNode>(new DifferentiableNode(
+        std::move(name), std::move(inNodes), std::move(evaluate), std::move(differentiate),
+        std::move(eq), mode));
+    wire(self, self->inputs());
+    return self;
+}
+
+template<std::size_t N>
+DifferentiableNode<N>::DifferentiableNode(std::string name, Inputs ins, Fn fn, DualFn dualFn,
+                                          EqualityPolicyPtr eq, InvalidationMode mode)
+    : NodeBase(mode), name_(std::move(name)), inputs_(std::move(ins)), fn_(std::move(fn))
+    , dualFn_(std::move(dualFn)), eq_(std::move(eq)) {}
+
+template<std::size_t N>
+ValuePtr DifferentiableNode<N>::eval(EvalContext& ctx) {
+    if (!dirty() && !ctx.forceRecompute) return cached_;
+    return applyInputs(ctx, std::make_index_sequence<N>{});
+}
+
+// ComputeNode's path for inputs that are cheap to copy: every input is pulled
+// and copied out, left to right, before the resolve check. See
+// ComputeNode::applyInputs in dag.inl.
+template<std::size_t N>
+template<std::size_t... Is>
+ValuePtr DifferentiableNode<N>::applyInputs(EvalContext& ctx, std::index_sequence<Is...>) {
+    const std::array<double, N> x{ get_value<double>(inputs_[Is]->eval(ctx))... };
+    if (skipRecompute(ctx)) { markClean(); return cached_; }
+    const ValuePtr newV = slot_.emit(fn_(x[Is]...));
+    if (!eq_->equal(cached_, newV)) {
+        cached_ = newV;
+        notifyDownstream();
+    }
+    markClean();
+    return cached_;
+}
+
+template<std::size_t N>
+std::string DifferentiableNode<N>::name() const { return name_; }
+
+template<std::size_t N>
+std::vector<NodePtr> DifferentiableNode<N>::inputs() const {
+    return {inputs_.begin(), inputs_.end()};
+}
+
+template<std::size_t N>
+bool DifferentiableNode<N>::partials(EvalContext& ctx, Partials& out) {
+    dualPartials(ctx, out, std::make_index_sequence<N>{});
+    return true;
+}
+
+// Argument i arrives as its input's value with d = eᵢ, so the result's d holds
+// every partial. A tape asks only a clean node, so each pull returns a cached
+// value.
+template<std::size_t N>
+template<std::size_t... Is>
+void DifferentiableNode<N>::dualPartials(EvalContext& ctx, Partials& out,
+                                         std::index_sequence<Is...>) {
+    std::array<Dual<N>, N> x{ Dual<N>(get_value<double>(inputs_[Is]->eval(ctx)))... };
+    for (std::size_t i = 0; i < N; ++i) x[i].d[i] = 1.0;
+    const Dual<N> y = dualFn_(x[Is]...);
+    for (std::size_t i = 0; i < N; ++i) out.add(i, y.d[i]);
+}
+
 } // namespace dag::aad

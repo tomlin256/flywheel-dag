@@ -47,6 +47,7 @@
 //   • A node with inputs but no partials is a BARRIER, and its inputs are not
 //     followed. Every dag::ts node is one. So is a ComputeNode,
 //     InPlaceComputeNode or MemoizedComputeNode, because its functor is opaque.
+//     A DifferentiableNode (below) is the compute node a tape can see into.
 //   • The branch a ConditionNode did not take, and the inputs of a tweaked
 //     node, are never named, so the walk never reaches them.
 //
@@ -94,6 +95,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
@@ -277,6 +280,104 @@ template<std::size_t N> Dual<N> min(double a, const Dual<N>& b);
 template<std::size_t N> Dual<N> max(const Dual<N>& a, const Dual<N>& b);
 template<std::size_t N> Dual<N> max(const Dual<N>& a, double b);
 template<std::size_t N> Dual<N> max(double a, const Dual<N>& b);
+
+namespace detail {
+
+/// std::function<T(const T&, …)>, with N parameters.
+template<typename T, typename Seq> struct RepeatedFn;
+template<typename T, std::size_t... Is>
+struct RepeatedFn<T, std::index_sequence<Is...>> {
+    template<std::size_t> using Param = const T&;
+    using type = std::function<T(Param<Is>...)>;
+};
+
+} // namespace detail
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DifferentiableNode<N> — a ComputeNode over N doubles whose functor a tape can
+// differentiate.
+//
+// A ComputeNode's functor is a std::function<Out(const Ins&...)>, so it is
+// opaque: a tape cannot see into it, and the node is a barrier. This node takes
+// its functor once, as a generic callable, and instantiates it at two types: at
+// double to evaluate, and at Dual<N> to take all N partials in one call when a
+// tape asks for them.
+//
+//   auto d1 = aad::DifferentiableNode<3>::make(
+//       "d1", {logMoneyness, vol, expiry},
+//       [](const auto& m, const auto& v, const auto& t) {
+//           using std::sqrt;
+//           return (m + 0.5 * v * v * t) / (v * sqrt(t));
+//       },
+//       InvalidationMode::Lazy);
+//
+// Everything else is ComputeNode: the same three make() overloads for the
+// equality policy and the invalidation mode, a ValueSlot, and an
+// allocation-free steady state. Its inputs and its output are doubles.
+//
+// THE FUNCTOR MUST HAVE NO SIDE EFFECTS. It runs again, on duals, each time a
+// tape records the node, so a functor that mutated captured state would mutate
+// it twice. Reading captured state is allowed, and makes the node Eager, as it
+// would a ComputeNode.
+//
+// Why a sibling and not another ComputeNode::make(): std::function erases a
+// generic callable to one signature, so ComputeNode would need a second callable
+// member. That is an extra member on the hottest class in the engine, for a
+// handful of nodes, which is also why InPlaceComputeNode is a sibling.
+// ─────────────────────────────────────────────────────────────────────────────
+template<std::size_t N>
+class DifferentiableNode
+    : public NodeBase
+    , public IDifferentiable
+    , public std::enable_shared_from_this<DifferentiableNode<N>>
+{
+    static_assert(N > 0, "DifferentiableNode needs an input: a constant is an Input");
+
+public:
+    using Inputs = std::array<NodePtr, N>;
+    using Fn     = typename detail::RepeatedFn<double, std::make_index_sequence<N>>::type;
+    using DualFn = typename detail::RepeatedFn<Dual<N>, std::make_index_sequence<N>>::type;
+
+    /// fn must be callable with N doubles and with N Dual<N>s: a generic lambda
+    /// whose body calls its functions unqualified.
+    template<typename F>
+    static std::shared_ptr<DifferentiableNode> make(
+        std::string name, Inputs inNodes, F fn, EqualityPolicyPtr eq = nullptr);
+    template<typename F>
+    static std::shared_ptr<DifferentiableNode> make(
+        std::string name, Inputs inNodes, F fn, InvalidationMode mode);
+    template<typename F>
+    static std::shared_ptr<DifferentiableNode> make(
+        std::string name, Inputs inNodes, F fn, EqualityPolicyPtr eq, InvalidationMode mode);
+
+    ValuePtr eval(EvalContext& ctx) override;
+    std::string name() const override;
+    std::vector<NodePtr> inputs() const override;
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+    /// All N partials, from one call of the functor on duals.
+    bool partials(EvalContext& ctx, Partials& out) override;
+
+private:
+    DifferentiableNode(std::string name, Inputs ins, Fn fn, DualFn dualFn,
+                       EqualityPolicyPtr eq, InvalidationMode mode);
+
+    template<std::size_t... Is>
+    ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
+    template<std::size_t... Is>
+    void dualPartials(EvalContext& ctx, Partials& out, std::index_sequence<Is...>);
+
+    std::string       name_;
+    Inputs            inputs_;
+    Fn                fn_;
+    DualFn            dualFn_;
+    EqualityPolicyPtr eq_;
+    ValuePtr          cached_;
+    ValueSlot<double> slot_;
+};
+
+template<std::size_t N>
+using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 
 } // namespace dag::aad
 

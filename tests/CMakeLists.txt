@@ -2,6 +2,7 @@
 set(FLYWHEEL_DAG_TESTS
   test_aad_dual
   test_aad_forward
+  test_aad_node
   test_aad_partials
   test_aad_reverse
   test_compute_module
