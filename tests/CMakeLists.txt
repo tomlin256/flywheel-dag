@@ -43,13 +43,14 @@ add_test(NAME test_consumer_subproject
     --test-command consumer)
 set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)
 
-# The install (flywheel-dag#2). test_install installs this build into an empty
-# prefix under package/ and checks that the prefix holds the engine alone. It
-# is registered wherever the root promises install rules, never from anything
-# the install block itself sets.
+# The installed package (flywheel-dag#2). These tests are registered wherever
+# the root promises install rules, never from anything the install block itself
+# sets. Everything they install goes into its own prefix under package/.
 if(FLYWHEEL_DAG_INSTALL)
   set(package_dir ${CMAKE_CURRENT_BINARY_DIR}/package)
 
+  # Installs this build into an empty prefix and checks that the prefix holds
+  # the engine alone.
   add_test(NAME test_install
     COMMAND ${CMAKE_COMMAND}
       -DBINARY_DIR=${PROJECT_BINARY_DIR}
@@ -60,6 +61,36 @@ if(FLYWHEEL_DAG_INSTALL)
       -DCONFIG=$<CONFIG>
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_install.cmake)
   set_tests_properties(test_install PROPERTIES FIXTURES_SETUP installed_engine)
+
+  # spdlog and nlohmann/json in a prefix of their own, as a package manager
+  # provides them. Like test_consumer_subproject, it builds spdlog, which takes
+  # longer than the default timeout allows.
+  add_test(NAME install_dependencies
+    COMMAND ${CMAKE_COMMAND}
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -DBINARY_DIR=${package_dir}/dependencies-build
+      -DPREFIX=${package_dir}/dependencies
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -DCONFIG=$<CONFIG>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/install_dependencies.cmake)
+  set_tests_properties(install_dependencies PROPERTIES
+    FIXTURES_SETUP installed_dependencies
+    TIMEOUT 600)
+
+  # A consumer that finds the installed engine with find_package. The engine's
+  # config finds spdlog and nlohmann/json as installed packages.
+  add_test(NAME test_consumer_package
+    COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/consumer
+                       ${package_dir}/consumer
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options -DFLYWHEEL_DAG_PACKAGE_VERSION=${PROJECT_VERSION}
+                      -DCMAKE_PREFIX_PATH=${package_dir}/engine$<SEMICOLON>${package_dir}/dependencies
+                      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      --test-command consumer)
+  set_tests_properties(test_consumer_package PROPERTIES
+    FIXTURES_REQUIRED "installed_engine;installed_dependencies")
 endif()
 
 # The warning flags reach every translation unit of this project and none of
