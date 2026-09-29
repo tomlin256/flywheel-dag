@@ -141,13 +141,14 @@ inline std::vector<double> Tape::adjoints(const NodePtr& root,
         const double a = adj[i];
         for (std::size_t k = e.firstEdge; k < e.lastEdge; ++k) {
             reached[edges_[k].input] = true;
-            // A zero adjoint propagates nothing, so a constant's ∞ or NaN partial
-            // cannot make a NaN out of it. A NaN adjoint is not zero, and does
+            // A partial times an adjoint is 0 when either is 0, so neither 0·∞
+            // nor 0·NaN makes a NaN. A NaN that is not multiplied by 0 does
             // propagate.
-            if (a != 0.0) adj[edges_[k].input] += edges_[k].d * a;
+            const double d = edges_[k].d;
+            if (a != 0.0 && d != 0.0) adj[edges_[k].input] += d * a;
         }
     }
-    checkBarriers(root, reached, wrt);
+    checkBarriers("root " + root->name(), reached, wrt);
 
     std::vector<double> out;
     out.reserve(wrt.size());
@@ -159,12 +160,50 @@ inline std::vector<double> Tape::adjoints(const NodePtr& root,
     return out;
 }
 
-// A wrt node upstream of a barrier that the root reaches has a derivative
+// Each seed adds its tangent to its node. Then each node, from the leaves up,
+// adds each partial times the tangent of the input it names to its own. Every
+// input sits earlier on the tape, so its tangent is complete first.
+//
+// A seed on an intermediate node adds to the tangent that reaches it, rather
+// than replacing it. That keeps this sweep the exact dual of adjoints(): a
+// root's tangent is Σ seed · adjoint.
+inline std::vector<double> Tape::tangents(const std::vector<Seed>& seeds) const {
+    std::vector<NodePtr> seeded;
+    seeded.reserve(seeds.size());
+    for (const auto& s : seeds) seeded.push_back(s.node);
+    checkWrt(seeded);
+    // One forward sweep serves every root, so every barrier on the tape counts.
+    checkBarriers("a root", std::vector<bool>(entries_.size(), true), seeded);
+
+    std::vector<double> t(entries_.size(), 0.0);
+    for (const auto& s : seeds) {
+        const auto it = position_.find(s.node.get());
+        if (it != position_.end()) t[it->second] += s.tangent;
+    }
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& e = entries_[i];
+        double sum = t[i];
+        for (std::size_t k = e.firstEdge; k < e.lastEdge; ++k) {
+            // As in adjoints(): a partial times a tangent is 0 when either is 0.
+            const double tin = t[edges_[k].input];
+            const double d   = edges_[k].d;
+            if (tin != 0.0 && d != 0.0) sum += d * tin;
+        }
+        t[i] = sum;
+    }
+
+    std::vector<double> out;
+    out.reserve(roots_.size());
+    for (const auto& r : roots_) out.push_back(t[position_.at(r.get())]);
+    return out;
+}
+
+// A wrt node upstream of a barrier that the sweep reaches has a derivative
 // through that barrier that nothing can say, so the answer would be silently
 // incomplete. The walk follows inputs(), which reads no value. One visited set
 // serves every barrier: a node already walked from one barrier has no wrt node
 // above it, or the walk would have thrown there.
-inline void Tape::checkBarriers(const NodePtr& root, const std::vector<bool>& reached,
+inline void Tape::checkBarriers(const std::string& target, const std::vector<bool>& reached,
                                 const std::vector<NodePtr>& wrt) const {
     if (wrt.empty()) return;
     std::unordered_set<const INode*> wanted;
@@ -181,9 +220,8 @@ inline void Tape::checkBarriers(const NodePtr& root, const std::vector<bool>& re
             frontier.pop_back();
             if (!visited.insert(n.get()).second) continue;
             if (wanted.count(n.get()) != 0)
-                throw std::domain_error("aad::Tape: " + n->name() + " reaches root "
-                    + root->name() + " through " + e.node->name()
-                    + ", which has no partials");
+                throw std::domain_error("aad::Tape: " + n->name() + " reaches " + target
+                    + " through " + e.node->name() + ", which has no partials");
             for (auto& m : n->inputs()) frontier.push_back(std::move(m));
         }
     }
@@ -195,6 +233,11 @@ inline void Tape::checkBarriers(const NodePtr& root, const std::vector<bool>& re
 
 inline std::vector<double> adjoints(const NodePtr& root, const std::vector<NodePtr>& wrt) {
     return Tape({root}).adjoints(root, wrt);
+}
+
+inline std::vector<double> tangents(const std::vector<NodePtr>& roots,
+                                    const std::vector<Seed>& seeds) {
+    return Tape(roots).tangents(seeds);
 }
 
 } // namespace dag::aad

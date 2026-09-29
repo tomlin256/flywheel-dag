@@ -187,7 +187,11 @@ The rules:
 - **A zero adjoint or tangent propagates nothing.** So a constant's NaN or infinite partial never
   reaches a result. Take `PowerNode` at a = −2 with a constant n = 3. Its ∂/∂n is NaN, and ∂/∂a is
   still 12 in both modes. With 0·NaN taken literally, ∂/∂a would be NaN too. A varied input whose
-  partial is NaN still gives NaN, which is the true answer.
+  partial is NaN still gives NaN, which is the true answer. *As built:* a partial of 0 propagates
+  nothing either: a partial times an adjoint or a tangent counts as 0 when either one is 0. Without
+  that, the two modes disagreed. z·√x at z = 0 and x = 0 gave ∂/∂x = 0 in reverse and NaN forward,
+  and √(z·x) at z = 0 and x = 4 gave the opposite. Both are 0 for every x while z is 0, so 0 is the
+  answer in both.
 - **A `wrt` or seed node on the tape must hold a `double`,** or the sweep throws
   `std::invalid_argument`. A node that is not on the tape has derivative 0, whatever it holds.
 - **Eval thread only,** like `eval()`.
@@ -371,6 +375,9 @@ Commit: `feat: record a tape and sweep it in reverse`.
 ### Step 3 — The forward sweep
 
 - `Tape::tangents()` and the free `aad::tangents()`.
+- *As built:* both sweeps also skip a partial of 0 (see the rules above), and the small graphs with
+  known derivatives move to a shared test header, `tests/aad_test_graphs.hpp`, which
+  `test_aad_reverse.cpp` now uses too.
 
 Tests: a new suite, `tests/test_aad_forward.cpp`.
 
@@ -381,13 +388,17 @@ Tests: a new suite, `tests/test_aad_forward.cpp`.
 | `AadForward.IsTheDualOfReverse` | On every Step 2 graph, a weighted seed's tangent equals the weighted sum of adjoints, to 1e-13 relative |
 | `AadForward.JacobianBothWays` | A graph with 3 inputs and 2 roots: 3 forward sweeps and 2 reverse sweeps of one tape give the same Jacobian |
 | `AadForward.ASeedOnAnIntermediateNodeAdds` | A seed on eˣ alone gives ∂root/∂(eˣ). Seeded with x as well, it adds to the tangent from x |
+| `AadForward.AnUnreachedSeedMovesNothing` | *Added as built.* A seed on the branch not taken, or on another graph, gives 0 |
+| `AadForward.RejectsANullSeed` | *Added as built.* `std::invalid_argument` |
 | `AadForward.ABarrierWithASeedUpstreamThrows` | `std::domain_error`, as in reverse mode |
 | `AadForward.AZeroTangentPropagatesNothing` | `PowerNode` at a = −2 with a constant exponent, seeded on a: 12, not NaN |
+| `AadForward.AZeroPartialPropagatesNothing` | *Added as built.* z·√x at z = 0 and x = 0, seeded on x: 0, as the reverse sweep gives. `AadReverse.AZeroPartialPropagatesNothing` pins the other case: √(z·x) at z = 0 and x = 4 has ∂/∂x = 0 and ∂/∂z = +∞ |
 
 | Change made by hand, then reverted | Must fail |
 |---|---|
 | Remove the zero-tangent skip | `AZeroTangentPropagatesNothing` |
 | Let a seed replace the tangent that reaches its node, instead of adding to it | `ASeedOnAnIntermediateNodeAdds` |
+| Skip only a zero adjoint or tangent, not a partial of 0 | Both `AZeroPartialPropagatesNothing` tests |
 
 **Done when:** ctest is green (30 of 30), `--invariants` matches, each hand-made change fails as
 stated, and CI is green on both legs.
@@ -487,8 +498,8 @@ Commits: `docs: add an example that checks a call's sensitivities both ways`,
   value can lag its inputs, so the chain rule mixes points that differ by less than the tolerance.
   Under the default policy they are the same point.
 - **Zero propagates nothing, which departs from IEEE on purpose.** 0·∞ and 0·NaN count as 0 when the
-  zero is an adjoint or a tangent. A NaN partial on a path the result depends on still gives NaN.
-  Tests pin both halves.
+  zero is an adjoint, a tangent or, as built, a partial. A NaN partial on a path the result depends
+  on still gives NaN. Tests pin both halves.
 - **The barrier check is conservative.** It throws when a `wrt` node is anywhere upstream of a
   barrier the root reaches, even if the path through the barrier contributes 0. Each sweep walks up
   from its barriers with one shared visited set, so the check is linear in the size of the graph.
@@ -520,8 +531,8 @@ Commits: `docs: add an example that checks a call's sensitivities both ways`,
 | Step | Status | Notes |
 |---|---|---|
 | 1 — The contract, and partials | Done locally | ctest 28 / 28, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_partials` has 13 tests: the plan's 10 and three added as built. Writing `Derivative<PowOp<double>>` found a second flat case: at b = 0, b·a^(b−1) is NaN at a = 0, where a^0 is flat. The three hand-made changes each failed as stated. `product / x_i` gave NaN against 12 at (0, 3, 4). Without their flat cases, both `PowerNode` tests read NaN against 0. Pulling both branches ran the other branch's functor once and left it clean. Interleaved on this Mac, `chain` read 250.2–254.3 ns/cycle before and 250.4–254.3 after. CI run 36615115643 is green on both legs, at 28 / 28 with no compiler warnings |
-| 2 — The tape and the reverse sweep | Done locally | ctest 29 / 29, and `--invariants` is unchanged. `test_install` installs the new header and its `.inl` with no change to the install rules. `test_aad_reverse` has 19 tests: the plan's 17, with `AZeroAdjointPropagatesNothing` given a case that can fail, and two added as built. The four hand-made changes each failed as stated. Without the zero-adjoint skip, z·√x at 0 gave NaN against 0. Without the clean-root check, the tape evaluated the dirty root and threw nothing. Without the barrier check, the tests that expect `std::domain_error` got none. Checking every barrier on the tape made the clean root's sweep throw. One test was wrong as first written: it asked for ∂/∂y through an opaque `ComputeNode` in a test of "a pass evaluates nothing", and the tape rightly threw |
-| 3 — The forward sweep | Not started | |
+| 2 — The tape and the reverse sweep | Done locally | ctest 29 / 29, and `--invariants` is unchanged. `test_install` installs the new header and its `.inl` with no change to the install rules. `test_aad_reverse` has 19 tests: the plan's 17, with `AZeroAdjointPropagatesNothing` given a case that can fail, and two added as built. The four hand-made changes each failed as stated. Without the zero-adjoint skip, z·√x at 0 gave NaN against 0. Without the clean-root check, the tape evaluated the dirty root and threw nothing. Without the barrier check, the tests that expect `std::domain_error` got none. Checking every barrier on the tape made the clean root's sweep throw. One test was wrong as first written: it asked for ∂/∂y through an opaque `ComputeNode` in a test of "a pass evaluates nothing", and the tape rightly threw. CI run 36616058228 is green on both legs, at 29 / 29 with no compiler warnings |
+| 3 — The forward sweep | Done locally | ctest 30 / 30, and `--invariants` is unchanged. `test_aad_forward` has 10 tests: the plan's 7 and three added as built, and `test_aad_reverse` gains `AZeroPartialPropagatesNothing`, for 20. A probe found the two modes disagreeing where a partial of 0 meets an infinite rate: z·√x at z = 0 and x = 0 gave 0 in reverse and NaN forward, and √(z·x) at z = 0 and x = 4 the opposite. Both sweeps now skip a partial of 0 as well, and both cases give 0 in both modes. The three hand-made changes each failed as stated. Without the zero-tangent skip, ∂/∂a gave NaN against 12. A seed that replaced its node's tangent broke `ASeedOnAnIntermediateNodeAdds` alone. Skipping only a zero adjoint or tangent broke both `AZeroPartialPropagatesNothing` tests |
 | 4 — Dual numbers | Not started | |
 | 5 — `aad::DifferentiableNode<N>` | Not started | |
 | 6 — Example, docs and release | Not started | |

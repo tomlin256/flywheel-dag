@@ -20,9 +20,22 @@
 // through aad::IDifferentiable (dag.hpp). Nothing is recorded while the graph
 // evaluates, so a graph that never asks for a derivative pays nothing.
 //
+// A tape is swept in either direction:
+//
+//   • Reverse (adjoints): one sweep down from a root gives its derivative with
+//     respect to every node it depends on. One sweep per output.
+//   • Forward (tangents): one sweep up from the seeds gives the derivative of
+//     every root in the direction they give. One sweep per direction.
+//
 //   EvalContext ctx;
-//   price->eval(ctx);                                  // a tape reads a clean root
-//   auto g = aad::adjoints(price, {spot, vol, rate});  // ∂price/∂spot, ∂price/∂vol, ∂price/∂rate
+//   price->eval(ctx);    // a tape reads a clean root
+//   hedge->eval(ctx);
+//
+//   // ∂price/∂spot, ∂price/∂vol and ∂price/∂rate, in one sweep:
+//   auto g = aad::adjoints(price, {spot, vol, rate});
+//
+//   // ∂price/∂vol and ∂hedge/∂vol, in one sweep:
+//   auto dv = aad::tangents({price, hedge}, {{vol, 1.0}});
 //
 // What a tape records
 // ───────────────────
@@ -47,19 +60,25 @@
 //     as clean, and its callback misses the change. Run a pass in the root's
 //     output callback, where the engine has just evaluated it, or evaluate the
 //     root first.
-//   • Any node can be a wrt node, not only a leaf. Its adjoint is the
-//     derivative with respect to a change in its own value.
+//   • Any node can be a wrt or seed node, not only a leaf. Its adjoint is the
+//     derivative with respect to a change in its own value. A seed on an
+//     intermediate node adds to the tangent that reaches it. That keeps the two
+//     sweeps exact duals: a root's tangent is Σ seed · adjoint.
 //   • A node the root does not depend on at this point has derivative 0. That
 //     includes a node on the branch not taken.
-//   • A barrier with a wrt node upstream throws std::domain_error, naming both.
-//     The derivative through a barrier is unknown, and 0 would be a silently
-//     wrong answer. A barrier with no wrt node upstream is a constant, and a
-//     barrier can itself be a wrt node. Only the barriers the swept root
-//     reaches count.
-//   • A zero adjoint propagates nothing, so a constant's infinite or NaN
-//     partial never reaches a result. A NaN partial on a path the result
-//     depends on still gives NaN, which is the true answer.
-//   • A wrt node on the tape must hold a double, or the sweep throws
+//   • A barrier with a wrt or seed node upstream throws std::domain_error,
+//     naming both. The derivative through a barrier is unknown, and 0 would be
+//     a silently wrong answer. A barrier with none upstream is a constant, and
+//     a barrier can itself be a wrt or seed node. A reverse sweep counts only
+//     the barriers its root reaches. A forward sweep serves every root, so it
+//     counts every barrier on the tape.
+//   • A partial times an adjoint or a tangent counts as 0 when either one is
+//     0. So a constant's infinite or NaN partial never reaches a result, and
+//     neither does an infinite rate through a partial of 0: z·√x at z = 0 and
+//     x = 0 has ∂/∂x = 0 in both sweeps, because it is 0 for every x. A NaN on
+//     a path the result depends on, not multiplied by 0, still gives NaN,
+//     which is the true answer.
+//   • A wrt or seed node on the tape must hold a double, or the sweep throws
 //     std::invalid_argument. A node off the tape has derivative 0, whatever it
 //     holds.
 //   • A tape holds partials, not values, so it describes the point it was
@@ -83,12 +102,21 @@
 namespace dag::aad {
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Seed — one part of a forward sweep's direction: a node, and the rate at which
+// it moves.
+// ─────────────────────────────────────────────────────────────────────────────
+struct Seed {
+    NodePtr node;
+    double  tangent;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tape — the nodes some roots depend on at the values they hold now, each with
 // its local partials, in topological order: every node after the inputs it
 // names.
 //
 // Record once and sweep many times. A full Jacobian is one reverse sweep per
-// root over the same tape.
+// root, or one forward sweep per input, over the same tape.
 // ─────────────────────────────────────────────────────────────────────────────
 class Tape {
 public:
@@ -100,6 +128,11 @@ public:
     /// Reverse sweep: ∂root/∂w for each w in wrt, in wrt's order, in one sweep
     /// however many there are. root must be one of the tape's roots.
     std::vector<double> adjoints(const NodePtr& root, const std::vector<NodePtr>& wrt) const;
+
+    /// Forward sweep: each root's derivative in the direction the seeds give,
+    /// Σ ∂root/∂s.node · s.tangent, in the roots' order, in one sweep however
+    /// many roots there are.
+    std::vector<double> tangents(const std::vector<Seed>& seeds) const;
 
     /// The number of nodes recorded.
     std::size_t size() const noexcept;
@@ -121,7 +154,8 @@ private:
     void record();
     std::size_t rootPosition(const NodePtr& root) const;
     void checkWrt(const std::vector<NodePtr>& wrt) const;
-    void checkBarriers(const NodePtr& root, const std::vector<bool>& reached,
+    /// `target` names what the barriers were reached from, for the message.
+    void checkBarriers(const std::string& target, const std::vector<bool>& reached,
                        const std::vector<NodePtr>& wrt) const;
 
     std::vector<NodePtr>                          roots_;
@@ -133,6 +167,10 @@ private:
 /// Records a tape for one root and sweeps it once in reverse: ∂root/∂w for
 /// each w in wrt.
 std::vector<double> adjoints(const NodePtr& root, const std::vector<NodePtr>& wrt);
+
+/// Records a tape for the roots and sweeps it once forward: each root's
+/// derivative in the direction the seeds give.
+std::vector<double> tangents(const std::vector<NodePtr>& roots, const std::vector<Seed>& seeds);
 
 } // namespace dag::aad
 

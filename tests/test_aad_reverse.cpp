@@ -10,6 +10,7 @@
 // Recording a tape and sweeping it in reverse (flywheel-dag#10).
 
 #include <gtest/gtest.h>
+#include "aad_test_graphs.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
 #include "flywheel/dag_engine.hpp"
@@ -23,12 +24,12 @@
 #include <vector>
 
 using namespace dag;
+using aad_test::expectClose;
+using aad_test::LogTimesRoot;
+using aad_test::PowerOfDifference;
+using aad_test::SumOfTerms;
 
 namespace {
-
-void expectClose(double actual, double expected) {
-    EXPECT_NEAR(actual, expected, 1e-13 * std::max(1.0, std::abs(expected)));
-}
 
 // Compares each adjoint of `root` with a central difference, bumping one input
 // at a time through set() and evaluating the root again.
@@ -54,30 +55,16 @@ void expectCentralDifferences(const NodePtr& root, const std::vector<InputPtr<do
     }
 }
 
-// x·y + exp(x)/y
-struct SumOfTerms {
-    InputPtr<double> x = Input<double>::make("x", 1.3);
-    InputPtr<double> y = Input<double>::make("y", 0.7);
-    NodePtr root = ops::SumNode<>::make("root", {
-        ops::ProductNode<>::make("xy", {x, y}),
-        ops::DivideNode<>::make("exp/y", ops::ExpNode<>::make("exp", x), y)});
-};
-
-// ln(x)·√y
-struct LogTimesRoot {
-    InputPtr<double> x = Input<double>::make("x", 2.5);
-    InputPtr<double> y = Input<double>::make("y", 3.0);
-    NodePtr root = ops::ProductNode<>::make("root", {
-        ops::LnNode<>::make("ln", x), ops::SqrtNode<>::make("sqrt", y)});
-};
-
-// (x − y)^z
-struct PowerOfDifference {
-    InputPtr<double> x = Input<double>::make("x", 3.5);
-    InputPtr<double> y = Input<double>::make("y", 1.25);
-    InputPtr<double> z = Input<double>::make("z", 1.8);
-    NodePtr root = ops::PowerNode<>::make("root", ops::DiffNode<>::make("x-y", x, y), z);
-};
+// Checks one graph's adjoints against its analytic gradient.
+template<typename Graph>
+void expectRightGradient(const Graph& g) {
+    EvalContext ctx;
+    g.root->eval(ctx);
+    const std::vector<double> adj = aad::adjoints(g.root, aad_test::asNodes(g.inputs()));
+    const std::vector<double> expected = g.gradient();
+    ASSERT_EQ(adj.size(), expected.size());
+    for (std::size_t i = 0; i < adj.size(); ++i) expectClose(adj[i], expected[i]);
+}
 
 // A node that turns a float into a double and says so, with a partial of 1. No
 // node in the engine puts a non-double on a tape, but an application's could.
@@ -118,37 +105,18 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(AadReverse, MatchesAnalyticGradients) {
-    EvalContext ctx;
-
-    SumOfTerms s;
-    s.root->eval(ctx);
-    std::vector<double> g = aad::adjoints(s.root, {s.x, s.y});
-    const double x = 1.3, y = 0.7;
-    expectClose(g[0], y + std::exp(x) / y);
-    expectClose(g[1], x - std::exp(x) / (y * y));
-
-    LogTimesRoot l;
-    l.root->eval(ctx);
-    g = aad::adjoints(l.root, {l.x, l.y});
-    expectClose(g[0], std::sqrt(3.0) / 2.5);
-    expectClose(g[1], std::log(2.5) / (2.0 * std::sqrt(3.0)));
-
-    PowerOfDifference p;
-    p.root->eval(ctx);
-    g = aad::adjoints(p.root, {p.x, p.y, p.z});
-    const double d = 3.5 - 1.25, z = 1.8;
-    expectClose(g[0], z * std::pow(d, z - 1.0));
-    expectClose(g[1], -z * std::pow(d, z - 1.0));
-    expectClose(g[2], std::pow(d, z) * std::log(d));
+    expectRightGradient(SumOfTerms{});
+    expectRightGradient(LogTimesRoot{});
+    expectRightGradient(PowerOfDifference{});
 }
 
 TEST(AadReverse, MatchesCentralDifferences) {
-    SumOfTerms s;
-    expectCentralDifferences(s.root, {s.x, s.y});
-    LogTimesRoot l;
-    expectCentralDifferences(l.root, {l.x, l.y});
-    PowerOfDifference p;
-    expectCentralDifferences(p.root, {p.x, p.y, p.z});
+    const SumOfTerms s;
+    expectCentralDifferences(s.root, s.inputs());
+    const LogTimesRoot l;
+    expectCentralDifferences(l.root, l.inputs());
+    const PowerOfDifference p;
+    expectCentralDifferences(p.root, p.inputs());
 }
 
 // x·eˣ·eˣ: eˣ feeds the product twice, and x feeds it directly and through eˣ.
@@ -302,6 +270,20 @@ TEST(AadReverse, AZeroAdjointPropagatesNothing) {
     const std::vector<double> g = aad::adjoints(root, {x, z});
     EXPECT_EQ(g[0], 0.0);
     EXPECT_EQ(g[1], 0.0);
+}
+
+// √(z·x) at z = 0 and x = 4. √'s partial at 0 is ∞, so the product's adjoint
+// is ∞, and its partial for x is z = 0. √(z·x) is 0 for every x while z is 0,
+// so ∂/∂x is 0. For z it is ∞, the true answer.
+TEST(AadReverse, AZeroPartialPropagatesNothing) {
+    auto z    = Input<double>::make("z", 0.0);
+    auto x    = Input<double>::make("x", 4.0);
+    auto root = ops::SqrtNode<>::make("root", ops::ProductNode<>::make("zx", {z, x}));
+    EvalContext ctx;
+    root->eval(ctx);
+    const std::vector<double> g = aad::adjoints(root, {x, z});
+    EXPECT_EQ(g[0], 0.0);
+    EXPECT_TRUE(std::isinf(g[1]) && g[1] > 0.0);
 }
 
 TEST(AadReverse, ATrueNaNIsKept) {
