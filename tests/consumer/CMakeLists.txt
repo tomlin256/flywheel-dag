@@ -9,6 +9,9 @@
 #                                               CMAKE_PREFIX_PATH alone
 #                                               (test_consumer_package,
 #                                               flywheel-dag#2)
+#
+# With -DCONSUMER_FETCHES_DEPENDENCIES=ON, a package consumer first fetches
+# spdlog and nlohmann/json itself (test_consumer_package_own_dependencies).
 cmake_minimum_required(VERSION 3.18)
 project(flywheel_dag_consumer LANGUAGES CXX)
 
@@ -41,6 +44,20 @@ elseif(FLYWHEEL_DAG_PACKAGE_VERSION)
   set(CMAKE_FIND_USE_CMAKE_SYSTEM_PATH       OFF)
   set(CMAKE_FIND_USE_PACKAGE_REGISTRY        OFF)
   set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)
+
+  # The consumer's own copies, made available before find_package, as in a
+  # project that already fetches them. The engine's config must use them and
+  # look for no package: the test's prefix holds the engine alone, so a search
+  # would fail. The test points both at the sources the engine's build fetched.
+  if(CONSUMER_FETCHES_DEPENDENCIES)
+    FetchContent_Declare(spdlog
+      GIT_REPOSITORY https://github.com/gabime/spdlog.git
+      GIT_TAG        v1.17.0)
+    FetchContent_Declare(nlohmann_json
+      GIT_REPOSITORY https://github.com/nlohmann/json.git
+      GIT_TAG        v3.12.0)
+    FetchContent_MakeAvailable(spdlog nlohmann_json)
+  endif()
 
   # EXACT, so the version file must report the version that was installed.
   find_package(flywheel_dag ${FLYWHEEL_DAG_PACKAGE_VERSION} EXACT CONFIG REQUIRED)

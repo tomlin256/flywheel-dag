@@ -91,6 +91,26 @@ if(FLYWHEEL_DAG_INSTALL)
       --test-command consumer)
   set_tests_properties(test_consumer_package PROPERTIES
     FIXTURES_REQUIRED "installed_engine;installed_dependencies")
+
+  # A consumer that fetches its own spdlog and nlohmann/json, then finds the
+  # installed engine in a prefix that holds the engine alone. The engine's
+  # config must use the consumer's copies. The consumer builds spdlog, like
+  # test_consumer_subproject.
+  add_test(NAME test_consumer_package_own_dependencies
+    COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/consumer
+                       ${package_dir}/consumer_own_dependencies
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options -DFLYWHEEL_DAG_PACKAGE_VERSION=${PROJECT_VERSION}
+                      -DCMAKE_PREFIX_PATH=${package_dir}/engine
+                      -DCONSUMER_FETCHES_DEPENDENCIES=ON
+                      -DFETCHCONTENT_SOURCE_DIR_SPDLOG=${spdlog_SOURCE_DIR}
+                      -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${nlohmann_json_SOURCE_DIR}
+                      -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      --test-command consumer)
+  set_tests_properties(test_consumer_package_own_dependencies PROPERTIES
+    FIXTURES_REQUIRED installed_engine
+    TIMEOUT 600)
 endif()
 
 # The warning flags reach every translation unit of this project and none of
