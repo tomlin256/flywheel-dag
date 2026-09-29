@@ -264,17 +264,19 @@ Maybe, so a Lazy consumer skips when the recomputed value equals the frozen one
 **Custom node design** — Compose `ComputeNode` (+ captured mutable state), or a
 `dag::ts::StatefulNodeBase` for incremental time-series state, or a
 `dag::ops::OpNodeImpl<Derived>`-based op (see below) for a stateless arithmetic
-primitive that needs its own identifiable type. If you genuinely need a node of
-your own, derive from **`dag::NodeBase`**, never from `dag::INode` — `INode` is
-the interface the engine calls through, not a base to build on.
+primitive that needs its own identifiable type, or an
+`aad::DifferentiableNode<N>` for a functor a tape must differentiate (see
+Algorithmic Differentiation). If you genuinely need a node of your own, derive
+from **`dag::NodeBase`**, never from `dag::INode` — `INode` is the interface the
+engine calls through, not a base to build on.
 
 **`dag::NodeBase` — the one copy of the dirty/downstream protocol.** It owns
 `downstream_`, the dirty flag, and `dirty()` / `invalidate()` / `addDownstream()`
 / `notifyDownstream()`. Every node in the engine derives from it: `Input`,
 `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`,
 `AsyncInput`, `AsyncQueue`, `MemoizedComputeNode`, `ReplayInput`, `ReplayQueue`,
-`ts::NodeImpl` and `ops::OpNodeImpl` — and so should any node an application
-defines.
+`ts::NodeImpl`, `ops::OpNodeImpl` and `aad::DifferentiableNode` — and so should
+any node an application defines.
 
 `downstream_` is **private**. Reaching downstream goes through
 `notifyDownstream()` — several of the twelve copies this replaced walked the
@@ -448,15 +450,27 @@ unsigned silently wraps); `ExpNode`/`LnNode`/`PowerNode`/`SqrtNode` tighten to
 truncate an integral `T`).
 
 **Why dedicated types, not `ComputeNode<T, ...>` + a lambda:** each op is its own
-concrete C++ type so that `inputs()` plus the op's identity are enough for a future
-pass (e.g. reverse-mode AAD) to attach a closed-form local derivative
-(`SumNode`: all partials `1`; `ProductNode`: partial w.r.t. `x_i` is `product / x_i`;
-`DiffNode`: `+1`/`-1`; `DivideNode`: `1/b`, `-a/b²`; `NegateNode`: `-1`; `ExpNode`:
-`exp(a)` itself; `LnNode`: `1/a`; `PowerNode`: `b·a^(b-1)` w.r.t. `a`, `a^b·ln(a)`
-w.r.t. `b`; `SqrtNode`: `1/(2·sqrt(a))`) without redesigning these primitives — a
+concrete C++ type so that `inputs()` plus the op's identity are enough for a tape
+(see Algorithmic Differentiation) to attach a closed-form local derivative — a
 `ComputeNode` wrapping an arbitrary lambda can't supply that, since the lambda body
-is opaque to the graph. No tape or backward pass exists yet — this is forward
-evaluation only.
+is opaque to the graph. Each op reports its partials through `aad::IDifferentiable`,
+from `ops::Derivative<Op>`:
+
+| Op | Partials |
+|---|---|
+| `SumNode` | `1` for each input |
+| `ProductNode` | The product of the other factors, from prefix and suffix products — exact at a zero factor, where `product / x_i` is 0/0 |
+| `DiffNode` | `+1`, `-1` |
+| `DivideNode` | `1/b`, `-a/b²` (computed as `-(a/b)/b`) |
+| `NegateNode` | `-1` |
+| `ExpNode` | `exp(a)` |
+| `LnNode` | `1/a` |
+| `PowerNode` | `b·a^(b-1)`, or `0` when `b` is 0; `a^b·ln(a)`, or `0` at `a = 0` with `b > 0` |
+| `SqrtNode` | `1/(2·sqrt(a))` |
+
+`PowerNode`'s two exceptions are points where the formula gives 0·∞, a NaN, but the
+function is flat. A NaN that is the true answer, ∂/∂b at `a < 0`, is kept. Only
+`T = double` has partials: an op over another type returns `false` and is a barrier.
 
 **Implementation note:** all nine ops above are `using` aliases over three
 arity-generic templates — `UnaryOpNode<T,Op>`, `BinaryOpNode<T,Op>`,
@@ -470,8 +484,78 @@ equivalent exists at all. Each alias still names its own concrete type
 (`SumNode<double>` ≡
 `NAryOpNode<double,PlusOp<double>>`, distinct from `ProductNode<double>` ≡
 `NAryOpNode<double,MultipliesOp<double>>`), so the AAD-dispatch property above is
-unaffected — a future derivative trait would specialize per `Op` rather than per
-node class name.
+unaffected — the derivative trait, `Derivative<Op>`, specialises per `Op` rather
+than per node class name, and an application's own `Op` becomes differentiable by
+specialising it.
+
+---
+
+## Algorithmic Differentiation (`dag_aad.hpp`)
+
+**The graph is the tape** (flywheel-dag#10). An `aad::Tape` records the nodes some
+roots depend on at the values they hold now, each with its local partials, in
+topological order. `adjoints(root, wrt)` sweeps it in reverse: the root's
+derivative with respect to any number of nodes, in one sweep. `tangents(seeds)`
+sweeps it forward: every root's derivative in one direction, in one sweep. Nothing
+is recorded while the graph evaluates, so no `eval()` path pays for it.
+
+**Where partials come from** — `aad::IDifferentiable`, declared in `dag.hpp`: a
+mixin a tape finds with `dynamic_cast`, as `discoverStatefulNodes()` finds
+`IStatefulNode`, so `INode` and `NodeBase` are untouched.
+
+| Node | Partials |
+|---|---|
+| `dag::ops` over `double` | Closed form, from `ops::Derivative<Op>` (see Basic Arithmetic Ops) |
+| `ConditionNode` | `1` for the branch it took. It never names the condition or the other branch |
+| `TweakableComputeNode` | Tweaked: none, a constant. Untweaked: `false`, a barrier |
+| `aad::DifferentiableNode<N>` | Its generic functor, run once on `aad::Dual<N>` |
+
+A node with inputs and no partials is a **barrier**: every `dag::ts` node,
+`ComputeNode`, `InPlaceComputeNode`, `MemoizedComputeNode`, and any application
+node that does not implement the mixin. A tape does not follow a barrier's inputs.
+
+**The rules:**
+
+- **A tape evaluates nothing.** Every root must be clean, or the tape throws
+  `std::invalid_argument`. `partials()` pulls inputs with `eval()`, and a clean
+  node's named inputs are clean too, so every pull returns a cached value. Never
+  make a tape evaluate a dirty root for its caller: `Engine::cycle()` snapshots its
+  outputs' dirty flags before evaluating them, so a registered output evaluated
+  between cycles reads as clean, and its callback misses the change. A pass runs in
+  the root's output callback, or after the caller has evaluated the root.
+- **Partials come from the inputs alone,** never from the node's own published
+  value, which a tolerance policy can hold back.
+- **A partial times an adjoint or a tangent is 0 when either is 0.** So a
+  constant's ∞ or NaN partial never reaches a result, and the two sweeps agree at
+  0·∞: z·√x at z = 0 and x = 0 has ∂/∂x = 0 both ways. A NaN that is not multiplied
+  by 0 propagates, because it is the true answer. `Dual<N>` keeps the same rule.
+- **A barrier with a `wrt` or seed node upstream throws `std::domain_error`,**
+  naming both, rather than answer 0. A reverse sweep counts only the barriers its
+  root reaches. A forward sweep serves every root, so it counts every barrier on
+  the tape. A barrier can itself be a `wrt` node.
+- **Any node can be a `wrt` or seed node.** A seed on an intermediate node adds to
+  the tangent that reaches it, which keeps the sweeps exact duals: a tangent is
+  Σ seed · adjoint.
+- **A tape holds partials, not values,** so it goes stale when an input moves.
+  Record another.
+- **Eval thread only.** An application's clock-driven node, whose `dirty()` is
+  always true, is re-evaluated when a differentiable consumer's `partials()` pulls
+  it, as any consumer's pull does, and it can never be a root.
+
+**`DifferentiableNode<N>`'s functor must have no side effects:** it runs again, on
+duals, each time a tape records the node. Its body calls math functions
+unqualified, after `using std::exp;`, so that one body compiles at `double` and at
+`Dual<N>`; `std::exp(x)` does not compile at `Dual<N>`. `aad::chain(x,
+f(x.value), f′(x.value))` lifts any other function. At a kink, `abs′(0)` is 0, and
+`min`/`max` follow the argument they return, the first one on a tie. `÷`, `exp`,
+`log`, `sqrt` and `pow` on duals take their partials from `ops::Derivative<Op>`,
+so a `Dual` and an op node cannot drift apart.
+
+**Test the path you mean to test.** The Black–Scholes price's derivative through
+d1 is 0, because S·φ(d1) = K·e^(−rT)·φ(d2), so the price alone cannot see d1's
+partials: a wrong partial passed that test.
+`AadNode.ItsDeltaMatchesItsClosedFormDerivatives` differentiates N(d1), which can
+see them.
 
 ---
 

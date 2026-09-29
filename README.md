@@ -22,8 +22,12 @@ evaluates only the part of the graph they dirtied.
 - **Incremental time-series nodes** (`dag::ts`) — rolling mean/stddev, EWMA, rolling min/max and
   sum, z-score, tick- and time-based delays, thresholds with hysteresis, debouncing and rate
   limiting.
-- **Arithmetic op nodes** (`dag::ops`) — each op its own type, so a later pass can attach
-  closed-form derivatives.
+- **Arithmetic op nodes** (`dag::ops`) — each op its own type, with closed-form partial
+  derivatives.
+- **Algorithmic differentiation** (`dag::aad`) — an output's derivative with respect to every
+  input in one reverse sweep, or every output's derivative in one direction in one forward sweep,
+  at the values the graph holds. A compute node written as a generic lambda is differentiated with
+  dual numbers.
 - **Snapshot and restore** of stateful nodes, discovered by walking the graph; a JSON file store
   writes atomically.
 - **Deterministic replay** of recorded sessions through an unmodified graph, with no threads or
@@ -125,6 +129,40 @@ cmake -B build && cmake --build build
 ./build/bin/quickstart
 ```
 
+### Derivatives
+
+`dag_aad.hpp` takes derivatives over the graph, at the values it holds, in either direction:
+
+```cpp
+#include <flywheel/dag_aad.hpp>
+#include <flywheel/dag_ops.hpp>
+
+using namespace dag;
+
+auto x = Input<double>::make("x", 2.0);
+auto y = Input<double>::make("y", 3.0);
+auto f = ops::ProductNode<>::make("f", {x, ops::ExpNode<>::make("exp(y)", y)});   // x·eʸ
+
+EvalContext ctx;
+f->eval(ctx);                       // a pass reads evaluated values only
+
+aad::adjoints(f, {x, y});           // reverse, one sweep: {eʸ, x·eʸ}
+aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative along x
+```
+
+- The ops supply their partials in closed form. A `ComputeNode`'s lambda is opaque, so for a
+  functor a pass can see into, use `aad::DifferentiableNode<N>`. Its functor is written once, as a
+  generic lambda, and differentiated with dual numbers.
+  [`examples/aad.cpp`](examples/aad.cpp) prices a call that way, and checks its sensitivities both
+  ways against bumps.
+- A pass evaluates nothing, advances no stateful node, and never reads the branch a `ConditionNode`
+  did not take. Its root must already be evaluated, so run it in the root's output callback, or
+  after evaluating the root.
+- A node with inputs but no partials is a barrier: every `dag::ts` node, and every opaque
+  `ComputeNode`. A derivative through one throws `std::domain_error` rather than answer 0.
+- An output callback fires only when the output's value changes, and a gradient can change while
+  the value does not.
+
 ## Concepts
 
 - **Build nodes with `make()`**, never a constructor: `make()` wires the node into the graph once
@@ -150,12 +188,13 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 
 | Header | Namespace | Provides |
 |---|---|---|
-| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase` |
+| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase`, `aad::IDifferentiable` |
 | `dag_async.hpp` | `dag::async` | `AsyncInput`, `AsyncQueue`, `FeedRegistry`, `TickLoop` |
 | `dag_engine.hpp` | `dag::async` | `Engine`, `CycleSeqLock` |
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
-| `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode` |
+| `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `Derivative` |
+| `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual` |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
