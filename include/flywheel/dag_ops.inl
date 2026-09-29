@@ -260,4 +260,45 @@ inline std::pair<double, double> Derivative<PowOp<double>>::d(double a, double b
 
 inline double Derivative<SqrtOp<double>>::d(double a) { return 0.5 / std::sqrt(a); }
 
+inline double Derivative<SinOp<double>>::d(double a) { return std::cos(a); }
+
+inline double Derivative<CosOp<double>>::d(double a) { return -std::sin(a); }
+
+// 1 + tan² a rather than 1/cos² a: both terms are non-negative, so nothing
+// cancels.
+inline double Derivative<TanOp<double>>::d(double a) {
+    const double t = std::tan(a);
+    return 1.0 + t * t;
+}
+
+// 1 − a² as (1 − a)(1 + a). Next to |a| = 1, a² is rounded before the
+// subtraction exposes it: at a = 1 − 2⁻²⁷, 1 − a² reads 2⁻²⁶ where the exact
+// value is 2⁻²⁶ − 2⁻⁵⁴. Next to ±1 one factor is exact and the other is near 2,
+// so the product is good to about an ulp. Where a compiler fuses 1 − a·a into
+// one FMA, as Apple Clang does on arm64, the textbook form is exact as well, so
+// AadPartials.AsinAndAcosAreAccurateNextToTheirEnds catches it only where it
+// does not. At |a| = 1 the partial is +∞, the one-sided slope, as √'s is at 0.
+inline double Derivative<AsinOp<double>>::d(double a) {
+    return 1.0 / std::sqrt((1.0 - a) * (1.0 + a));
+}
+
+inline double Derivative<AcosOp<double>>::d(double a) {
+    return -Derivative<AsinOp<double>>::d(a);
+}
+
+// 1 + a² is at least 1, so it cannot underflow. It overflows past
+// |a| ≈ 1.3e154, where the partial reads 0 and the exact value is below
+// 5.6e-309, a subnormal.
+inline double Derivative<AtanOp<double>>::d(double a) { return 1.0 / (1.0 + a * a); }
+
+// b/(a² + b²) and −a/(a² + b²) as (b/h)/h and −(a/h)/h, with h = hypot(a, b),
+// for the reason −a/b² is −(a/b)/b above. a² + b² overflows once a or b passes
+// about 1.3e154, and underflows once both fall below about 1.5e-154. hypot does
+// neither, and b/h is cos θ. At the origin h is 0 and both partials are NaN,
+// from 0/0: the angle jumps there, and has no derivative.
+inline std::pair<double, double> Derivative<Atan2Op<double>>::d(double a, double b) {
+    const double h = std::hypot(a, b);
+    return {(b / h) / h, -(a / h) / h};
+}
+
 } // namespace dag::ops

@@ -25,9 +25,12 @@
 
 using namespace dag;
 using aad_test::expectClose;
+using aad_test::InverseTrig;
 using aad_test::LogTimesRoot;
+using aad_test::PolarRoundTrip;
 using aad_test::PowerOfDifference;
 using aad_test::SumOfTerms;
+using aad_test::TrigOfRatio;
 
 namespace {
 
@@ -108,6 +111,9 @@ TEST(AadReverse, MatchesAnalyticGradients) {
     expectRightGradient(SumOfTerms{});
     expectRightGradient(LogTimesRoot{});
     expectRightGradient(PowerOfDifference{});
+    expectRightGradient(TrigOfRatio{});
+    expectRightGradient(InverseTrig{});
+    expectRightGradient(PolarRoundTrip{});
 }
 
 TEST(AadReverse, MatchesCentralDifferences) {
@@ -117,6 +123,12 @@ TEST(AadReverse, MatchesCentralDifferences) {
     expectCentralDifferences(l.root, l.inputs());
     const PowerOfDifference p;
     expectCentralDifferences(p.root, p.inputs());
+    const TrigOfRatio t;
+    expectCentralDifferences(t.root, t.inputs());
+    const InverseTrig i;
+    expectCentralDifferences(i.root, i.inputs());
+    const PolarRoundTrip r;
+    expectCentralDifferences(r.root, r.inputs());
 }
 
 // x·eˣ·eˣ: eˣ feeds the product twice, and x feeds it directly and through eˣ.

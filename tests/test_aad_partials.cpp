@@ -16,6 +16,7 @@
 #include "flywheel/dag_ops.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -258,6 +259,15 @@ TEST(AadPartials, OnlyDoubleOpsHavePartials) {
     const Reported rf = partialsOf(ops::ExpNode<float>::make("expFloat", f));
     EXPECT_FALSE(rf.ok);
     EXPECT_TRUE(rf.entries.empty());
+
+    const Reported rs = partialsOf(ops::SinNode<float>::make("sinFloat", f));
+    EXPECT_FALSE(rs.ok);
+    EXPECT_TRUE(rs.entries.empty());
+
+    auto g = Input<float>::make("g", 2.0f);
+    const Reported ra = partialsOf(ops::Atan2Node<float>::make("atan2Float", f, g));
+    EXPECT_FALSE(ra.ok);
+    EXPECT_TRUE(ra.entries.empty());
 }
 
 TEST(AadPartials, AnApplicationOpCanSpecialiseDerivative) {
@@ -280,6 +290,143 @@ TEST(AadPartials, AnInputNamedTwiceGetsTwoEntries) {
     ASSERT_TRUE(r.ok);
     ASSERT_EQ(r.entries.size(), 2u);
     EXPECT_EQ(r.entries[0].d + r.entries[1].d, 0.0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The trigonometric ops (flywheel-dag#14)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The textbook forms, to 4 ulp. tan's is checked against 1/cos² a, so that the
+// check is not the formula it checks.
+TEST(AadPartials, TrigOpsMatchTheirClosedForms) {
+    auto a = Input<double>::make("a", 0.0);
+    auto b = Input<double>::make("b", 1.0);
+    const NodePtr sn  = ops::SinNode<>::make("sin", a);
+    const NodePtr cs  = ops::CosNode<>::make("cos", a);
+    const NodePtr tn  = ops::TanNode<>::make("tan", a);
+    const NodePtr as  = ops::AsinNode<>::make("asin", a);
+    const NodePtr ac  = ops::AcosNode<>::make("acos", a);
+    const NodePtr at  = ops::AtanNode<>::make("atan", a);
+    const NodePtr at2 = ops::Atan2Node<>::make("atan2", a, b);
+
+    struct Point { double x, y; };
+    // |x| < 1 at both, so that asin and acos are defined.
+    for (const Point& p : {Point{0.3, -1.7}, Point{-0.8, 2.4}}) {
+        a->set(p.x);
+        b->set(p.y);
+        SCOPED_TRACE(testing::Message() << "at " << p.x << ", " << p.y);
+
+        Reported r = partialsOf(sn);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), std::cos(p.x));
+
+        r = partialsOf(cs);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), -std::sin(p.x));
+
+        r = partialsOf(tn);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), 1.0 / (std::cos(p.x) * std::cos(p.x)));
+
+        r = partialsOf(as);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), 1.0 / std::sqrt(1.0 - p.x * p.x));
+
+        r = partialsOf(ac);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), -1.0 / std::sqrt(1.0 - p.x * p.x));
+
+        r = partialsOf(at);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), 1.0 / (1.0 + p.x * p.x));
+
+        r = partialsOf(at2);
+        ASSERT_TRUE(r.ok);
+        const double r2 = p.x * p.x + p.y * p.y;
+        EXPECT_DOUBLE_EQ(r.at(0), p.y / r2);
+        EXPECT_DOUBLE_EQ(r.at(1), -p.x / r2);
+    }
+}
+
+TEST(AadPartials, TrigOpsMatchCentralDifferences) {
+    auto a = Input<double>::make("a", 0.45);
+    auto b = Input<double>::make("b", -1.3);
+    expectCentralDifferences(ops::SinNode<>::make("sin", a), {a});
+    expectCentralDifferences(ops::CosNode<>::make("cos", a), {a});
+    expectCentralDifferences(ops::TanNode<>::make("tan", a), {a});
+    expectCentralDifferences(ops::AsinNode<>::make("asin", a), {a});
+    expectCentralDifferences(ops::AcosNode<>::make("acos", a), {a});
+    expectCentralDifferences(ops::AtanNode<>::make("atan", a), {a});
+    expectCentralDifferences(ops::Atan2Node<>::make("atan2", a, b), {a, b});
+}
+
+// Next to |a| = 1, 1 − a² cancels: at a = 1 − 2⁻²⁷ it reads 2⁻²⁶ where the exact
+// value is 2⁻²⁶ − 2⁻⁵⁴, and the textbook partial is 1.9e-9 too small. The
+// textbook form passes here only where the compiler fuses 1 − a·a into one FMA,
+// as Apple Clang does on arm64.
+TEST(AadPartials, AsinAndAcosAreAccurateNextToTheirEnds) {
+    const double nearOne = 1.0 - std::ldexp(1.0, -27);
+    // 1/√(2⁻²⁶ − 2⁻⁵⁴), rounded twice: 1 − 2⁻²⁸ is exact.
+    const double exact = std::ldexp(1.0, 13) / std::sqrt(1.0 - std::ldexp(1.0, -28));
+    auto a = Input<double>::make("a", nearOne);
+    const NodePtr as = ops::AsinNode<>::make("asin", a);
+    const NodePtr ac = ops::AcosNode<>::make("acos", a);
+    for (const double x : {nearOne, -nearOne}) {
+        a->set(x);
+        SCOPED_TRACE(testing::Message() << "at " << x);
+        const Reported rs = partialsOf(as);
+        ASSERT_TRUE(rs.ok);
+        EXPECT_DOUBLE_EQ(rs.at(0), exact);
+        const Reported rc = partialsOf(ac);
+        ASSERT_TRUE(rc.ok);
+        EXPECT_DOUBLE_EQ(rc.at(0), -exact);
+    }
+}
+
+// At |a| = 1 the slope from inside is infinite, as √'s is at 0. Beyond, the
+// value is NaN, and so are the partials.
+TEST(AadPartials, AsinAndAcosKeepTheirTrueInfinities) {
+    const double inf = std::numeric_limits<double>::infinity();
+    auto a = Input<double>::make("a", 1.0);
+    const NodePtr as = ops::AsinNode<>::make("asin", a);
+    const NodePtr ac = ops::AcosNode<>::make("acos", a);
+    for (const double x : {1.0, -1.0}) {
+        a->set(x);
+        EXPECT_EQ(partialsOf(as).at(0), inf) << "at " << x;
+        EXPECT_EQ(partialsOf(ac).at(0), -inf) << "at " << x;
+    }
+
+    a->set(1.5);
+    EXPECT_TRUE(std::isnan(partialsOf(as).at(0)));
+    EXPECT_TRUE(std::isnan(partialsOf(ac).at(0)));
+}
+
+// a² + b² underflows to 0 at the first point, and overflows at the second. The
+// exact partials are b/(a² + b²) and −a/(a² + b²): (4/25, −3/25)·2⁶⁰⁰ at
+// (3, 4)·2⁻⁶⁰⁰, and (4/25, −3/25)·2⁻⁶⁰⁰ at (3, 4)·2⁶⁰⁰.
+TEST(AadPartials, Atan2NeitherOverflowsNorUnderflows) {
+    auto a = Input<double>::make("a", 0.0);
+    auto b = Input<double>::make("b", 1.0);
+    const NodePtr at2 = ops::Atan2Node<>::make("atan2", a, b);
+    for (const int e : {-600, 600}) {
+        a->set(std::ldexp(3.0, e));
+        b->set(std::ldexp(4.0, e));
+        SCOPED_TRACE(testing::Message() << "at (3, 4) * 2^" << e);
+        const Reported r = partialsOf(at2);
+        ASSERT_TRUE(r.ok);
+        EXPECT_DOUBLE_EQ(r.at(0), std::ldexp(4.0 / 25.0, -e));
+        EXPECT_DOUBLE_EQ(r.at(1), std::ldexp(-3.0 / 25.0, -e));
+    }
+}
+
+// The angle jumps at the origin, so it has no derivative there: 0/0.
+TEST(AadPartials, Atan2HasNoDerivativeAtTheOrigin) {
+    auto a = Input<double>::make("a", 0.0);
+    auto b = Input<double>::make("b", 0.0);
+    const Reported r = partialsOf(ops::Atan2Node<>::make("atan2", a, b));
+    ASSERT_TRUE(r.ok);
+    EXPECT_TRUE(std::isnan(r.at(0)));
+    EXPECT_TRUE(std::isnan(r.at(1)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

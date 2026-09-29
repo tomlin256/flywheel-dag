@@ -269,7 +269,9 @@ struct Atan2Op {
 //
 // Where a formula would divide zero by zero, or multiply zero by infinity, at a
 // point where the function is in fact flat, the partial is the exact 0. See
-// MultipliesOp and PowOp.
+// MultipliesOp and PowOp. Where the textbook form would cancel, overflow or
+// underflow, the partial is computed another way. See std::divides, AsinOp and
+// Atan2Op.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Op>
 struct Derivative {
@@ -338,6 +340,57 @@ template<>
 struct Derivative<SqrtOp<double>> {
     static constexpr bool defined = true;
     static double d(double a);
+};
+
+/// cos a.
+template<>
+struct Derivative<SinOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// −sin a.
+template<>
+struct Derivative<CosOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// 1 + tan² a.
+template<>
+struct Derivative<TanOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// 1/√(1 − a²), as 1/√((1 − a)(1 + a)), which does not cancel next to |a| = 1.
+/// +∞ at |a| = 1, the one-sided slope, and NaN beyond.
+template<>
+struct Derivative<AsinOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// −1/√(1 − a²): the negative of AsinOp's.
+template<>
+struct Derivative<AcosOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// 1/(1 + a²).
+template<>
+struct Derivative<AtanOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// b/(a² + b²) and −a/(a² + b²), through hypot(a, b), which neither overflows
+/// nor underflows. NaN at the origin, where the angle has no derivative.
+template<>
+struct Derivative<Atan2Op<double>> {
+    static constexpr bool defined = true;
+    static std::pair<double, double> d(double a, double b);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

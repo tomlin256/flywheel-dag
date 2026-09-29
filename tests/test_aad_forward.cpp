@@ -22,9 +22,12 @@
 
 using namespace dag;
 using aad_test::expectClose;
+using aad_test::InverseTrig;
 using aad_test::LogTimesRoot;
+using aad_test::PolarRoundTrip;
 using aad_test::PowerOfDifference;
 using aad_test::SumOfTerms;
+using aad_test::TrigOfRatio;
 
 namespace {
 
@@ -69,6 +72,9 @@ TEST(AadForward, MatchesAnalyticDerivatives) {
     expectRightTangents(SumOfTerms{});
     expectRightTangents(LogTimesRoot{});
     expectRightTangents(PowerOfDifference{});
+    expectRightTangents(TrigOfRatio{});
+    expectRightTangents(InverseTrig{});
+    expectRightTangents(PolarRoundTrip{});
 }
 
 TEST(AadForward, OneSweepServesEveryRoot) {
@@ -91,6 +97,9 @@ TEST(AadForward, IsTheDualOfReverse) {
     expectDuality(SumOfTerms{});
     expectDuality(LogTimesRoot{});
     expectDuality(PowerOfDifference{});
+    expectDuality(TrigOfRatio{});
+    expectDuality(InverseTrig{});
+    expectDuality(PolarRoundTrip{});
 }
 
 // f = (x·y·z, exp(x) − z/y): 3 forward sweeps and 2 reverse sweeps of one tape.
