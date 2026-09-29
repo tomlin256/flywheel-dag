@@ -1,0 +1,29 @@
+# flywheel_dagConfig.cmake — find_package(flywheel_dag) for an installed
+# flywheel-dag. It defines the imported target flywheel::dag.
+#
+# flywheel::dag needs spdlog and nlohmann/json, which the install does not
+# include. A consumer provides them, either as installed packages or through its
+# own FetchContent before it calls find_package(flywheel_dag).
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# A dependency the consumer already provides (through its own FetchContent, or
+# an earlier find_package) is used as it is, so a build holds one copy of each.
+if(NOT TARGET spdlog::spdlog)
+    find_dependency(spdlog)
+endif()
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    find_dependency(nlohmann_json)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/flywheel_dagTargets.cmake")
+
+# The exported target names no dependency, because the engine's build links
+# whichever copies it has. The package links the ones found above. Without
+# APPEND, a second find_package in the same directory sets the same value.
+set_property(TARGET flywheel::dag PROPERTY INTERFACE_LINK_LIBRARIES
+             spdlog::spdlog nlohmann_json::nlohmann_json)
+
+check_required_components(flywheel_dag)

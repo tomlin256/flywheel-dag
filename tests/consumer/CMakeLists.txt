@@ -20,6 +20,12 @@ foreach(leaked IN ITEMS test_dag quickstart gtest GTest::gtest)
   endif()
 endforeach()
 
+# Nor does the engine install itself into its consumer's prefix unless the
+# consumer asks (flywheel-dag#2).
+if(FLYWHEEL_DAG_INSTALL)
+  message(FATAL_ERROR "flywheel-dag turned on its install rules in its consumer")
+endif()
+
 # A consumer's compile flags are its own (flywheel-dag#4): the engine's warning
 # flags must reach it neither through flywheel::dag nor through the cache.
 get_target_property(engine_options flywheel::dag INTERFACE_COMPILE_OPTIONS)

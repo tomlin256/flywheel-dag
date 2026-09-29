@@ -19,9 +19,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level or subproject.
 #
-# Tests, examples, benchmarks and every build-wide setting below apply only when
-# this is the top-level project. A consumer's build settings are its own, and it
-# never inherits the engine's test targets or googletest.
+# Tests, examples, benchmarks, install rules and every build-wide setting below
+# apply only when this is the top-level project. A consumer's build settings are
+# its own: it never inherits the engine's test targets or googletest, and the
+# engine lands in its install prefix only if it sets FLYWHEEL_DAG_INSTALL.
 # ─────────────────────────────────────────────────────────────────────────────
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_flywheel_dag_top_level ON)
@@ -29,9 +30,10 @@ else()
     set(_flywheel_dag_top_level OFF)
 endif()
 
-option(FLYWHEEL_DAG_BUILD_TESTS      "Build the engine's tests"                  ${_flywheel_dag_top_level})
-option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                        ${_flywheel_dag_top_level})
-option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand" ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_TESTS      "Build the engine's tests"                           ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                                 ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand"          ${_flywheel_dag_top_level})
+option(FLYWHEEL_DAG_INSTALL          "Generate the install rules and the package config" ${_flywheel_dag_top_level})
 
 if(_flywheel_dag_top_level)
     # RelWithDebInfo (-O2 -g -DNDEBUG) unless a build type was asked for: an
@@ -90,13 +92,65 @@ endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The engine. flywheel_dag is the real target; consumers link the alias,
-# flywheel::dag (an ALIAS cannot be the subject of target_* commands).
+# flywheel::dag (an ALIAS cannot be the subject of target_* commands). The
+# install exports it under the same name: EXPORT_NAME dag, in the flywheel::
+# namespace.
+#
+# The include path and the dependencies are $<BUILD_INTERFACE:...>, which is
+# its content in a build tree and empty in the export. The export cannot name
+# the dependencies: the copies this build fetched are its own targets, in no
+# export set. The package config links the copies the consumer has instead
+# (cmake/flywheel_dagConfig.cmake.in).
 # ─────────────────────────────────────────────────────────────────────────────
 add_library(flywheel_dag INTERFACE)
 add_library(flywheel::dag ALIAS flywheel_dag)
-target_include_directories(flywheel_dag INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(flywheel_dag INTERFACE spdlog::spdlog nlohmann_json::nlohmann_json)
+target_include_directories(flywheel_dag INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_link_libraries(flywheel_dag INTERFACE
+    $<BUILD_INTERFACE:spdlog::spdlog>
+    $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 target_compile_features(flywheel_dag INTERFACE cxx_std_17)
+set_target_properties(flywheel_dag PROPERTIES EXPORT_NAME dag)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Install (flywheel-dag#2): the engine alone, meaning its headers, a
+# find_package(flywheel_dag) config and the LICENSE file. Every installed file
+# exists once configure finishes, so nothing needs building first. spdlog and
+# nlohmann/json are not installed: a consumer provides them, as installed
+# packages or through its own FetchContent before find_package. test_install
+# checks the installed set.
+# ─────────────────────────────────────────────────────────────────────────────
+if(FLYWHEEL_DAG_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    # share/, not lib/: a header-only package does not depend on the architecture.
+    set(_flywheel_dag_config_dir ${CMAKE_INSTALL_DATADIR}/cmake/flywheel_dag)
+
+    install(TARGETS flywheel_dag EXPORT flywheel_dagTargets
+            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    # Headers only, so an editor backup or a .DS_Store is never installed.
+    install(DIRECTORY include/flywheel DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.inl")
+    install(EXPORT flywheel_dagTargets NAMESPACE flywheel::
+            DESTINATION ${_flywheel_dag_config_dir})
+
+    configure_package_config_file(cmake/flywheel_dagConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfig.cmake
+        INSTALL_DESTINATION ${_flywheel_dag_config_dir})
+    # Before 1.0 a minor release may break the API, so a request for 0.1 accepts
+    # any 0.1.z and nothing else. At 1.0 this becomes SameMajorVersion.
+    # ARCH_INDEPENDENT: headers do not care what pointer size the consumer has.
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfigVersion.cmake
+        COMPATIBILITY SameMinorVersion ARCH_INDEPENDENT)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfig.cmake
+                  ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfigVersion.cmake
+            DESTINATION ${_flywheel_dag_config_dir})
+
+    # Every header's banner points to this file.
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/flywheel_dag)
+endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests, examples and benchmarks (top-level by default).

@@ -367,7 +367,7 @@ Commits: `docs: say how to install the engine and find it`, `build: release v0.1
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Install the engine | Not started | |
+| 1 — Install the engine | Done locally | ctest 24 / 24, and `--invariants` is unchanged. `test_install` finds the engine alone: 27 files. A fresh configure with CI's flags prints no warnings. `cmake --install` of that tree, configured and never built, installs the same 27 files. Both hand-made changes failed their test. `include/flywheel/extra.h` gave "Not installed: include/flywheel/extra.h". An `ON` default gave "flywheel-dag turned on its install rules in its consumer". For that second check, the local consumer build directory had to be removed first: its cache keeps the option's first value. CI always configures fresh |
 | 2 — A consumer finds the package and its dependencies | Not started | |
 | 3 — A consumer that fetches its own dependencies | Not started | |
 | 4 — Docs and release | Not started | |

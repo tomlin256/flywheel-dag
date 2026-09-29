@@ -43,6 +43,25 @@ add_test(NAME test_consumer_subproject
     --test-command consumer)
 set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)
 
+# The install (flywheel-dag#2). test_install installs this build into an empty
+# prefix under package/ and checks that the prefix holds the engine alone. It
+# is registered wherever the root promises install rules, never from anything
+# the install block itself sets.
+if(FLYWHEEL_DAG_INSTALL)
+  set(package_dir ${CMAKE_CURRENT_BINARY_DIR}/package)
+
+  add_test(NAME test_install
+    COMMAND ${CMAKE_COMMAND}
+      -DBINARY_DIR=${PROJECT_BINARY_DIR}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DPREFIX=${package_dir}/engine
+      -DINCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
+      -DDATADIR=${CMAKE_INSTALL_DATADIR}
+      -DCONFIG=$<CONFIG>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_install.cmake)
+  set_tests_properties(test_install PROPERTIES FIXTURES_SETUP installed_engine)
+endif()
+
 # The warning flags reach every translation unit of this project and none of
 # its dependencies' (flywheel-dag#4). Registered wherever the root
 # CMakeLists.txt promises the flags (the top level, GCC or Clang), never from
