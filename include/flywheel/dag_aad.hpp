@@ -89,7 +89,10 @@
 // Never include dag_aad.inl directly — always include this file.
 
 #include "dag.hpp"
+#include "dag_ops.hpp"
 
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -171,6 +174,109 @@ std::vector<double> adjoints(const NodePtr& root, const std::vector<NodePtr>& wr
 /// Records a tape for the roots and sweeps it once forward: each root's
 /// derivative in the direction the seeds give.
 std::vector<double> tangents(const std::vector<NodePtr>& roots, const std::vector<Seed>& seeds);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dual<N> — a value, and its partial derivatives with respect to N arguments.
+//
+// It takes a functor's partials in one call. A functor written once, as a
+// generic callable, runs at double to evaluate and at Dual<N> to differentiate:
+// argument i arrives as its value with d = eᵢ, and the result carries
+// ∂result/∂(argument i) in d[i]. Everything is on the stack.
+//
+// The functions below are found by argument-dependent lookup. A functor calls
+// them unqualified, after `using std::exp;` and the like, so that one body
+// compiles at double and at Dual<N>. A functor that writes std::exp(x) does not
+// compile at Dual<N>: a compile error, not a wrong answer. chain() lifts any
+// other function whose derivative is known.
+//
+// Comparisons read the value alone, so a functor can branch. Its derivative is
+// then the derivative of the branch it took, as a ConditionNode's is.
+//
+// The rule a tape keeps holds here too: a partial times a derivative counts as
+// 0 when either one is 0. So a constant in a functor, a Dual whose d is 0,
+// never turns an infinite or NaN partial into a NaN: pow(x, 3.0) at x = −2 has
+// derivative 12, although a^b·ln a is NaN there.
+//
+// At a kink: abs′(0) is 0. min and max follow the argument they return, and
+// return the first one on a tie, as std::min and std::max do.
+// ─────────────────────────────────────────────────────────────────────────────
+template<std::size_t N>
+struct Dual {
+    double                value = 0.0;
+    std::array<double, N> d{};   ///< d[i] = ∂value/∂(argument i)
+
+    Dual() = default;
+    /// A constant, whose partials are all 0. Implicit, so that a double converts
+    /// wherever a Dual is wanted: `Dual<2> y = 1.0`, or a conditional with a
+    /// Dual on one side and a double on the other.
+    Dual(double v);   // NOLINT(google-explicit-constructor)
+
+    Dual& operator+=(const Dual& b);
+    Dual& operator-=(const Dual& b);
+    Dual& operator*=(const Dual& b);
+    Dual& operator/=(const Dual& b);
+};
+
+/// f(x), given f(x.value) and f′(x.value): the chain rule, for a function this
+/// header does not provide.
+template<std::size_t N> Dual<N> chain(const Dual<N>& x, double fx, double dfx);
+
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a);
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a);
+
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> operator+(double a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> operator-(double a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator*(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator*(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> operator*(double a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator/(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> operator/(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> operator/(double a, const Dual<N>& b);
+
+template<std::size_t N> bool operator==(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator==(const Dual<N>& a, double b);
+template<std::size_t N> bool operator==(double a, const Dual<N>& b);
+template<std::size_t N> bool operator!=(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator!=(const Dual<N>& a, double b);
+template<std::size_t N> bool operator!=(double a, const Dual<N>& b);
+template<std::size_t N> bool operator<(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator<(const Dual<N>& a, double b);
+template<std::size_t N> bool operator<(double a, const Dual<N>& b);
+template<std::size_t N> bool operator<=(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator<=(const Dual<N>& a, double b);
+template<std::size_t N> bool operator<=(double a, const Dual<N>& b);
+template<std::size_t N> bool operator>(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator>(const Dual<N>& a, double b);
+template<std::size_t N> bool operator>(double a, const Dual<N>& b);
+template<std::size_t N> bool operator>=(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> bool operator>=(const Dual<N>& a, double b);
+template<std::size_t N> bool operator>=(double a, const Dual<N>& b);
+
+template<std::size_t N> Dual<N> exp(const Dual<N>& x);
+template<std::size_t N> Dual<N> log(const Dual<N>& x);
+template<std::size_t N> Dual<N> sqrt(const Dual<N>& x);
+template<std::size_t N> Dual<N> sin(const Dual<N>& x);
+template<std::size_t N> Dual<N> cos(const Dual<N>& x);
+template<std::size_t N> Dual<N> tanh(const Dual<N>& x);
+template<std::size_t N> Dual<N> erf(const Dual<N>& x);
+template<std::size_t N> Dual<N> erfc(const Dual<N>& x);
+template<std::size_t N> Dual<N> abs(const Dual<N>& x);
+
+/// With ops::PowerNode's partials, including where a^b is flat.
+template<std::size_t N> Dual<N> pow(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> pow(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> pow(double a, const Dual<N>& b);
+
+template<std::size_t N> Dual<N> min(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> min(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> min(double a, const Dual<N>& b);
+template<std::size_t N> Dual<N> max(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> max(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> max(double a, const Dual<N>& b);
 
 } // namespace dag::aad
 

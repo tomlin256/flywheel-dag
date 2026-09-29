@@ -220,7 +220,11 @@ auto d1 = aad::DifferentiableNode<3>::make(
   has `exp`, `log`, `sqrt`, `pow`, `abs`, `min`, `max`, `sin`, `cos`, `tanh`, `erf` and `erfc`,
   found by argument-dependent lookup. A functor calls them unqualified after `using std::exp;`, so
   the same body compiles at `double` and at `Dual<N>`. `aad::chain(x, f(x.value), f′(x.value))`
-  lifts any other function whose derivative is known.
+  lifts any other function whose derivative is known. *As built:* a `double` operand is a constant
+  `Dual` whose partials are 0, and a partial times a derivative counts as 0 when either one is 0, as
+  in a tape's sweeps. So `pow(x, 3.0)` at x = −2 has derivative 12, although a^b·ln a is NaN there.
+  `÷`, `exp`, `log`, `sqrt` and `pow` take their partials from the ops' `Derivative<Op>`, so a
+  `Dual` and an op node agree to the bit, flat cases included.
 - **The functor must have no side effects.** It runs again, on duals, each time a tape records the
   node. A functor that mutates captured state would mutate it twice.
 - **Why a new node, and not another `ComputeNode::make()`.** `std::function` erases a generic
@@ -414,18 +418,21 @@ Tests: a new suite, `tests/test_aad_dual.cpp`.
 
 | Test | Asserts |
 |---|---|
-| `AadDual.ArithmeticFollowsTheSumProductAndQuotientRules` | `+ − × ÷` and unary minus, between duals and with a `double` on either side |
+| `AadDual.ArithmeticFollowsTheSumProductAndQuotientRules` | `+ − × ÷` and unary minus, between duals |
+| `AadDual.ADoubleIsAConstantOnEitherSide` | *Split out as built.* `+ − × ÷` with a `double` on either side, an `int`, the four compound assignments, and a `Dual` built from a `double` |
 | `AadDual.FunctionsMatchTheirDerivatives` | At three points, each function's value equals the `std::` one, and its partials equal the analytic derivative |
-| `AadDual.PowCoversEachMix` | `pow(Dual, Dual)`, `pow(Dual, double)` and `pow(double, Dual)`, with ∂/∂b = 0 at a = 0 and b > 0 |
+| `AadDual.PowCoversEachMix` | `pow(Dual, Dual)`, `pow(Dual, double)` and `pow(double, Dual)`, with ∂/∂b = 0 at a = 0 and b > 0, and ∂/∂a = 0 when b is 0 |
 | `AadDual.ComparisonsReadTheValue` | A functor that branches on `x < y` takes the same branch at `double` and at `Dual` |
 | `AadDual.ConventionsAtKinks` | abs′(0) is 0. `min` and `max` follow the argument they return, and the first one on a tie |
 | `AadDual.OneBodyCompilesAtBothTypes` | A generic lambda with `using std::exp;` gives the same value at `double` and at `Dual<3>`, and three partials that match central differences |
 | `AadDual.ChainLiftsAFunction` | The standard normal CDF, built with `chain()`, has the density as its derivative |
+| `AadDual.AZeroDerivativePropagatesNothing` | *Added as built.* `pow(x, 3.0)` at x = −2 gives 12, and x·√0 gives 0. A non-zero derivative through an infinite partial stays infinite |
 
 | Change made by hand, then reverted | Must fail |
 |---|---|
 | The quotient rule without the square in its denominator | `ArithmeticFollowsTheSumProductAndQuotientRules` |
-| Drop the a = 0 case from `pow` | `PowCoversEachMix` |
+| Drop the a = 0 case from `pow`. *As built,* it lives in `Derivative<PowOp<double>>`, which `pow` shares | `PowCoversEachMix` |
+| *Added as built.* Multiply a partial by a derivative even when one of them is 0 | `AZeroDerivativePropagatesNothing` |
 
 **Done when:** ctest is green (31 of 31), each hand-made change fails as stated, and CI is green on
 both legs.
@@ -532,7 +539,7 @@ Commits: `docs: add an example that checks a call's sensitivities both ways`,
 |---|---|---|
 | 1 — The contract, and partials | Done locally | ctest 28 / 28, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_partials` has 13 tests: the plan's 10 and three added as built. Writing `Derivative<PowOp<double>>` found a second flat case: at b = 0, b·a^(b−1) is NaN at a = 0, where a^0 is flat. The three hand-made changes each failed as stated. `product / x_i` gave NaN against 12 at (0, 3, 4). Without their flat cases, both `PowerNode` tests read NaN against 0. Pulling both branches ran the other branch's functor once and left it clean. Interleaved on this Mac, `chain` read 250.2–254.3 ns/cycle before and 250.4–254.3 after. CI run 36615115643 is green on both legs, at 28 / 28 with no compiler warnings |
 | 2 — The tape and the reverse sweep | Done locally | ctest 29 / 29, and `--invariants` is unchanged. `test_install` installs the new header and its `.inl` with no change to the install rules. `test_aad_reverse` has 19 tests: the plan's 17, with `AZeroAdjointPropagatesNothing` given a case that can fail, and two added as built. The four hand-made changes each failed as stated. Without the zero-adjoint skip, z·√x at 0 gave NaN against 0. Without the clean-root check, the tape evaluated the dirty root and threw nothing. Without the barrier check, the tests that expect `std::domain_error` got none. Checking every barrier on the tape made the clean root's sweep throw. One test was wrong as first written: it asked for ∂/∂y through an opaque `ComputeNode` in a test of "a pass evaluates nothing", and the tape rightly threw. CI run 36616058228 is green on both legs, at 29 / 29 with no compiler warnings |
-| 3 — The forward sweep | Done locally | ctest 30 / 30, and `--invariants` is unchanged. `test_aad_forward` has 10 tests: the plan's 7 and three added as built, and `test_aad_reverse` gains `AZeroPartialPropagatesNothing`, for 20. A probe found the two modes disagreeing where a partial of 0 meets an infinite rate: z·√x at z = 0 and x = 0 gave 0 in reverse and NaN forward, and √(z·x) at z = 0 and x = 4 the opposite. Both sweeps now skip a partial of 0 as well, and both cases give 0 in both modes. The three hand-made changes each failed as stated. Without the zero-tangent skip, ∂/∂a gave NaN against 12. A seed that replaced its node's tangent broke `ASeedOnAnIntermediateNodeAdds` alone. Skipping only a zero adjoint or tangent broke both `AZeroPartialPropagatesNothing` tests |
-| 4 — Dual numbers | Not started | |
+| 3 — The forward sweep | Done locally | ctest 30 / 30, and `--invariants` is unchanged. `test_aad_forward` has 10 tests: the plan's 7 and three added as built, and `test_aad_reverse` gains `AZeroPartialPropagatesNothing`, for 20. A probe found the two modes disagreeing where a partial of 0 meets an infinite rate: z·√x at z = 0 and x = 0 gave 0 in reverse and NaN forward, and √(z·x) at z = 0 and x = 4 the opposite. Both sweeps now skip a partial of 0 as well, and both cases give 0 in both modes. The three hand-made changes each failed as stated. Without the zero-tangent skip, ∂/∂a gave NaN against 12. A seed that replaced its node's tangent broke `ASeedOnAnIntermediateNodeAdds` alone. Skipping only a zero adjoint or tangent broke both `AZeroPartialPropagatesNothing` tests. CI run 36617046092 is green on both legs, at 30 / 30 with no compiler warnings |
+| 4 — Dual numbers | Done locally | ctest 31 / 31, and `--invariants` is unchanged. `test_aad_dual` has 9 tests: the plan's 7, one split out of the first and one added as built. A `Dual` follows the tape's zero rule, and takes its quotient, `exp`, `log`, `sqrt` and `pow` partials from the ops' `Derivative<Op>`, so the two cannot drift apart. The three hand-made changes each failed as stated. The quotient without its square also broke the tests that divide by a `double` and the central-difference check. Dropping `pow`'s flat case at a = 0 broke `PowCoversEachMix` alone. Multiplying through a zero broke `AZeroDerivativePropagatesNothing`, and `PowCoversEachMix` too: at a = 0 and b = 0, ∂/∂b is −∞, and b's derivative with respect to a is 0 |
 | 5 — `aad::DifferentiableNode<N>` | Not started | |
 | 6 — Example, docs and release | Not started | |

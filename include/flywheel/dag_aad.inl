@@ -240,4 +240,162 @@ inline std::vector<double> tangents(const std::vector<NodePtr>& roots,
     return Tape(roots).tangents(seeds);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dual<N>
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace detail {
+
+/// A partial times a derivative, as 0 when either one is 0. A tape's sweeps
+/// keep the same rule.
+inline double times(double partial, double d) {
+    return (partial == 0.0 || d == 0.0) ? 0.0 : partial * d;
+}
+
+/// The value v of f(a, b), whose partials are pa and pb.
+template<std::size_t N>
+Dual<N> combine(double v, double pa, const Dual<N>& a, double pb, const Dual<N>& b) {
+    Dual<N> r(v);
+    for (std::size_t i = 0; i < N; ++i) r.d[i] = times(pa, a.d[i]) + times(pb, b.d[i]);
+    return r;
+}
+
+/// 2/√π, the constant in erf′ and erfc′.
+inline constexpr double kTwoOverRootPi = 1.1283791670955126;
+
+} // namespace detail
+
+template<std::size_t N>
+Dual<N>::Dual(double v) : value(v) {}
+
+template<std::size_t N>
+Dual<N>& Dual<N>::operator+=(const Dual& b) { return *this = *this + b; }
+
+template<std::size_t N>
+Dual<N>& Dual<N>::operator-=(const Dual& b) { return *this = *this - b; }
+
+template<std::size_t N>
+Dual<N>& Dual<N>::operator*=(const Dual& b) { return *this = *this * b; }
+
+template<std::size_t N>
+Dual<N>& Dual<N>::operator/=(const Dual& b) { return *this = *this / b; }
+
+template<std::size_t N>
+Dual<N> chain(const Dual<N>& x, double fx, double dfx) {
+    Dual<N> r(fx);
+    for (std::size_t i = 0; i < N; ++i) r.d[i] = detail::times(dfx, x.d[i]);
+    return r;
+}
+
+// ── Arithmetic ──────────────────────────────────────────────────────────────
+//
+// A double operand is a constant: it converts to a Dual whose d is 0, which
+// the zero rule then passes over.
+
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a) { return a; }
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a) { return chain(a, -a.value, -1.0); }
+
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a, const Dual<N>& b) {
+    return detail::combine(a.value + b.value, 1.0, a, 1.0, b);
+}
+template<std::size_t N> Dual<N> operator+(const Dual<N>& a, double b) { return a + Dual<N>(b); }
+template<std::size_t N> Dual<N> operator+(double a, const Dual<N>& b) { return Dual<N>(a) + b; }
+
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a, const Dual<N>& b) {
+    return detail::combine(a.value - b.value, 1.0, a, -1.0, b);
+}
+template<std::size_t N> Dual<N> operator-(const Dual<N>& a, double b) { return a - Dual<N>(b); }
+template<std::size_t N> Dual<N> operator-(double a, const Dual<N>& b) { return Dual<N>(a) - b; }
+
+template<std::size_t N> Dual<N> operator*(const Dual<N>& a, const Dual<N>& b) {
+    return detail::combine(a.value * b.value, b.value, a, a.value, b);
+}
+template<std::size_t N> Dual<N> operator*(const Dual<N>& a, double b) { return a * Dual<N>(b); }
+template<std::size_t N> Dual<N> operator*(double a, const Dual<N>& b) { return Dual<N>(a) * b; }
+
+// The quotient's partials are DivideNode's: 1/b and −a/b², the second as
+// −(a/b)/b.
+template<std::size_t N> Dual<N> operator/(const Dual<N>& a, const Dual<N>& b) {
+    const auto [pa, pb] = ops::Derivative<std::divides<double>>::d(a.value, b.value);
+    return detail::combine(a.value / b.value, pa, a, pb, b);
+}
+template<std::size_t N> Dual<N> operator/(const Dual<N>& a, double b) { return a / Dual<N>(b); }
+template<std::size_t N> Dual<N> operator/(double a, const Dual<N>& b) { return Dual<N>(a) / b; }
+
+// ── Comparisons, on the value alone ─────────────────────────────────────────
+
+template<std::size_t N> bool operator==(const Dual<N>& a, const Dual<N>& b) { return a.value == b.value; }
+template<std::size_t N> bool operator==(const Dual<N>& a, double b) { return a.value == b; }
+template<std::size_t N> bool operator==(double a, const Dual<N>& b) { return a == b.value; }
+template<std::size_t N> bool operator!=(const Dual<N>& a, const Dual<N>& b) { return a.value != b.value; }
+template<std::size_t N> bool operator!=(const Dual<N>& a, double b) { return a.value != b; }
+template<std::size_t N> bool operator!=(double a, const Dual<N>& b) { return a != b.value; }
+template<std::size_t N> bool operator<(const Dual<N>& a, const Dual<N>& b) { return a.value < b.value; }
+template<std::size_t N> bool operator<(const Dual<N>& a, double b) { return a.value < b; }
+template<std::size_t N> bool operator<(double a, const Dual<N>& b) { return a < b.value; }
+template<std::size_t N> bool operator<=(const Dual<N>& a, const Dual<N>& b) { return a.value <= b.value; }
+template<std::size_t N> bool operator<=(const Dual<N>& a, double b) { return a.value <= b; }
+template<std::size_t N> bool operator<=(double a, const Dual<N>& b) { return a <= b.value; }
+template<std::size_t N> bool operator>(const Dual<N>& a, const Dual<N>& b) { return a.value > b.value; }
+template<std::size_t N> bool operator>(const Dual<N>& a, double b) { return a.value > b; }
+template<std::size_t N> bool operator>(double a, const Dual<N>& b) { return a > b.value; }
+template<std::size_t N> bool operator>=(const Dual<N>& a, const Dual<N>& b) { return a.value >= b.value; }
+template<std::size_t N> bool operator>=(const Dual<N>& a, double b) { return a.value >= b; }
+template<std::size_t N> bool operator>=(double a, const Dual<N>& b) { return a >= b.value; }
+
+// ── Functions ───────────────────────────────────────────────────────────────
+//
+// exp, log and sqrt take their partials from the ops' Derivative<Op>, so a
+// Dual and an op node agree to the bit.
+
+template<std::size_t N> Dual<N> exp(const Dual<N>& x) {
+    return chain(x, std::exp(x.value), ops::Derivative<ops::ExpOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> log(const Dual<N>& x) {
+    return chain(x, std::log(x.value), ops::Derivative<ops::LnOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> sqrt(const Dual<N>& x) {
+    return chain(x, std::sqrt(x.value), ops::Derivative<ops::SqrtOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> sin(const Dual<N>& x) {
+    return chain(x, std::sin(x.value), std::cos(x.value));
+}
+template<std::size_t N> Dual<N> cos(const Dual<N>& x) {
+    return chain(x, std::cos(x.value), -std::sin(x.value));
+}
+template<std::size_t N> Dual<N> tanh(const Dual<N>& x) {
+    const double t = std::tanh(x.value);
+    return chain(x, t, 1.0 - t * t);
+}
+template<std::size_t N> Dual<N> erf(const Dual<N>& x) {
+    return chain(x, std::erf(x.value), detail::kTwoOverRootPi * std::exp(-x.value * x.value));
+}
+template<std::size_t N> Dual<N> erfc(const Dual<N>& x) {
+    return chain(x, std::erfc(x.value), -detail::kTwoOverRootPi * std::exp(-x.value * x.value));
+}
+// abs′(0) is 0: the midpoint of the two one-sided slopes.
+template<std::size_t N> Dual<N> abs(const Dual<N>& x) {
+    const double slope = x.value > 0.0 ? 1.0 : (x.value < 0.0 ? -1.0 : 0.0);
+    return chain(x, std::abs(x.value), slope);
+}
+
+template<std::size_t N> Dual<N> pow(const Dual<N>& a, const Dual<N>& b) {
+    const auto [pa, pb] = ops::Derivative<ops::PowOp<double>>::d(a.value, b.value);
+    return detail::combine(std::pow(a.value, b.value), pa, a, pb, b);
+}
+template<std::size_t N> Dual<N> pow(const Dual<N>& a, double b) { return pow(a, Dual<N>(b)); }
+template<std::size_t N> Dual<N> pow(double a, const Dual<N>& b) { return pow(Dual<N>(a), b); }
+
+// As std::min and std::max: the first argument on a tie.
+template<std::size_t N> Dual<N> min(const Dual<N>& a, const Dual<N>& b) {
+    return b.value < a.value ? b : a;
+}
+template<std::size_t N> Dual<N> min(const Dual<N>& a, double b) { return min(a, Dual<N>(b)); }
+template<std::size_t N> Dual<N> min(double a, const Dual<N>& b) { return min(Dual<N>(a), b); }
+template<std::size_t N> Dual<N> max(const Dual<N>& a, const Dual<N>& b) {
+    return a.value < b.value ? b : a;
+}
+template<std::size_t N> Dual<N> max(const Dual<N>& a, double b) { return max(a, Dual<N>(b)); }
+template<std::size_t N> Dual<N> max(double a, const Dual<N>& b) { return max(Dual<N>(a), b); }
+
 } // namespace dag::aad
