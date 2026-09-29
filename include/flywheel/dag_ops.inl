@@ -65,6 +65,19 @@ std::string UnaryOpNode<T,Op>::name() const { return name_; }
 template<typename T, typename Op>
 std::vector<NodePtr> UnaryOpNode<T,Op>::inputs() const { return {a_}; }
 
+// A pass asks only a clean node, so the pull returns a's cached value.
+template<typename T, typename Op>
+bool UnaryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
+                                 [[maybe_unused]] aad::Partials& out) {
+    if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+        const ValuePtr av = a_->eval(ctx);
+        out.add(0, Derivative<Op>::d(get_value<double>(av)));
+        return true;
+    } else {
+        return false;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BinaryOpNode<T, Op>
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +115,23 @@ std::string BinaryOpNode<T,Op>::name() const { return name_; }
 
 template<typename T, typename Op>
 std::vector<NodePtr> BinaryOpNode<T,Op>::inputs() const { return {a_, b_}; }
+
+// When a and b are one node, as in x − x, the two entries name the same node,
+// and a pass adds them up.
+template<typename T, typename Op>
+bool BinaryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
+                                  [[maybe_unused]] aad::Partials& out) {
+    if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+        const ValuePtr av = a_->eval(ctx);
+        const ValuePtr bv = b_->eval(ctx);
+        const auto [da, db] = Derivative<Op>::d(get_value<double>(av), get_value<double>(bv));
+        out.add(0, da);
+        out.add(1, db);
+        return true;
+    } else {
+        return false;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NAryOpNode<T, Op>
@@ -155,5 +185,79 @@ std::string NAryOpNode<T,Op>::name() const { return name_; }
 
 template<typename T, typename Op>
 std::vector<NodePtr> NAryOpNode<T,Op>::inputs() const { return inputs_; }
+
+// The values are copied out, because a product's partials need all of them at
+// once. Allocating here is fine: a pass is not on the cycle path.
+template<typename T, typename Op>
+bool NAryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
+                                [[maybe_unused]] aad::Partials& out) {
+    if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+        std::vector<double> x;
+        x.reserve(inputs_.size());
+        for (auto& in : inputs_) x.push_back(get_value<double>(in->eval(ctx)));
+        std::vector<double> dx(x.size());
+        Derivative<Op>::d(x, dx);
+        for (std::size_t i = 0; i < dx.size(); ++i) out.add(i, dx[i]);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Derivative<Op>
+//
+// Full specialisations are ordinary classes, so their members defined here are
+// inline, like any non-template function in a header.
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline void Derivative<PlusOp<double>>::d(const std::vector<double>&,
+                                          std::vector<double>& dx) {
+    for (double& v : dx) v = 1.0;
+}
+
+// dx[i] is first the product of the factors before i, then times the product
+// of those after it. No factor is ever divided out, so a zero factor is exact:
+// (0, 3, 4) gives (12, 0, 0).
+inline void Derivative<MultipliesOp<double>>::d(const std::vector<double>& x,
+                                                std::vector<double>& dx) {
+    double before = 1.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        dx[i] = before;
+        before *= x[i];
+    }
+    double after = 1.0;
+    for (std::size_t i = x.size(); i-- > 0;) {
+        dx[i] *= after;
+        after *= x[i];
+    }
+}
+
+inline std::pair<double, double> Derivative<std::minus<double>>::d(double, double) {
+    return {1.0, -1.0};
+}
+
+// −a/b² as −(a/b)/b, which does not overflow or underflow in b² first.
+inline std::pair<double, double> Derivative<std::divides<double>>::d(double a, double b) {
+    const double q = a / b;
+    return {1.0 / b, -q / b};
+}
+
+inline double Derivative<std::negate<double>>::d(double) { return -1.0; }
+
+inline double Derivative<ExpOp<double>>::d(double a) { return std::exp(a); }
+
+inline double Derivative<LnOp<double>>::d(double a) { return 1.0 / a; }
+
+// a^b is flat in a when b is 0: a^0 is 1 for every a. It is flat in b at a = 0
+// with b > 0: 0^b is 0 there. At a = 0 the formulas give 0·∞, a NaN, for both.
+// Elsewhere a NaN is the true answer, as for ∂/∂b at a < 0, and is kept.
+inline std::pair<double, double> Derivative<PowOp<double>>::d(double a, double b) {
+    const double da = (b == 0.0) ? 0.0 : b * std::pow(a, b - 1.0);
+    const double db = (a == 0.0 && b > 0.0) ? 0.0 : std::pow(a, b) * std::log(a);
+    return {da, db};
+}
+
+inline double Derivative<SqrtOp<double>>::d(double a) { return 0.5 / std::sqrt(a); }
 
 } // namespace dag::ops

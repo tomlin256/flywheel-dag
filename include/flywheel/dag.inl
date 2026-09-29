@@ -371,6 +371,20 @@ std::vector<NodePtr> InPlaceComputeNode<Out, Ins...>::collectInputs(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// aad::Partials
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline void aad::Partials::add(std::size_t input, double d) {
+    entries_.push_back({input, d});
+}
+
+inline const std::vector<aad::Partials::Entry>& aad::Partials::entries() const noexcept {
+    return entries_;
+}
+
+inline void aad::Partials::clear() noexcept { entries_.clear(); }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TweakableComputeNode<Out, Ins...>
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -490,6 +504,15 @@ std::optional<Out> TweakableComputeNode<Out, Ins...>::tweakValue() const {
     return get_value<Out>(cached_);
 }
 
+// A frozen value depends on no input, so it names none, and a pass stops here
+// without reading the inputs the freeze is ignoring. Those inputs can be dirty:
+// propagate() absorbs their invalidations while frozen. Untweaked, the functor
+// is opaque, so the node cannot say and is a barrier.
+template<typename Out, typename... Ins>
+bool TweakableComputeNode<Out, Ins...>::partials(EvalContext&, aad::Partials&) {
+    return tweaked_;
+}
+
 template<typename Out, typename... Ins>
 TweakableComputeNode<Out, Ins...>::TweakableComputeNode(
     std::string name, InputTuple ins, Fn fn,
@@ -564,6 +587,18 @@ inline std::string ConditionNode::name() const { return name_; }
 
 inline std::vector<NodePtr> ConditionNode::inputs() const {
     return { condition_, trueBranch_, falseBranch_ };
+}
+
+// The derivative of a selection is the derivative of the branch it took. The
+// condition is a bool, so it has no partial, and the other branch gets no entry,
+// so a pass never reads it. That is the property eval() keeps: an untaken branch
+// may be stale, and reading it would evaluate it. The condition is pulled only
+// to learn which branch was taken. The node is clean when a pass asks, so the
+// pull returns the value its last eval() chose by.
+inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
+    const bool cond = get_value<bool>(condition_->eval(ctx));
+    out.add(cond ? 1 : 2, 1.0);
+    return true;
 }
 
 // Lazy, fixed in the class: this is pure selection over three inputs, with no

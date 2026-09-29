@@ -635,6 +635,67 @@ private:
 template<typename Out, typename... Ins>
 using InPlaceComputeNodePtr = std::shared_ptr<InPlaceComputeNode<Out, Ins...>>;
 
+namespace aad {
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Partials — what IDifferentiable::partials() writes.
+//
+// One entry per input that the node's value depends on at the current point:
+// the input's position in inputs(), and ∂value/∂input. An input the value does
+// not depend on here gets no entry. That absence is what keeps a pass away from
+// the branch a ConditionNode did not take, and from the inputs of a tweaked
+// node: a pass follows only the inputs a node names.
+//
+// A node may name one input twice, as a DiffNode of x and x does. The entries
+// add up.
+// ─────────────────────────────────────────────────────────────────────────────
+class Partials {
+public:
+    struct Entry {
+        std::size_t input;   ///< position in the node's inputs()
+        double      d;       ///< ∂value/∂inputs()[input]
+    };
+
+    void add(std::size_t input, double d);
+    const std::vector<Entry>& entries() const noexcept;
+    /// Empties the list and keeps its capacity, so a pass reuses one Partials
+    /// for every node it asks.
+    void clear() noexcept;
+
+private:
+    std::vector<Entry> entries_;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDifferentiable — a node that can say how its value moves with its inputs.
+//
+// A mixin, like ITweakable and IStatefulNode. A pass finds it with
+// dynamic_cast, as Engine::discoverStatefulNodes() finds IStatefulNode, so
+// INode and NodeBase do not change, and neither does any node that does not
+// implement it. A node with inputs that does not implement it is a barrier: a
+// pass cannot follow its inputs.
+//
+// partials() writes the node's local partial derivatives at its inputs'
+// CURRENT values. It pulls its inputs with eval(ctx), as eval() does. A pass
+// calls it only on a clean node, whose inputs are then clean too, so every pull
+// returns a cached value and nothing is evaluated.
+//
+// The partials come from the inputs alone, never from the node's own published
+// value. Under a tolerance policy the two can differ, because the published
+// value is the last one the policy let through.
+//
+// Returns false when the node cannot say, which makes it a barrier. An op over
+// a type other than double returns false, and so does an untweaked
+// TweakableComputeNode, whose functor is opaque.
+// ─────────────────────────────────────────────────────────────────────────────
+class IDifferentiable {
+public:
+    virtual ~IDifferentiable() = default;
+    virtual bool partials(EvalContext& ctx, Partials& out) = 0;
+};
+
+} // namespace aad
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ITweakable — interface for nodes that support value freezing.
 //
@@ -702,6 +763,7 @@ template<typename Out, typename... Ins>
 class TweakableComputeNode
     : public NodeBase
     , public ITweakable<Out>
+    , public aad::IDifferentiable
     , public std::enable_shared_from_this<TweakableComputeNode<Out, Ins...>>
 {
 public:
@@ -728,6 +790,11 @@ public:
     void clearTweak() override;
     bool isTweaked() const override;
     std::optional<Out> tweakValue() const override;
+
+    // ── aad::IDifferentiable ─────────────────────────────────────────────────
+    /// While tweaked, true with no partials: the frozen value is a constant.
+    /// Otherwise false: the functor is opaque.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
 private:
     TweakableComputeNode(std::string name, InputTuple ins, Fn fn,
@@ -757,7 +824,11 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // ConditionNode — selects between two branches at runtime.
 // ─────────────────────────────────────────────────────────────────────────────
-class ConditionNode : public NodeBase, public std::enable_shared_from_this<ConditionNode> {
+class ConditionNode
+    : public NodeBase
+    , public aad::IDifferentiable
+    , public std::enable_shared_from_this<ConditionNode>
+{
 public:
     static std::shared_ptr<ConditionNode> make(
         std::string name, NodePtr condition, NodePtr trueBranch, NodePtr falseBranch,
@@ -767,6 +838,10 @@ public:
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
     NodeKind kind() const override { return NodeKind::Compute; }
+
+    /// 1 for the branch the condition selects. Never names the condition or the
+    /// other branch, so a pass never reads the branch eval() did not take.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
 private:
     ConditionNode(std::string name, NodePtr cond, NodePtr tb, NodePtr fb,

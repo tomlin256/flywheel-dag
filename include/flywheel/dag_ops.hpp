@@ -12,9 +12,10 @@
 //
 // Each op below is its own concrete C++ type — not a generic ComputeNode
 // wrapping an opaque lambda — so that inputs() plus the op's identity are
-// enough for a future pass (e.g. reverse-mode AAD) to attach a closed-form
-// local derivative without redesigning these primitives. This file builds
-// forward evaluation only: no tape, no backward pass.
+// enough for a pass (e.g. reverse-mode AAD) to attach a closed-form local
+// derivative without redesigning these primitives. Each op supplies it through
+// aad::IDifferentiable (dag.hpp), from Derivative<Op> below. This file only
+// evaluates and supplies partials: it records no tape and runs no sweep.
 //
 // Every op below is a `using` alias over one of three arity-generic
 // templates (UnaryOpNode / BinaryOpNode / NAryOpNode<T, Op>), parameterized
@@ -51,9 +52,17 @@ namespace dag::ops {
 // collision if a file ever has both `dag::ts` and `dag::ops` open. Reports
 // NodeKind::Compute — these are pure functions of their inputs, same bucket
 // as ComputeNode/ConditionNode, not a new kind.
+//
+// Every op is an aad::IDifferentiable. Each arity template implements
+// partials() from Derivative<Op>, and returns false for an op over a type
+// other than double or an Op with no specialisation.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Derived>
-class OpNodeImpl : public NodeBase, public std::enable_shared_from_this<Derived> {
+class OpNodeImpl
+    : public NodeBase
+    , public aad::IDifferentiable
+    , public std::enable_shared_from_this<Derived>
+{
 public:
     NodeKind kind() const override { return NodeKind::Compute; }
 
@@ -89,6 +98,7 @@ public:
     ValuePtr eval(EvalContext& ctx) override;
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
 private:
     UnaryOpNode(std::string name, NodePtr a, EqualityPolicyPtr eq);
@@ -112,6 +122,7 @@ public:
     ValuePtr eval(EvalContext& ctx) override;
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
 private:
     BinaryOpNode(std::string name, NodePtr a, NodePtr b, EqualityPolicyPtr eq);
@@ -139,6 +150,7 @@ public:
     ValuePtr eval(EvalContext& ctx) override;
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
 private:
     NAryOpNode(std::string name, std::vector<NodePtr> ins, EqualityPolicyPtr eq);
@@ -189,6 +201,97 @@ struct PowOp {
 template<typename T>
 struct SqrtOp {
     T operator()(const T& a) const { return std::sqrt(a); }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Derivative<Op> — an Op's local partial derivatives, specialised per Op.
+//
+// This is what the ops being their own types buys (see the top of this file).
+// A pass asks a node for its partials, and the node asks this trait for its
+// Op's. The primary template has none, so an op whose Op has no specialisation
+// is a barrier to a pass. An application's own Op joins by specialising it.
+//
+// Only double has partials. A pass needs a double root, so an op over another
+// type could reach one only through a conversion node, which is a barrier
+// anyway. A specialisation sets `defined`, and provides the function for the
+// arity its Op is used at:
+//
+//   unary   static double d(double a);
+//   binary  static std::pair<double, double> d(double a, double b);
+//   n-ary   static void d(const std::vector<double>& x, std::vector<double>& dx);
+//           dx arrives sized like x, and receives ∂/∂x[i] in dx[i].
+//
+// Where a formula would divide zero by zero, or multiply zero by infinity, at a
+// point where the function is in fact flat, the partial is the exact 0. See
+// MultipliesOp and PowOp.
+// ─────────────────────────────────────────────────────────────────────────────
+template<typename Op>
+struct Derivative {
+    static constexpr bool defined = false;
+};
+
+/// 1 for each input.
+template<>
+struct Derivative<PlusOp<double>> {
+    static constexpr bool defined = true;
+    static void d(const std::vector<double>& x, std::vector<double>& dx);
+};
+
+/// The product of the other factors, from prefix and suffix products. Not
+/// product / x[i], which is 0/0 when x[i] is 0.
+template<>
+struct Derivative<MultipliesOp<double>> {
+    static constexpr bool defined = true;
+    static void d(const std::vector<double>& x, std::vector<double>& dx);
+};
+
+/// 1 and −1.
+template<>
+struct Derivative<std::minus<double>> {
+    static constexpr bool defined = true;
+    static std::pair<double, double> d(double a, double b);
+};
+
+/// 1/b and −a/b².
+template<>
+struct Derivative<std::divides<double>> {
+    static constexpr bool defined = true;
+    static std::pair<double, double> d(double a, double b);
+};
+
+/// −1.
+template<>
+struct Derivative<std::negate<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// exp(a).
+template<>
+struct Derivative<ExpOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// 1/a.
+template<>
+struct Derivative<LnOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
+};
+
+/// b·a^(b−1), or 0 when b is 0. a^b·ln a, or 0 at a = 0 with b > 0.
+template<>
+struct Derivative<PowOp<double>> {
+    static constexpr bool defined = true;
+    static std::pair<double, double> d(double a, double b);
+};
+
+/// 1/(2·√a).
+template<>
+struct Derivative<SqrtOp<double>> {
+    static constexpr bool defined = true;
+    static double d(double a);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

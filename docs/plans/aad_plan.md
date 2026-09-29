@@ -85,7 +85,7 @@ The declarations go in `dag.hpp`, beside `ITweakable`, because `ConditionNode` a
 | `NegateNode` | −1 |
 | `ExpNode` | exp(a) |
 | `LnNode` | 1/a |
-| `PowerNode` | b·a^(b−1); a^b·ln a, except 0 at a = 0 with b > 0 |
+| `PowerNode` | b·a^(b−1), or 0 when b = 0. a^b·ln a, or 0 at a = 0 with b > 0 |
 | `SqrtNode` | 1/(2·√a) |
 | `ConditionNode` | 1 for the branch it took. Nothing for the condition or for the other branch |
 | `TweakableComputeNode` | While tweaked, none: its value is a constant. Otherwise `false`: its functor is opaque |
@@ -96,7 +96,8 @@ Three points differ from what `CLAUDE.md` says today:
 - **`ProductNode`.** `product / x_i` is 0/0 when `x_i` is 0. The product of the other factors is
   exact.
 - **`PowerNode`.** At a = 0 with b > 0, a^b·ln a is 0·(−∞), which is NaN. But a^b is flat in b
-  there, so the partial is 0.
+  there, so the partial is 0. *As built:* the same holds for ∂/∂a when b is 0. There b·a^(b−1) is
+  0·∞ at a = 0, but a^0 is 1 for every a, so that partial is 0 too.
 - **Only `T = double` has partials.** An op over another type returns `false`. A pass needs a
   `double` root, so such an op could reach one only through a conversion node, which is a barrier
   anyway.
@@ -305,8 +306,11 @@ Tests: a new suite, `tests/test_aad_partials.cpp`.
 | `AadPartials.OpsMatchCentralDifferences` | Each op's partials are within 1e-6 relative of a central difference |
 | `AadPartials.ProductIsExactWithZeroFactors` | (0, 3, 4) gives (12, 0, 0), and (0, 0, 4) gives (0, 0, 0) |
 | `AadPartials.PowerIsFlatInTheExponentAtZero` | a = 0 and b = 2 give ∂/∂b = 0 |
+| `AadPartials.PowerIsFlatInTheBaseWhenTheExponentIsZero` | *Added as built.* b = 0 gives ∂/∂a = 0, at a = 0 and at a = −2 |
+| `AadPartials.PowerKeepsATrueNaN` | *Added as built.* a = −2 and b = 3 give ∂/∂a = 12, and a NaN for ∂/∂b |
 | `AadPartials.OnlyDoubleOpsHavePartials` | `SumNode<int>` and `ExpNode<float>` return `false` |
 | `AadPartials.AnApplicationOpCanSpecialiseDerivative` | A test-local `Op` with a `Derivative` specialisation reports it. One without returns `false` |
+| `AadPartials.AnInputNamedTwiceGetsTwoEntries` | *Added as built.* A `DiffNode` of x and x names x twice, and the two entries add up to 0 |
 | `AadPartials.ConditionNamesOnlyTheTakenBranch` | Input 1 when the condition is true and input 2 when it is false, with partial 1. Never input 0 |
 | `AadPartials.ConditionNeverReadsTheOtherBranch` | A counting `ComputeNode` on the untaken branch stays dirty, and its count does not move |
 | `AadPartials.ATweakedNodeIsAConstant` | Tweaked: `true` with no entries. Cleared: `false` |
@@ -315,7 +319,7 @@ Tests: a new suite, `tests/test_aad_partials.cpp`.
 | Change made by hand, then reverted | Must fail |
 |---|---|
 | `ProductNode`'s partial as `product / x_i` | `ProductIsExactWithZeroFactors` |
-| Drop the a = 0 case from `PowerNode` | `PowerIsFlatInTheExponentAtZero` |
+| Drop both flat cases from `PowerNode` | `PowerIsFlatInTheExponentAtZero` and `PowerIsFlatInTheBaseWhenTheExponentIsZero` |
 | `ConditionNode::partials()` pulls both branches | `ConditionNeverReadsTheOtherBranch` |
 
 **Done when:** ctest is green (28 of 28), `--invariants` matches, each hand-made change fails as
@@ -455,7 +459,8 @@ Commit: `feat: a compute node differentiated through dual numbers`.
   `DifferentiableNode` functor with no side effects. The ops section drops "No tape or backward pass
   exists yet", and gives the `ProductNode` and `PowerNode` partials as built. `NodeBase`'s list of
   derived classes gains `DifferentiableNode`.
-- `dag_ops.hpp`'s header comment no longer says "forward evaluation only".
+- `dag_ops.hpp`'s header comment no longer says "forward evaluation only". *As built:* Step 1
+  changed it, when the ops gained their partials.
 - Release v0.1.6 as v0.1.5 was released: the project version and the FetchContent snippets in
   `CMakeLists.txt` and the README, the tag, and a GitHub release with notes.
 - Open the follow-up issues from "Not in this plan", mark this plan done, and close flywheel-dag#10
@@ -512,7 +517,7 @@ Commits: `docs: add an example that checks a call's sensitivities both ways`,
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — The contract, and partials | Not started | |
+| 1 — The contract, and partials | Done locally | ctest 28 / 28, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_partials` has 13 tests: the plan's 10 and three added as built. Writing `Derivative<PowOp<double>>` found a second flat case: at b = 0, b·a^(b−1) is NaN at a = 0, where a^0 is flat. The three hand-made changes each failed as stated. `product / x_i` gave NaN against 12 at (0, 3, 4). Without their flat cases, both `PowerNode` tests read NaN against 0. Pulling both branches ran the other branch's functor once and left it clean. Interleaved on this Mac, `chain` read 250.2–254.3 ns/cycle before and 250.4–254.3 after |
 | 2 — The tape and the reverse sweep | Not started | |
 | 3 — The forward sweep | Not started | |
 | 4 — Dual numbers | Not started | |
