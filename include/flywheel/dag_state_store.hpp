@@ -211,8 +211,10 @@ private:
 // =============================================================================
 class JsonFileStateStore : public IStateStore {
 public:
-    /// file — full path to the snapshot file (e.g. "state/graph_state.json").
-    /// The parent directory is created on first save if it does not exist.
+    /// file — path to the snapshot file (e.g. "state/graph_state.json"). A
+    /// relative path is taken from the working directory. The parent directory
+    /// is created on first save if it does not exist. A bare filename has no
+    /// parent directory, so it is written straight into the working directory.
     explicit JsonFileStateStore(std::filesystem::path file);
 
     void save(const std::vector<std::shared_ptr<IStatefulNode>>& nodes) override;

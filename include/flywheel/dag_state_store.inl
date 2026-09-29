@@ -288,7 +288,10 @@ inline void JsonFileStateStore::save(
     envelope["nodes"] = std::move(nodesJson);
 
     // ── Atomic write (temp → rename) ───────────────────────────────────────────
-    std::filesystem::create_directories(file_.parent_path());
+    // A bare filename has no parent to create, and create_directories("")
+    // throws (flywheel-dag#9).
+    if (file_.has_parent_path())
+        std::filesystem::create_directories(file_.parent_path());
     auto tmp = file_;
     tmp += ".tmp";
     {

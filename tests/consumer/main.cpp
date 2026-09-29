@@ -37,8 +37,7 @@ int main(int /*argc*/, char* argv[]) {
     const double second = get_value<double>(sum->eval(ctx));
 
     // The snapshot goes beside the executable, so consumers built in different
-    // directories never share one. The path is absolute: a bare filename trips
-    // flywheel-dag#9.
+    // directories never share one, whatever directory ctest runs them from.
     const std::filesystem::path snapshot =
         std::filesystem::absolute(argv[0]).parent_path() / "consumer_state.json";
 

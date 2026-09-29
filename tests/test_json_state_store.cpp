@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <system_error>
 
 using namespace dag;
 using namespace dag::ts;
@@ -35,6 +36,26 @@ public:
     std::filesystem::path file(const std::string& name) const { return dir_ / name; }
 private:
     std::filesystem::path dir_;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: switch the working directory for one test, and switch back.
+// Declare it after the TempDir it enters, so it leaves before that is removed.
+// ─────────────────────────────────────────────────────────────────────────────
+class WorkingDirectory {
+public:
+    explicit WorkingDirectory(const std::filesystem::path& dir)
+        : previous_(std::filesystem::current_path()) {
+        std::filesystem::current_path(dir);
+    }
+    ~WorkingDirectory() {
+        std::error_code ec;   // a destructor must not throw
+        std::filesystem::current_path(previous_, ec);
+    }
+    WorkingDirectory(const WorkingDirectory&)            = delete;
+    WorkingDirectory& operator=(const WorkingDirectory&) = delete;
+private:
+    std::filesystem::path previous_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,6 +260,29 @@ TEST(JsonStoreTests, CreatesParentDirectory) {
     JsonFileStateStore store(snapFile);
     EXPECT_NO_THROW(store.save({ewma}));
     EXPECT_TRUE(std::filesystem::exists(snapFile));
+}
+
+TEST(JsonStoreTests, BareFilenameSaveRestoreRoundTrip) {
+    // A bare filename has no parent directory to create, and
+    // create_directories("") throws (flywheel-dag#9). The snapshot goes to the
+    // working directory.
+    TempDir tmp;
+    WorkingDirectory cwd(tmp.path());
+
+    auto [inp, ewma] = makeWarmEwma("ewma", 0.5, {10.0, 20.0});
+    JsonFileStateStore store("snap.json");
+    ASSERT_NO_THROW(store.save({ewma}));
+    EXPECT_TRUE(std::filesystem::exists(tmp.file("snap.json")));
+
+    auto inp2  = Input<double>::make("ewma_inp2", 0.0);
+    auto ewma2 = EWMANode::make("ewma", inp2, 0.5);
+    EXPECT_TRUE(store.restore({ewma2}));
+
+    EvalContext ctx;
+    inp->set(30.0);  ewma->eval(ctx);
+    inp2->set(30.0); ewma2->eval(ctx);
+    EXPECT_NEAR(get_value<double>(ewma->eval(ctx)),
+                get_value<double>(ewma2->eval(ctx)), 1e-9);
 }
 
 TEST(JsonStoreTests, RollingStatsSaveRestoreRoundTrip) {
