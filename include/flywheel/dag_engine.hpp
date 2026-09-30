@@ -216,6 +216,8 @@ public:
 
     /// Block and run until stop() is called.
     /// Must be called from exactly one thread.
+    /// An exception from a node's eval() or an output callback ends the run and leaves through
+    /// run(), which can then be called again (flywheel-dag#16).
     void run();
 
     /// Signal the engine to stop after the current cycle finishes.

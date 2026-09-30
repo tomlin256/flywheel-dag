@@ -615,8 +615,9 @@ and sweeps it, in reverse or forward.
 - **`eval()` throws what the tape throws, and leaves the node dirty,** so the next
   `eval()` retries: `std::domain_error` for a barrier with a `wrt` or seed node
   upstream, `std::invalid_argument` for a root, `wrt` or seed node on the tape that
-  does not hold a `double`. A throw out of `Engine::run()` leaves the engine running
-  (flywheel-dag#16).
+  does not hold a `double`. The throw ends `Engine::run()`, which can then be called
+  again (flywheel-dag#16), but the aborted cycle can leave another output's callback
+  stale (flywheel-dag#20).
 - **Cost.** Each recompute records a new tape, about 20 evaluations of the roots'
   nodes, and an `Eager` node recomputes on every change upstream of any root,
   including one its value does not depend on. Where sensitivities are wanted only
