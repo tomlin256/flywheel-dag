@@ -722,7 +722,7 @@ static dag::InputPtr<int> makeMinimalEngine(Engine& engine) {
 }
 
 // Drive N distinct values through the engine synchronously — one step per value.
-static void driveNCycles(Engine& engine, dag::InputPtr<int> inp, int n) {
+static void driveNCycles(Engine& engine, const dag::InputPtr<int>& inp, int n) {
     for (int i = 1; i <= n; ++i) {
         inp->set(i);
         engine.step();
