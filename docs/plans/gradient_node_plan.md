@@ -1,6 +1,11 @@
 # Sensitivities as Graph Nodes
 
-**Status: Approved (2026-09-30).**
+**Status: Done (2026-09-30).** Approved 2026-09-30. Both steps landed, and v0.1.8 is released.
+`aad::GradientNode` holds a root's gradient with respect to a list of wrt nodes, so an engine
+delivers sensitivities through `addOutput`. Its one input is its root, and it is `Eager`, so it
+delivers the gradient of x·y at (2, 3) and at (3, 2), where the root's own callback fires once.
+It evaluates what its root's `eval()` evaluates, and throws what a tape throws. The forward-mode
+node is flywheel-dag#17. No evaluation path changed.
 
 Closes [flywheel-dag#12](https://github.com/tomlin256/flywheel-dag/issues/12).
 
@@ -134,7 +139,7 @@ a throw out of a cycle leaves `Engine::run()` running, which is now flywheel-dag
   on the branch a `ConditionNode` did not take moves when another root pulls it, and tells the
   `ConditionNode`. So such a node must pull its roots until they settle, and an application's
   clock-driven node would never let them. That is a design of its own, and Step 2 opens it as a
-  follow-up issue.
+  follow-up issue. *As built:* flywheel-dag#17.
 - **An allocation-free recompute.** flywheel-dag#13.
 - **Higher-order derivatives.**
 - **`Engine::run()` after a throw.** flywheel-dag#16.
@@ -236,4 +241,4 @@ Commits: `docs: describe the gradient node`, `build: release v0.1.8` and
 | Step | Status | Notes |
 |---|---|---|
 | 1 — `aad::GradientNode` | Done | ctest 34 / 34, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_gradient_node` has the plan's 11 tests. `EvaluatesOnlyWhatItsRootDoes` counts the dual calls of a `DifferentiableNode` on the taken branch, so it shows that the node recorded a tape without reading the other branch. The three hand-made changes each failed as stated. Built `Lazy`, the node also failed `EvaluatesOnlyWhatItsRootDoes`, because it skipped the recording that test counts. Rebinding on every recompute also failed it, through its check that an unchanged gradient keeps its `ValuePtr`. CI run 36686447518 is green on both legs, at 34 / 34 with no compiler warnings |
-| 2 — Docs and release | Not started | |
+| 2 — Docs and release | Done | The README's Derivatives section shows the node registered as an engine output, and its features list and headers table name it. `CLAUDE.md`'s algorithmic differentiation section gives the node's one input, why it is `Eager`, why pulling its root is not the evaluation the tape rule forbids, what it throws and what it costs. The `InvalidationMode` table, the list of modes fixed in a class and `NodeBase`'s list of derived classes gain it. ctest 34 / 34. The docs and release commits were pushed together, and CI run 36687096320 on the release commit is green on both legs, at 34 / 34 with no compiler warnings. The installed version file reports 0.1.8. `v0.1.8` is tagged and released. The forward-mode node is flywheel-dag#17, and flywheel-dag#12 is closed |
