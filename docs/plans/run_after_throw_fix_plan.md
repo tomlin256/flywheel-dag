@@ -1,6 +1,9 @@
 # `Engine::run()` Can Start Again After a Cycle Throws
 
-**Status: Approved (2026-09-30).**
+**Status: Done (2026-09-30).** Approved 2026-09-30. Both steps landed, and v0.1.10 is released.
+`Engine::run()` clears its running flag however it exits, from a scope guard built after the
+already-running check, so it can start again after a node or an output callback throws out of a
+cycle.
 
 Closes [flywheel-dag#16](https://github.com/tomlin256/flywheel-dag/issues/16).
 
@@ -131,6 +134,9 @@ Planning found two more defects in what an aborted cycle leaves behind. Each is 
 - **`meanCycleUs()` counts a cycle that throws at zero duration** —
   [flywheel-dag#21](https://github.com/tomlin256/flywheel-dag/issues/21).
 
+*As built:* the fix also found that `dag_engine.hpp` includes `<iostream>`, which nothing uses:
+[flywheel-dag#22](https://github.com/tomlin256/flywheel-dag/issues/22).
+
 ## Self-review — risks and assumptions
 
 - **Two threads calling `run()`.** The guard stores `false` on every exit. If a second thread's
@@ -160,5 +166,5 @@ Planning found two more defects in what an aborted cycle leaves behind. Each is 
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Done | ctest 35 / 35, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the three `EngineRun` tests. On v0.1.9 the first two failed with "already running", and the third passed. With no guard, the first two failed and nothing else did. With the guard before the check, only the third failed, delivering 1 value where 2 were due. `test_dag_replay`, the only other suite that calls `run()`, passed under both |
-| 2 — Docs and release | Not started | |
+| 1 — Tests, then the fix | Done | ctest 35 / 35, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the three `EngineRun` tests. On v0.1.9 the first two failed with "already running", and the third passed. With no guard, the first two failed and nothing else did. With the guard before the check, only the third failed, delivering 1 value where 2 were due. `test_dag_replay`, the only other suite that calls `run()`, passed under both. CI run 36767621141 is green on both legs, at 35 / 35 with no compiler warnings |
+| 2 — Docs and release | Done | `run()`'s doc in `dag_engine.hpp` says that a throw out of a cycle ends the run, and that `run()` can then be called again. `CLAUDE.md`'s sensitivity-node bullet says the same, and names flywheel-dag#20. ctest 35 / 35. The docs and release commits were pushed together, and CI run 36768161410 on the release commit is green on both legs, at 35 / 35 with no compiler warnings. The installed version file reports 0.1.10. `v0.1.10` is tagged and released, and flywheel-dag#16 is closed |
