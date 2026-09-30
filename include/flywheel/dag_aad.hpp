@@ -87,6 +87,18 @@
 //     a value from the graph.
 //   • Eval thread only, like eval().
 //
+// Sensitivities as nodes
+// ──────────────────────
+// A pass in the root's output callback misses a gradient that moves while the
+// root's value stands still: x·y is 6 at (2, 3) and at (3, 2), with gradients
+// (3, 2) and (2, 3). A GradientNode (below) holds the gradient as its value, so
+// an engine delivers it through addOutput like any other value:
+//
+//   auto grad = aad::GradientNode::make("dprice", price, {spot, vol, rate});
+//   engine.addOutput<std::vector<double>>(grad, [](const std::vector<double>& g) {
+//       // g[0] = ∂price/∂spot, g[1] = ∂price/∂vol, g[2] = ∂price/∂rate
+//   });
+//
 // Never include dag_aad.inl directly — always include this file.
 
 #include "dag.hpp"
@@ -392,6 +404,78 @@ private:
 
 template<std::size_t N>
 using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GradientNode — a node whose value is a gradient: ∂root/∂w for each w in wrt,
+// in wrt's order, as a std::vector<double>.
+//
+// Each time it recomputes, it pulls its root, records a Tape on it and sweeps it
+// in reverse, as aad::adjoints() does. It publishes the result through its
+// equality policy like any other node, so an engine output fires only when the
+// gradient moves.
+//
+// Its one input is its root. A wrt node the root depends on sits upstream of the
+// root, so the root carries its changes. One the root does not depend on has
+// derivative 0. Pulling the wrt nodes as well would evaluate nodes the root does
+// not read, such as one on the branch a ConditionNode did not take.
+//
+// It is EAGER, fixed here, and that is the point of it. Its value depends on the
+// partials of every node the tape records, and it declares none of them as
+// inputs. A change upstream of the root marks it at least Maybe, and an Eager
+// node recomputes then. A Lazy node would skip whenever the root's value stood
+// still, and x·y at (2, 3) and at (3, 2) is exactly that case.
+//
+// It evaluates what the root's eval() evaluates, and nothing more: the tape then
+// reads clean nodes alone. Pulling the root is what any consumer does to its
+// input, so it is not the evaluation the tape's rules forbid, and the engine's
+// dirty snapshot still covers a root that is a registered output too.
+//
+// eval() throws what the tape throws, and the node stays dirty, so the next
+// eval() tries again: std::domain_error for a barrier with a wrt node upstream,
+// and std::invalid_argument for a root, or a wrt node on the tape, that does not
+// hold a double. make() cannot check either, because both depend on values.
+//
+// COST. Every recompute records a new tape, which costs about 20 evaluations of
+// the root, and an Eager node recomputes on every change upstream of its root,
+// including a change the gradient does not depend on. A graph that wants its
+// sensitivities only now and then should run a pass on demand instead.
+//
+// Under the default policy, a gradient holding a NaN is unequal to itself, so
+// it is published on every recompute, as a double NaN is. It is not an
+// IDifferentiable: its value is a vector, so no tape can take it as a root or a
+// wrt node, and a node that reads one of its entries is a barrier.
+// ─────────────────────────────────────────────────────────────────────────────
+class GradientNode
+    : public NodeBase
+    , public std::enable_shared_from_this<GradientNode>
+{
+public:
+    /// ∂root/∂w for each w in wrt, in wrt's order. Throws std::invalid_argument
+    /// if root or a wrt node is null, or if wrt is empty. The default policy is
+    /// TypedEqualityPolicy<std::vector<double>>.
+    static std::shared_ptr<GradientNode> make(
+        std::string name, NodePtr root, std::vector<NodePtr> wrt,
+        EqualityPolicyPtr eq = nullptr);
+
+    ValuePtr eval(EvalContext& ctx) override;
+    std::string name() const override;
+    /// The root alone.
+    std::vector<NodePtr> inputs() const override;
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+private:
+    GradientNode(std::string name, NodePtr root, std::vector<NodePtr> wrt,
+                 EqualityPolicyPtr eq);
+
+    std::string                    name_;
+    NodePtr                        root_;
+    std::vector<NodePtr>           wrt_;
+    EqualityPolicyPtr              eq_;
+    ValuePtr                       cached_;
+    ValueSlot<std::vector<double>> slot_;
+};
+
+using GradientNodePtr = std::shared_ptr<GradientNode>;
 
 } // namespace dag::aad
 

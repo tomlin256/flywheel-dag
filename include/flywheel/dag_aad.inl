@@ -511,4 +511,47 @@ void DifferentiableNode<N>::dualPartials(EvalContext& ctx, Partials& out,
     for (std::size_t i = 0; i < N; ++i) out.add(i, y.d[i]);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GradientNode
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline GradientNodePtr GradientNode::make(std::string name, NodePtr root,
+                                          std::vector<NodePtr> wrt, EqualityPolicyPtr eq)
+{
+    if (!root) throw std::invalid_argument("aad::GradientNode: " + name + " has a null root");
+    if (wrt.empty())
+        throw std::invalid_argument("aad::GradientNode: " + name + " has no wrt nodes");
+    for (const auto& w : wrt)
+        if (!w) throw std::invalid_argument("aad::GradientNode: " + name + " has a null wrt node");
+    if (!eq) eq = std::make_shared<TypedEqualityPolicy<std::vector<double>>>();
+    auto self = std::shared_ptr<GradientNode>(new GradientNode(
+        std::move(name), std::move(root), std::move(wrt), std::move(eq)));
+    wire(self, self->inputs());
+    return self;
+}
+
+// Eager, fixed here, with no mode to take: see the class comment.
+inline GradientNode::GradientNode(std::string name, NodePtr root, std::vector<NodePtr> wrt,
+                                  EqualityPolicyPtr eq)
+    : NodeBase(InvalidationMode::Eager), name_(std::move(name)), root_(std::move(root))
+    , wrt_(std::move(wrt)), eq_(std::move(eq)) {}
+
+// Pulling the root leaves it clean, so the tape reads it and evaluates nothing
+// more. A throw from the tape leaves this node dirty, and cached_ as it was.
+inline ValuePtr GradientNode::eval(EvalContext& ctx) {
+    if (!dirty() && !ctx.forceRecompute) return cached_;
+    root_->eval(ctx);
+    const ValuePtr newV = slot_.emit(Tape({root_}).adjoints(root_, wrt_));
+    if (!eq_->equal(cached_, newV)) {
+        cached_ = newV;
+        notifyDownstream();
+    }
+    markClean();
+    return cached_;
+}
+
+inline std::string GradientNode::name() const { return name_; }
+
+inline std::vector<NodePtr> GradientNode::inputs() const { return {root_}; }
+
 } // namespace dag::aad
