@@ -1,6 +1,11 @@
 # A Forward-Mode Sensitivity Node
 
-**Status: Approved (2026-09-30).**
+**Status: Done (2026-09-30).** Approved 2026-09-30. All three steps landed, and v0.1.9 is released.
+`aad::TangentNode` holds several roots' derivatives in one direction, from one tape and one
+forward sweep, so an engine delivers them through `addOutput`. It records each root right after
+its pull, through a private `Tape::add()`, so a root that another root's pull leaves dirty never
+makes it throw. Both sensitivity nodes are clean only when their roots are, which fixes
+`GradientNode`'s stale gradient behind an always-dirty node. No other evaluation path changed.
 
 Closes [flywheel-dag#17](https://github.com/tomlin256/flywheel-dag/issues/17) and
 [flywheel-dag#19](https://github.com/tomlin256/flywheel-dag/issues/19).
@@ -272,4 +277,4 @@ Commits: `docs: describe the tangent node`, `build: release v0.1.9` and
 |---|---|---|
 | 1 — A gradient node stays dirty while its root is | Done | ctest 34 / 34, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_gradient_node` has 12 tests: the 11 it had and `StaysDirtyWhileItsRootIs`. `AlwaysFiring` lives in `aad_test_graphs.hpp`, for Step 2's suite to share. Marking the node clean regardless of its root failed `StaysDirtyWhileItsRootIs` alone, as stated. CI run 36696404748 is green on both legs, at 34 / 34 with no compiler warnings |
 | 2 — `aad::TangentNode` | Done | ctest 35 / 35, and `--invariants` is unchanged. The build prints no warnings. With `Tape(roots)` calling the new `add()`, and before the node existed, every AAD suite and `example_aad` passed unchanged. `test_aad_tangent_node` has the plan's 11 tests. The four hand-made changes each failed exactly the tests stated, and no others. CI run 36697477898 is green on both legs, at 35 / 35 with no compiler warnings |
-| 3 — Docs and release | Not started | |
+| 3 — Docs and release | Done | The README's Derivatives section names `TangentNode` beside `GradientNode`, and its features list and headers table gain it. `CLAUDE.md`'s sensitivity-node paragraph covers both nodes, with the one-tape recording and the rule that a sensitivity node is clean only when its roots are, and the `InvalidationMode` table, the list of modes fixed in a class and `NodeBase`'s list of derived classes gain `TangentNode`. ctest 35 / 35. The docs and release commits were pushed together, and CI run 36698150567 on the release commit is green on both legs, at 35 / 35 with no compiler warnings. The installed version file reports 0.1.9. `v0.1.9` is tagged and released, and flywheel-dag#17 and flywheel-dag#19 are closed |
