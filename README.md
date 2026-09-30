@@ -27,7 +27,8 @@ evaluates only the part of the graph they dirtied.
 - **Algorithmic differentiation** (`dag::aad`) — an output's derivative with respect to every
   input in one reverse sweep, or every output's derivative in one direction in one forward sweep,
   at the values the graph holds. A compute node written as a generic lambda is differentiated with
-  dual numbers.
+  dual numbers, and a gradient node delivers sensitivities through the engine like any other
+  output.
 - **Snapshot and restore** of stateful nodes, discovered by walking the graph; a JSON file store
   writes atomically.
 - **Deterministic replay** of recorded sessions through an unmodified graph, with no threads or
@@ -161,7 +162,18 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
 - A node with inputs but no partials is a barrier: every `dag::ts` node, and every opaque
   `ComputeNode`. A derivative through one throws `std::domain_error` rather than answer 0.
 - An output callback fires only when the output's value changes, and a gradient can change while
-  the value does not.
+  the value does not: x·y is 6 at (2, 3) and at (3, 2). For an engine to deliver sensitivities,
+  register an `aad::GradientNode`, whose value is the gradient:
+
+  ```cpp
+  auto grad = aad::GradientNode::make("grad", f, {x, y});
+  engine.addOutput<std::vector<double>>(grad, [](const std::vector<double>& g) {
+      // g[0] = ∂f/∂x, g[1] = ∂f/∂y
+  });
+  ```
+
+  It recomputes whenever anything upstream of `f` fires, and records a tape each time, which costs
+  about 20 evaluations of `f`.
 
 ## Concepts
 
@@ -194,7 +206,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
 | `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `SinNode`, `CosNode`, `TanNode`, `AsinNode`, `AcosNode`, `AtanNode`, `Atan2Node`, `Derivative` |
-| `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual` |
+| `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual`, `GradientNode` |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |

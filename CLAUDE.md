@@ -127,7 +127,7 @@ only when not `Clean`. `Input::set()` propagates downstream.
 
 | Mode | Meaning | Who gets it |
 |---|---|---|
-| `Eager` | Recompute whenever anything upstream fired. **The default.** | Anything whose output is not a pure function of its declared inputs' *values* — every `dag::ts` stateful node (its output depends on *how often* it ran), and any functor reading state it did not declare as an input. |
+| `Eager` | Recompute whenever anything upstream fired. **The default.** | Anything whose output is not a pure function of its declared inputs' *values* — every `dag::ts` stateful node (its output depends on *how often* it ran), `aad::GradientNode` (its value depends on the partials of every node above its root), and any functor reading state it did not declare as an input. |
 | `Lazy` | Recompute only when an input's value actually changed. | A functor that is a pure function of its declared inputs. |
 
 `Dirtiness` has three states, not two: `Dirty` means an input of mine definitely
@@ -141,7 +141,8 @@ The mode is a `make()` argument on the four opaque-functor templates
 (`ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`,
 `MemoizedComputeNode`); it is **fixed in the base** for `dag::ops` (`Lazy` —
 structurally pure, since `eval()` default-constructs the functor every time),
-`ConditionNode` (`Lazy` — pure selection, no functor) and `dag::ts` (`Eager`).
+`ConditionNode` (`Lazy` — pure selection, no functor), `dag::ts` (`Eager`) and
+`aad::GradientNode` (`Eager` — see Algorithmic Differentiation).
 Set it in the factory that **writes** the functor, not at the graph site: whether
 a functor is pure is a property of the functor.
 
@@ -275,8 +276,8 @@ engine calls through, not a base to build on.
 / `notifyDownstream()`. Every node in the engine derives from it: `Input`,
 `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`,
 `AsyncInput`, `AsyncQueue`, `MemoizedComputeNode`, `ReplayInput`, `ReplayQueue`,
-`ts::NodeImpl`, `ops::OpNodeImpl` and `aad::DifferentiableNode` — and so should
-any node an application defines.
+`ts::NodeImpl`, `ops::OpNodeImpl`, `aad::DifferentiableNode` and
+`aad::GradientNode` — and so should any node an application defines.
 
 `downstream_` is **private**. Reaching downstream goes through
 `notifyDownstream()` — several of the twelve copies this replaced walked the
@@ -569,6 +570,39 @@ node that does not implement the mixin. A tape does not follow a barrier's input
 - **Eval thread only.** An application's clock-driven node, whose `dirty()` is
   always true, is re-evaluated when a differentiable consumer's `partials()` pulls
   it, as any consumer's pull does, and it can never be a root.
+
+**Sensitivities as nodes — `aad::GradientNode`** (flywheel-dag#12). A pass in the
+root's output callback misses a gradient that moves while the root's value stands
+still: x·y is 6 at (2, 3) and at (3, 2), with gradients (3, 2) and (2, 3). A
+`GradientNode` holds ∂root/∂w for each w in its `wrt` list, as a
+`std::vector<double>`, so an engine delivers it through `addOutput`. Each recompute
+pulls the root, records a tape on it and sweeps it in reverse.
+
+- **Its one input is its root.** A `wrt` node the root depends on is upstream of the
+  root, and one it does not depend on has derivative 0. Pulling the `wrt` nodes too
+  would evaluate what the root does not read, such as the branch a `ConditionNode`
+  did not take.
+- **It is `Eager`, fixed in the class.** Its value depends on the partials of every
+  node the tape records, and it declares none of them. A `Lazy` node would skip
+  whenever the root's value stood still, which is the case the node exists for.
+  `AadGradientNode.DeliversAGradientThatMovesWhileTheValueStandsStill` goes red if
+  it is made `Lazy`.
+- **Pulling its root is not the evaluation the tape rule above forbids.** It is what
+  any consumer does to its input, inside the engine's cycle, so the dirty snapshot
+  still covers a root that is also a registered output, registered before or after
+  the node.
+- **`eval()` throws what the tape throws, and leaves the node dirty,** so the next
+  `eval()` retries: `std::domain_error` for a barrier with a `wrt` node upstream,
+  `std::invalid_argument` for a root or `wrt` node on the tape that does not hold a
+  `double`. A throw out of `Engine::run()` leaves the engine running
+  (flywheel-dag#16).
+- **Cost.** Each recompute records a new tape, about 20 evaluations of the root, and
+  an `Eager` node recomputes on every change upstream of its root, including one the
+  gradient does not depend on. Where sensitivities are wanted only now and then, run
+  a pass on demand. The allocation-free pass is flywheel-dag#13.
+- **There is no forward-mode node.** A tape needs several roots clean at once, and
+  pulling one root can leave another dirty through a stale node on a branch not
+  taken (flywheel-dag#17).
 
 **`DifferentiableNode<N>`'s functor must have no side effects:** it runs again, on
 duals, each time a tape records the node. Its body calls math functions
