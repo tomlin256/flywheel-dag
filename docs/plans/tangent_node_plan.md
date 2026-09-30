@@ -270,6 +270,6 @@ Commits: `docs: describe the tangent node`, `build: release v0.1.9` and
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — A gradient node stays dirty while its root is | Not started | |
+| 1 — A gradient node stays dirty while its root is | Done | ctest 34 / 34, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_gradient_node` has 12 tests: the 11 it had and `StaysDirtyWhileItsRootIs`. `AlwaysFiring` lives in `aad_test_graphs.hpp`, for Step 2's suite to share. Marking the node clean regardless of its root failed `StaysDirtyWhileItsRootIs` alone, as stated |
 | 2 — `aad::TangentNode` | Not started | |
 | 3 — Docs and release | Not started | |

@@ -16,9 +16,33 @@
 #include "flywheel/dag_ops.hpp"
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace aad_test {
+
+/// A node that is always dirty, as an application's clock-driven node is, and
+/// tells its consumers each time it is pulled. Its value is a constant, so a
+/// test can name the exact derivative through it.
+class AlwaysFiring : public dag::NodeBase, public std::enable_shared_from_this<AlwaysFiring> {
+public:
+    static std::shared_ptr<AlwaysFiring> make(double value) {
+        return std::shared_ptr<AlwaysFiring>(new AlwaysFiring(value));
+    }
+    bool dirty() const override { return true; }
+    dag::ValuePtr eval(dag::EvalContext&) override {
+        notifyDownstream();
+        return value_;
+    }
+    std::string name() const override { return "always-firing"; }
+    std::vector<dag::NodePtr> inputs() const override { return {}; }
+    dag::NodeKind kind() const override { return dag::NodeKind::Input; }
+
+private:
+    explicit AlwaysFiring(double value) : value_(dag::make_value(value)) {}
+    dag::ValuePtr value_;
+};
 
 /// Equal to 1e-13, relative to the larger of 1 and the expected value.
 inline void expectClose(double actual, double expected) {

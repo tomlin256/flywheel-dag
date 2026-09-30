@@ -538,6 +538,11 @@ inline GradientNode::GradientNode(std::string name, NodePtr root, std::vector<No
 
 // Pulling the root leaves it clean, so the tape reads it and evaluates nothing
 // more. A throw from the tape leaves this node dirty, and cached_ as it was.
+//
+// A node that is always dirty is the exception: the tape's pull evaluates it
+// again, and it can mark the root dirty again (flywheel-dag#19). This node then
+// stays dirty too. Marked clean, it would never see the next change, which
+// stops at the root because the root is already dirty.
 inline ValuePtr GradientNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
     root_->eval(ctx);
@@ -546,7 +551,7 @@ inline ValuePtr GradientNode::eval(EvalContext& ctx) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    if (!root_->dirty()) markClean();
     return cached_;
 }
 

@@ -435,6 +435,12 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // and std::invalid_argument for a root, or a wrt node on the tape, that does not
 // hold a double. make() cannot check either, because both depend on values.
 //
+// It is clean only when its root is. The tape's pulls can evaluate a node that
+// is always dirty, such as an application's clock-driven node, which then marks
+// the root dirty again. Marked clean, this node would never see the next change,
+// which stops at the root, so it stays dirty and recomputes on its next
+// evaluation (flywheel-dag#19).
+//
 // COST. Every recompute records a new tape, which costs about 20 evaluations of
 // the root, and an Eager node recomputes on every change upstream of its root,
 // including a change the gradient does not depend on. A graph that wants its

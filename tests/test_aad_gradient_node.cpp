@@ -250,6 +250,27 @@ TEST(AadGradientNode, DoesNotAdvanceAStatefulNode) {
     }
 }
 
+// k·x·x, where k is always dirty. The tape's pull evaluates k again, which
+// marks the root dirty again, so the node stays dirty with it. The move of x
+// then reaches the node, although the cascade stops at the root
+// (flywheel-dag#19).
+TEST(AadGradientNode, StaysDirtyWhileItsRootIs) {
+    auto k    = aad_test::AlwaysFiring::make(2.0);
+    auto x    = Input<double>::make("x", 3.0);
+    auto root = ops::ProductNode<>::make("root", {k, x, x});
+    auto grad = aad::GradientNode::make("grad", root, {x});
+    EvalContext ctx;
+    const ValuePtr before = grad->eval(ctx);
+    EXPECT_EQ(get_value<Gradient>(before), (Gradient{12.0}));
+    EXPECT_TRUE(root->dirty());
+    EXPECT_TRUE(grad->dirty());
+
+    x->set(5.0);
+    EXPECT_TRUE(grad->dirty());
+    const ValuePtr after = grad->eval(ctx);
+    EXPECT_EQ(get_value<Gradient>(after), (Gradient{20.0}));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Rejections
 // ─────────────────────────────────────────────────────────────────────────────
