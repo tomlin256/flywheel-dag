@@ -27,8 +27,8 @@ evaluates only the part of the graph they dirtied.
 - **Algorithmic differentiation** (`dag::aad`) — an output's derivative with respect to every
   input in one reverse sweep, or every output's derivative in one direction in one forward sweep,
   at the values the graph holds. A compute node written as a generic lambda is differentiated with
-  dual numbers, and a gradient node delivers sensitivities through the engine like any other
-  output.
+  dual numbers, and gradient and tangent nodes deliver sensitivities through the engine like any
+  other output.
 - **Snapshot and restore** of stateful nodes, discovered by walking the graph; a JSON file store
   writes atomically.
 - **Deterministic replay** of recorded sessions through an unmodified graph, with no threads or
@@ -173,7 +173,10 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
   ```
 
   It recomputes whenever anything upstream of `f` fires, and records a tape each time, which costs
-  about 20 evaluations of `f`.
+  about 20 evaluations of `f`. Its forward-mode counterpart, `aad::TangentNode`, holds several
+  roots' derivatives in one direction, from one tape and one sweep:
+  `aad::TangentNode::make("along x", {f, g}, {{x, 1.0}})` holds ∂f/∂x and ∂g/∂x, for another
+  root `g`.
 
 ## Concepts
 
@@ -206,7 +209,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
 | `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `SinNode`, `CosNode`, `TanNode`, `AsinNode`, `AcosNode`, `AtanNode`, `Atan2Node`, `Derivative` |
-| `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual`, `GradientNode` |
+| `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual`, `GradientNode`, `TangentNode` |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
