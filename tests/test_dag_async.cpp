@@ -17,6 +17,7 @@
 //  FeedRegistry    — flush-all, hasPending, wake hook propagation
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
+//  Engine::run()   — a cycle that throws ends the run, and run() can start again
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -1050,6 +1051,91 @@ TEST(EngineCycleSeqLock, ConcurrentStepAndConsistentReadNeverTears) {
     });
 
     EXPECT_EQ(torn, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine::run()
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// What run() threw, or "" when it returned. Every run() these tests start ends inside its own
+// cycles, by a throw or by a callback calling stop(), so none of them waits on a feed.
+std::string runAndCatch(Engine& engine) {
+    try {
+        engine.run();
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    return "";
+}
+
+}  // namespace
+
+// A throw out of a cycle ends the run. The next run() must start, not throw "already running"
+// (flywheel-dag#16).
+TEST(EngineRun, RunsAgainAfterANodeThrows) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    bool fail = true;
+    auto node = ComputeNode<double, double>::make(
+        "node",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [&fail](const double& v) {
+            if (fail) throw std::domain_error("from a node");
+            return v;
+        });
+    std::vector<double> seen;
+    engine.addOutput<double>(node, [&](const double& v) {
+        seen.push_back(v);
+        engine.stop();
+    });
+
+    EXPECT_EQ(runAndCatch(engine), "from a node");
+    EXPECT_EQ(runAndCatch(engine), "from a node");   // the node is still dirty, so this run retries it
+    fail = false;
+    EXPECT_EQ(runAndCatch(engine), "");
+    EXPECT_EQ(seen, std::vector<double>{1.0});
+}
+
+TEST(EngineRun, RunsAgainAfterACallbackThrows) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    bool fail = true;
+    std::vector<double> seen;
+    engine.addOutput<double>(x, [&](const double& v) {
+        if (fail) throw std::runtime_error("from a callback");
+        seen.push_back(v);
+        engine.stop();
+    });
+
+    EXPECT_EQ(runAndCatch(engine), "from a callback");
+    fail = false;
+    x->set(2.0);   // x is clean after the first run's cycle, so give the second run a value to deliver
+    EXPECT_EQ(runAndCatch(engine), "");
+    EXPECT_EQ(seen, std::vector<double>{2.0});
+}
+
+// The flag a refused run() found set belongs to the run already going, so the refusal must leave
+// it set.
+TEST(EngineRun, ARunCalledWhileRunningThrowsAndLeavesTheRunGoing) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    std::string nested;
+    std::vector<double> seen;
+    engine.addOutput<double>(x, [&](const double& v) {
+        seen.push_back(v);
+        if (seen.size() == 1) {
+            nested = runAndCatch(engine);
+            x->set(2.0);   // wakes the run for a second cycle
+        } else {
+            engine.stop();
+        }
+    });
+
+    EXPECT_EQ(runAndCatch(engine), "");
+    EXPECT_EQ(nested, "Engine::run() called while already running");
+    EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0}));
 }
 
 int main(int argc, char** argv) {

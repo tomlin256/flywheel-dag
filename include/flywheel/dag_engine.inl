@@ -205,6 +205,15 @@ inline void Engine::run() {
     if (running_.exchange(true))
         throw std::runtime_error("Engine::run() called while already running");
 
+    // A node or callback that throws ends the run, and its exception leaves through here. Clear
+    // running_ on every exit, or no later run() could start (flywheel-dag#16). This comes after
+    // the check: a run() refused there must leave the flag of the run already going alone.
+    struct ClearOnExit {
+        std::atomic<bool>& flag;
+        ~ClearOnExit() { flag = false; }
+    };
+    const ClearOnExit clearRunning{running_};
+
     // Initial cycle: flush any already-pending data, deliver starting values.
     cycle();
 

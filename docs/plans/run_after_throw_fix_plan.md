@@ -160,5 +160,5 @@ Planning found two more defects in what an aborted cycle leaves behind. Each is 
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Not started | |
+| 1 — Tests, then the fix | Done | ctest 35 / 35, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the three `EngineRun` tests. On v0.1.9 the first two failed with "already running", and the third passed. With no guard, the first two failed and nothing else did. With the guard before the check, only the third failed, delivering 1 value where 2 were due. `test_dag_replay`, the only other suite that calls `run()`, passed under both |
 | 2 — Docs and release | Not started | |
