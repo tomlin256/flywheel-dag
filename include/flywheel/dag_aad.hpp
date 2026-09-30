@@ -99,11 +99,20 @@
 //       // g[0] = ∂price/∂spot, g[1] = ∂price/∂vol, g[2] = ∂price/∂rate
 //   });
 //
+// A TangentNode (below) is its forward-mode counterpart: each of several roots'
+// derivative in one direction, from one tape and one sweep:
+//
+//   auto dspot = aad::TangentNode::make("dspot", {price, hedge}, {{spot, 1.0}});
+//   engine.addOutput<std::vector<double>>(dspot, [](const std::vector<double>& t) {
+//       // t[0] = ∂price/∂spot, t[1] = ∂hedge/∂spot
+//   });
+//
 // Never include dag_aad.inl directly — always include this file.
 
 #include "dag.hpp"
 #include "dag_ops.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -156,6 +165,9 @@ public:
     std::size_t size() const noexcept;
 
 private:
+    // TangentNode records its roots one at a time, each right after its pull.
+    friend class TangentNode;
+
     struct Edge {
         std::size_t input;   ///< the named input's position on the tape
         double      d;       ///< ∂node/∂input
@@ -169,7 +181,14 @@ private:
         bool        holdsDouble;
     };
 
-    void record();
+    /// An empty tape, for add().
+    Tape() = default;
+    /// Records root, and each node it depends on that the tape does not hold
+    /// yet, at the values they hold now. Throws std::invalid_argument unless
+    /// root is non-null, clean and holds a double. Private because between two
+    /// calls nothing may move the graph but the pull of the next root: a caller
+    /// that moved an input between them would get a tape that mixes two points.
+    void add(const NodePtr& root);
     std::size_t rootPosition(const NodePtr& root) const;
     void checkWrt(const std::vector<NodePtr>& wrt) const;
     /// `target` names what the barriers were reached from, for the message.
@@ -482,6 +501,68 @@ private:
 };
 
 using GradientNodePtr = std::shared_ptr<GradientNode>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TangentNode — a node whose value is a forward sweep's tangents: each root's
+// derivative in the direction the seeds give, Σ ∂root/∂s.node · s.tangent, in
+// the roots' order, as a std::vector<double>.
+//
+// GradientNode's forward-mode counterpart, and what GradientNode says about
+// itself holds here too. It is EAGER, fixed here. Its inputs are its roots, and
+// a seed's node is not one. It evaluates what its roots' eval() evaluates, it
+// throws what the tape throws, and it is not an IDifferentiable. The seeds are
+// constants, given at make().
+//
+// ONE TAPE. Each recompute pulls the roots in turn, and records each root right
+// after its pull, not after all of them. A later root's pull can leave an
+// earlier root dirty again: a stale node on the branch a ConditionNode did not
+// take moves when the later root pulls it, and tells the ConditionNode. A tape
+// recorded after every pull would then throw. Recorded right after its pull,
+// each root is clean, and a later pull evaluates only nodes the tape does not
+// hold yet, so it moves no value the tape recorded. One forward sweep of the
+// one tape serves every root.
+//
+// It is clean only when every root is, for GradientNode's reason: a root left
+// dirty, by a later root's pull or by an always-dirty node the tape pulled,
+// would stop the next change before it reached this node. So the node stays
+// dirty, and recomputes on its next evaluation.
+//
+// COST. A recompute records one tape over every root's nodes, which costs about
+// 20 evaluations of them, and it happens on every change upstream of any root.
+// ─────────────────────────────────────────────────────────────────────────────
+class TangentNode
+    : public NodeBase
+    , public std::enable_shared_from_this<TangentNode>
+{
+public:
+    /// Each root's derivative in the direction the seeds give,
+    /// Σ ∂root/∂s.node · s.tangent, in the roots' order. Throws
+    /// std::invalid_argument if roots or seeds is empty, or if a root or a
+    /// seed's node is null. The default policy is
+    /// TypedEqualityPolicy<std::vector<double>>.
+    static std::shared_ptr<TangentNode> make(
+        std::string name, std::vector<NodePtr> roots, std::vector<Seed> seeds,
+        EqualityPolicyPtr eq = nullptr);
+
+    ValuePtr eval(EvalContext& ctx) override;
+    std::string name() const override;
+    /// The roots.
+    std::vector<NodePtr> inputs() const override;
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+private:
+    TangentNode(std::string name, std::vector<NodePtr> roots, std::vector<Seed> seeds,
+                EqualityPolicyPtr eq);
+
+    std::string                    name_;
+    std::vector<NodePtr>           roots_;
+    std::vector<Seed>              seeds_;
+    EqualityPolicyPtr              eq_;
+    ValuePtr                       cached_;
+    ValueSlot<std::vector<double>> slot_;
+};
+
+using TangentNodePtr = std::shared_ptr<TangentNode>;
 
 } // namespace dag::aad
 

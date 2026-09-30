@@ -270,6 +270,6 @@ Commits: `docs: describe the tangent node`, `build: release v0.1.9` and
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — A gradient node stays dirty while its root is | Done | ctest 34 / 34, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_gradient_node` has 12 tests: the 11 it had and `StaysDirtyWhileItsRootIs`. `AlwaysFiring` lives in `aad_test_graphs.hpp`, for Step 2's suite to share. Marking the node clean regardless of its root failed `StaysDirtyWhileItsRootIs` alone, as stated |
-| 2 — `aad::TangentNode` | Not started | |
+| 1 — A gradient node stays dirty while its root is | Done | ctest 34 / 34, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_aad_gradient_node` has 12 tests: the 11 it had and `StaysDirtyWhileItsRootIs`. `AlwaysFiring` lives in `aad_test_graphs.hpp`, for Step 2's suite to share. Marking the node clean regardless of its root failed `StaysDirtyWhileItsRootIs` alone, as stated. CI run 36696404748 is green on both legs, at 34 / 34 with no compiler warnings |
+| 2 — `aad::TangentNode` | Done | ctest 35 / 35, and `--invariants` is unchanged. The build prints no warnings. With `Tape(roots)` calling the new `add()`, and before the node existed, every AAD suite and `example_aad` passed unchanged. `test_aad_tangent_node` has the plan's 11 tests. The four hand-made changes each failed exactly the tests stated, and no others |
 | 3 — Docs and release | Not started | |

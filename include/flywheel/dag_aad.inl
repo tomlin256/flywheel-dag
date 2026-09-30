@@ -18,22 +18,35 @@ namespace dag::aad {
 // Tape
 // ─────────────────────────────────────────────────────────────────────────────
 
-inline Tape::Tape(std::vector<NodePtr> roots) : roots_(std::move(roots)) {
-    record();
+// Recording evaluates nothing, so checking each root as add() reaches it is
+// checking all of them at once.
+inline Tape::Tape(std::vector<NodePtr> roots) {
+    roots_.reserve(roots.size());
+    for (const auto& root : roots) add(root);
 }
 
 inline std::size_t Tape::size() const noexcept { return entries_.size(); }
 
-// A depth-first walk up from each root, without recursion. It finishes a node
+// A depth-first walk up from the root, without recursion. It finishes a node
 // only after every input its partials name, so each node lands on the tape
-// after all of them.
+// after all of them. A node the tape already holds is not walked again: an
+// earlier add() recorded it, with everything it names.
 //
 // The walk reads each node twice when it first reaches it: eval() to learn what
 // the node holds, and partials(). Both read a clean node, so both return cached
-// values. The roots are checked clean, and a clean node's named inputs are clean
+// values. The root is checked clean, and a clean node's named inputs are clean
 // too, because an input that moves invalidates its consumers.
-inline void Tape::record() {
+inline void Tape::add(const NodePtr& root) {
+    if (!root) throw std::invalid_argument("aad::Tape: a root is null");
+    if (root->dirty())
+        throw std::invalid_argument("aad::Tape: root " + root->name()
+            + " is dirty. A tape reads only evaluated values: evaluate it first");
     EvalContext ctx;
+    const ValuePtr rootValue = root->eval(ctx);
+    if (!rootValue || rootValue->type() != std::type_index(typeid(double)))
+        throw std::invalid_argument("aad::Tape: root " + root->name()
+            + " does not hold a double");
+
     Partials partials;
 
     struct Frame {
@@ -44,10 +57,10 @@ inline void Tape::record() {
         bool holdsDouble = false;
     };
     std::vector<Frame> stack;
-    std::unordered_set<const INode*> reached;
+    std::unordered_set<const INode*> walking;   ///< reached by this call, not yet on the tape
 
     const auto visit = [&](const NodePtr& n) {
-        if (!reached.insert(n.get()).second) return;
+        if (position_.count(n.get()) != 0 || !walking.insert(n.get()).second) return;
         Frame f;
         f.node = n;
         const ValuePtr v = n->eval(ctx);
@@ -71,34 +84,24 @@ inline void Tape::record() {
         stack.push_back(std::move(f));
     };
 
-    for (const auto& root : roots_) {
-        if (!root) throw std::invalid_argument("aad::Tape: a root is null");
-        if (root->dirty())
-            throw std::invalid_argument("aad::Tape: root " + root->name()
-                + " is dirty. A tape reads only evaluated values: evaluate it first");
-        const ValuePtr v = root->eval(ctx);
-        if (!v || v->type() != std::type_index(typeid(double)))
-            throw std::invalid_argument("aad::Tape: root " + root->name()
-                + " does not hold a double");
-
-        visit(root);
-        while (!stack.empty()) {
-            Frame& top = stack.back();
-            if (top.next < top.named.size()) {
-                // A copy, not a reference: visit() can grow the stack and move top.
-                const NodePtr in = top.named[top.next++].first;
-                visit(in);
-                continue;
-            }
-            Entry e{top.node, edges_.size(), 0, top.barrier, top.holdsDouble};
-            for (const auto& [in, d] : top.named)
-                edges_.push_back({position_.at(in.get()), d});
-            e.lastEdge = edges_.size();
-            position_.emplace(top.node.get(), entries_.size());
-            entries_.push_back(std::move(e));
-            stack.pop_back();
+    visit(root);
+    while (!stack.empty()) {
+        Frame& top = stack.back();
+        if (top.next < top.named.size()) {
+            // A copy, not a reference: visit() can grow the stack and move top.
+            const NodePtr in = top.named[top.next++].first;
+            visit(in);
+            continue;
         }
+        Entry e{top.node, edges_.size(), 0, top.barrier, top.holdsDouble};
+        for (const auto& [in, d] : top.named)
+            edges_.push_back({position_.at(in.get()), d});
+        e.lastEdge = edges_.size();
+        position_.emplace(top.node.get(), entries_.size());
+        entries_.push_back(std::move(e));
+        stack.pop_back();
     }
+    roots_.push_back(root);
 }
 
 inline std::size_t Tape::rootPosition(const NodePtr& root) const {
@@ -558,5 +561,60 @@ inline ValuePtr GradientNode::eval(EvalContext& ctx) {
 inline std::string GradientNode::name() const { return name_; }
 
 inline std::vector<NodePtr> GradientNode::inputs() const { return {root_}; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TangentNode
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline TangentNodePtr TangentNode::make(std::string name, std::vector<NodePtr> roots,
+                                        std::vector<Seed> seeds, EqualityPolicyPtr eq)
+{
+    if (roots.empty())
+        throw std::invalid_argument("aad::TangentNode: " + name + " has no roots");
+    for (const auto& r : roots)
+        if (!r) throw std::invalid_argument("aad::TangentNode: " + name + " has a null root");
+    if (seeds.empty())
+        throw std::invalid_argument("aad::TangentNode: " + name + " has no seeds");
+    for (const auto& s : seeds)
+        if (!s.node)
+            throw std::invalid_argument("aad::TangentNode: " + name + " has a seed on a null node");
+    if (!eq) eq = std::make_shared<TypedEqualityPolicy<std::vector<double>>>();
+    auto self = std::shared_ptr<TangentNode>(new TangentNode(
+        std::move(name), std::move(roots), std::move(seeds), std::move(eq)));
+    wire(self, self->inputs());
+    return self;
+}
+
+// Eager, fixed here, with no mode to take: see the class comment.
+inline TangentNode::TangentNode(std::string name, std::vector<NodePtr> roots,
+                                std::vector<Seed> seeds, EqualityPolicyPtr eq)
+    : NodeBase(InvalidationMode::Eager), name_(std::move(name)), roots_(std::move(roots))
+    , seeds_(std::move(seeds)), eq_(std::move(eq)) {}
+
+// Each root is recorded right after its pull, while it is clean. A later root's
+// pull evaluates only nodes the tape does not hold yet, so it moves nothing the
+// tape recorded, but it can leave an earlier root dirty again. The node then
+// stays dirty, as a GradientNode does while its root is.
+inline ValuePtr TangentNode::eval(EvalContext& ctx) {
+    if (!dirty() && !ctx.forceRecompute) return cached_;
+    Tape tape;
+    for (const auto& root : roots_) {
+        root->eval(ctx);
+        tape.add(root);
+    }
+    const ValuePtr newV = slot_.emit(tape.tangents(seeds_));
+    if (!eq_->equal(cached_, newV)) {
+        cached_ = newV;
+        notifyDownstream();
+    }
+    if (std::none_of(roots_.begin(), roots_.end(),
+                     [](const NodePtr& root) { return root->dirty(); }))
+        markClean();
+    return cached_;
+}
+
+inline std::string TangentNode::name() const { return name_; }
+
+inline std::vector<NodePtr> TangentNode::inputs() const { return roots_; }
 
 } // namespace dag::aad
