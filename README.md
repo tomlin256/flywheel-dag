@@ -22,8 +22,8 @@ evaluates only the part of the graph they dirtied.
 - **Incremental time-series nodes** (`dag::ts`) — rolling mean/stddev, EWMA, rolling min/max and
   sum, z-score, tick- and time-based delays, thresholds with hysteresis, debouncing and rate
   limiting.
-- **Arithmetic op nodes** (`dag::ops`) — each op its own type, with closed-form partial
-  derivatives.
+- **Arithmetic and trigonometric op nodes** (`dag::ops`) — each op its own type, with
+  closed-form partial derivatives.
 - **Algorithmic differentiation** (`dag::aad`) — an output's derivative with respect to every
   input in one reverse sweep, or every output's derivative in one direction in one forward sweep,
   at the values the graph holds. A compute node written as a generic lambda is differentiated with
@@ -193,7 +193,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_engine.hpp` | `dag::async` | `Engine`, `CycleSeqLock` |
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
-| `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `Derivative` |
+| `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `SinNode`, `CosNode`, `TanNode`, `AsinNode`, `AcosNode`, `AtanNode`, `Atan2Node`, `Derivative` |
 | `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual` |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |

@@ -425,9 +425,9 @@ meaningless, and at seconds-scale horizons re-warming costs nothing.
 
 ---
 
-## Basic Arithmetic Ops (`dag_ops.hpp`)
+## Arithmetic and Trigonometric Ops (`dag_ops.hpp`)
 
-All arithmetic op primitives live in `dag::ops::` and inherit `OpNodeImpl<Derived>`
+All op primitives live in `dag::ops::` and inherit `OpNodeImpl<Derived>`
 (dirty/downstream/`kind()` boilerplate, parallel to `dag::ts::NodeImpl<Derived>`
 but reports `NodeKind::Compute` — these are stateless, not incremental).
 
@@ -442,12 +442,19 @@ but reports `NodeKind::Compute` — these are stateless, not incremental).
 | `LnNode<T>` | unary | `T` | `ln(a)` — floating-point `T` only; unguarded, `a <= 0` propagates IEEE inf/nan |
 | `PowerNode<T>` | binary | `T` | `a ^ b` — floating-point `T` only; unguarded, negative base + non-integer exponent propagates NaN |
 | `SqrtNode<T>` | unary | `T` | `sqrt(a)` — floating-point `T` only; unguarded, `a < 0` propagates NaN |
+| `SinNode<T>` | unary | `T` | `sin(a)`, in radians — floating-point `T` only; unguarded, infinite `a` propagates NaN |
+| `CosNode<T>` | unary | `T` | `cos(a)` — as `SinNode` |
+| `TanNode<T>` | unary | `T` | `tan(a)` — as `SinNode`. No double is a pole: π/2 is not one |
+| `AsinNode<T>` | unary | `T` | `asin(a)` — floating-point `T` only; unguarded, `\|a\| > 1` propagates NaN |
+| `AcosNode<T>` | unary | `T` | `acos(a)` — as `AsinNode` |
+| `AtanNode<T>` | unary | `T` | `atan(a)` — floating-point `T` only |
+| `Atan2Node<T>` | binary | `T` | `atan2(a, b)`, the angle of the point `(b, a)` — **y first**, in `std::atan2`'s order; floating-point `T` only |
 
 `T` defaults to `double`. `SumNode`/`ProductNode`/`DiffNode`/`DivideNode` constrain to
 `std::is_arithmetic_v<T>`; `NegateNode` tightens to `std::is_signed_v<T>` (negating
-unsigned silently wraps); `ExpNode`/`LnNode`/`PowerNode`/`SqrtNode` tighten to
-`std::is_floating_point_v<T>` (`<cmath>`'s integral-promoting overload would silently
-truncate an integral `T`).
+unsigned silently wraps); `ExpNode`/`LnNode`/`PowerNode`/`SqrtNode` and the seven
+trigonometric nodes tighten to `std::is_floating_point_v<T>` (`<cmath>`'s
+integral-promoting overload would silently truncate an integral `T`).
 
 **Why dedicated types, not `ComputeNode<T, ...>` + a lambda:** each op is its own
 concrete C++ type so that `inputs()` plus the op's identity are enough for a tape
@@ -467,20 +474,41 @@ from `ops::Derivative<Op>`:
 | `LnNode` | `1/a` |
 | `PowerNode` | `b·a^(b-1)`, or `0` when `b` is 0; `a^b·ln(a)`, or `0` at `a = 0` with `b > 0` |
 | `SqrtNode` | `1/(2·sqrt(a))` |
+| `SinNode` | `cos(a)` |
+| `CosNode` | `-sin(a)` |
+| `TanNode` | `1 + tan²(a)` |
+| `AsinNode` | `1/sqrt(1 - a²)` (computed as `1/sqrt((1 - a)(1 + a))`) |
+| `AcosNode` | `-1/sqrt(1 - a²)`, the negative of `AsinNode`'s |
+| `AtanNode` | `1/(1 + a²)` |
+| `Atan2Node` | `b/(a² + b²)`, `-a/(a² + b²)` (computed as `(b/h)/h` and `-(a/h)/h`, with `h = hypot(a, b)`) |
 
 `PowerNode`'s two exceptions are points where the formula gives 0·∞, a NaN, but the
 function is flat. A NaN that is the true answer, ∂/∂b at `a < 0`, is kept. Only
 `T = double` has partials: an op over another type returns `false` and is a barrier.
 
-**Implementation note:** all nine ops above are `using` aliases over three
+Three forms depart from the textbook to stay accurate. `DivideNode`'s `-(a/b)/b`
+does not overflow or underflow in `b²` first. `AsinNode`'s and `AcosNode`'s
+`(1 - a)(1 + a)` does not cancel next to `|a| = 1`, where the textbook partial is
+1.9e-9 off at `a = 1 - 2⁻²⁷`. `Atan2Node`'s `hypot` neither overflows past about
+1.3e154 nor underflows below about 1.5e-154, where `a² + b²` would make the partials
+0 or ±∞ (flywheel-dag#14). The asin guard,
+`AadPartials.AsinAndAcosAreAccurateNextToTheirEnds`, bites only where the compiler
+does not fuse `1 - a·a` into one FMA: Apple Clang on arm64 does, which makes the
+textbook form exact there, so CI's Linux leg is what guards it. Check a change to it
+locally in a build configured with `-DCMAKE_CXX_FLAGS=-ffp-contract=off`. The true
+edges are kept: asin′ and acos′ are ±∞ at `|a| = 1`, and atan2 has no derivative at
+the origin (both partials NaN).
+
+**Implementation note:** all sixteen ops above are `using` aliases over three
 arity-generic templates — `UnaryOpNode<T,Op>`, `BinaryOpNode<T,Op>`,
 `NAryOpNode<T,Op>` — parameterized by a small `Op` functor: `std::negate`/`minus`/
 `divides` from `<functional>` where no identity element is needed (`NegateNode`/
 `DiffNode`/`DivideNode`); a custom `PlusOp<T>`/`MultipliesOp<T>` where one is
 (`SumNode`/`ProductNode`) — `std::plus`/`std::multiplies` model the combining rule
 only, not the empty-input case, so they can't supply `identity()` themselves; and
-`ExpOp<T>`/`LnOp<T>`/`PowOp<T>`/`SqrtOp<T>` wrapping `<cmath>` where no `<functional>`
-equivalent exists at all. Each alias still names its own concrete type
+`ExpOp<T>`/`LnOp<T>`/`PowOp<T>`/`SqrtOp<T>` and the seven trigonometric `Op`s
+(`SinOp<T>` … `Atan2Op<T>`) wrapping `<cmath>` where no `<functional>` equivalent
+exists at all. Each alias still names its own concrete type
 (`SumNode<double>` ≡
 `NAryOpNode<double,PlusOp<double>>`, distinct from `ProductNode<double>` ≡
 `NAryOpNode<double,MultipliesOp<double>>`), so the AAD-dispatch property above is
@@ -505,7 +533,7 @@ mixin a tape finds with `dynamic_cast`, as `discoverStatefulNodes()` finds
 
 | Node | Partials |
 |---|---|
-| `dag::ops` over `double` | Closed form, from `ops::Derivative<Op>` (see Basic Arithmetic Ops) |
+| `dag::ops` over `double` | Closed form, from `ops::Derivative<Op>` (see Arithmetic and Trigonometric Ops) |
 | `ConditionNode` | `1` for the branch it took. It never names the condition or the other branch |
 | `TweakableComputeNode` | Tweaked: none, a constant. Untweaked: `false`, a barrier |
 | `aad::DifferentiableNode<N>` | Its generic functor, run once on `aad::Dual<N>` |
@@ -548,8 +576,10 @@ unqualified, after `using std::exp;`, so that one body compiles at `double` and 
 `Dual<N>`; `std::exp(x)` does not compile at `Dual<N>`. `aad::chain(x,
 f(x.value), f′(x.value))` lifts any other function. At a kink, `abs′(0)` is 0, and
 `min`/`max` follow the argument they return, the first one on a tie. `÷`, `exp`,
-`log`, `sqrt` and `pow` on duals take their partials from `ops::Derivative<Op>`,
-so a `Dual` and an op node cannot drift apart.
+`log`, `sqrt`, `pow` and the seven trigonometric functions (`sin`, `cos`, `tan`,
+`asin`, `acos`, `atan`, and `atan2` with y first) on duals take their partials from
+`ops::Derivative<Op>`, so a `Dual` and an op node cannot drift apart.
+`AadDual.TrigSharesTheOpsPartials` holds the trigonometric ones to the bit.
 
 **Test the path you mean to test.** The Black–Scholes price's derivative through
 d1 is 0, because S·φ(d1) = K·e^(−rT)·φ(d2), so the price alone cannot see d1's
