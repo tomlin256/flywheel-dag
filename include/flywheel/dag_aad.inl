@@ -345,8 +345,8 @@ template<std::size_t N> bool operator>=(double a, const Dual<N>& b) { return a >
 
 // ── Functions ───────────────────────────────────────────────────────────────
 //
-// exp, log and sqrt take their partials from the ops' Derivative<Op>, so a
-// Dual and an op node agree to the bit.
+// exp, log, sqrt and the trigonometric functions take their partials from the
+// ops' Derivative<Op>, so a Dual and an op node agree to the bit.
 
 template<std::size_t N> Dual<N> exp(const Dual<N>& x) {
     return chain(x, std::exp(x.value), ops::Derivative<ops::ExpOp<double>>::d(x.value));
@@ -358,10 +358,22 @@ template<std::size_t N> Dual<N> sqrt(const Dual<N>& x) {
     return chain(x, std::sqrt(x.value), ops::Derivative<ops::SqrtOp<double>>::d(x.value));
 }
 template<std::size_t N> Dual<N> sin(const Dual<N>& x) {
-    return chain(x, std::sin(x.value), std::cos(x.value));
+    return chain(x, std::sin(x.value), ops::Derivative<ops::SinOp<double>>::d(x.value));
 }
 template<std::size_t N> Dual<N> cos(const Dual<N>& x) {
-    return chain(x, std::cos(x.value), -std::sin(x.value));
+    return chain(x, std::cos(x.value), ops::Derivative<ops::CosOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> tan(const Dual<N>& x) {
+    return chain(x, std::tan(x.value), ops::Derivative<ops::TanOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> asin(const Dual<N>& x) {
+    return chain(x, std::asin(x.value), ops::Derivative<ops::AsinOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> acos(const Dual<N>& x) {
+    return chain(x, std::acos(x.value), ops::Derivative<ops::AcosOp<double>>::d(x.value));
+}
+template<std::size_t N> Dual<N> atan(const Dual<N>& x) {
+    return chain(x, std::atan(x.value), ops::Derivative<ops::AtanOp<double>>::d(x.value));
 }
 template<std::size_t N> Dual<N> tanh(const Dual<N>& x) {
     const double t = std::tanh(x.value);
@@ -385,6 +397,13 @@ template<std::size_t N> Dual<N> pow(const Dual<N>& a, const Dual<N>& b) {
 }
 template<std::size_t N> Dual<N> pow(const Dual<N>& a, double b) { return pow(a, Dual<N>(b)); }
 template<std::size_t N> Dual<N> pow(double a, const Dual<N>& b) { return pow(Dual<N>(a), b); }
+
+template<std::size_t N> Dual<N> atan2(const Dual<N>& a, const Dual<N>& b) {
+    const auto [pa, pb] = ops::Derivative<ops::Atan2Op<double>>::d(a.value, b.value);
+    return detail::combine(std::atan2(a.value, b.value), pa, a, pb, b);
+}
+template<std::size_t N> Dual<N> atan2(const Dual<N>& a, double b) { return atan2(a, Dual<N>(b)); }
+template<std::size_t N> Dual<N> atan2(double a, const Dual<N>& b) { return atan2(Dual<N>(a), b); }
 
 // As std::min and std::max: the first argument on a tie.
 template<std::size_t N> Dual<N> min(const Dual<N>& a, const Dual<N>& b) {

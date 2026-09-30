@@ -300,6 +300,61 @@ TEST(AadNode, ItsDeltaMatchesItsClosedFormDerivatives) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The trigonometric functions (flywheel-dag#14)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One formula over the seven, as a DifferentiableNode and as a graph of ops.
+// They agree to 1e-13, not bit for bit: the compiler may fuse the lambda's
+// arithmetic, which a chain of nodes cannot. The lambda calls the functions
+// unqualified, with a double and an int on either side of atan2.
+TEST(AadNode, ATrigFunctorAgreesWithItsOpGraph) {
+    auto u     = Input<double>::make("u", 0.6);
+    auto v     = Input<double>::make("v", 1.1);
+    auto one   = Input<double>::make("one", 1.0);
+    auto two   = Input<double>::make("two", 2.0);
+    auto three = Input<double>::make("three", 3.0);
+
+    const NodePtr fromOps = ops::SumNode<>::make("fromOps", {
+        ops::ProductNode<>::make("atan2(v,u).sin(u)", {ops::Atan2Node<>::make("atan2(v,u)", v, u),
+                                                       ops::SinNode<>::make("sin(u)", u)}),
+        ops::CosNode<>::make("cos(v)", v),
+        ops::NegateNode<>::make("-tan(u.v)",
+            ops::TanNode<>::make("tan(u.v)", ops::ProductNode<>::make("u.v", {u, v}))),
+        ops::ProductNode<>::make("asin(u/2).acos(v/3)", {
+            ops::AsinNode<>::make("asin(u/2)", ops::DivideNode<>::make("u/2", u, two)),
+            ops::AcosNode<>::make("acos(v/3)", ops::DivideNode<>::make("v/3", v, three))}),
+        ops::AtanNode<>::make("atan(u)", u),
+        ops::Atan2Node<>::make("atan2(v,1)", v, one),
+        ops::Atan2Node<>::make("atan2(2,u)", two, u)});
+
+    const NodePtr fromFunctor = aad::DifferentiableNode<2>::make("fromFunctor", {u, v},
+        [](const auto& x, const auto& y) {
+            using std::sin; using std::cos; using std::tan; using std::asin; using std::acos;
+            using std::atan; using std::atan2;
+            return atan2(y, x) * sin(x) + cos(y) - tan(x * y) + asin(x / 2.0) * acos(y / 3.0)
+                   + atan(x) + atan2(y, 1.0) + atan2(2, x);
+        },
+        InvalidationMode::Lazy);
+
+    EvalContext ctx;
+    const ValuePtr opsValue     = fromOps->eval(ctx);
+    const ValuePtr functorValue = fromFunctor->eval(ctx);
+    expectWithin(get_value<double>(functorValue), get_value<double>(opsValue), 1e-13);
+
+    const aad::Tape tape({fromOps, fromFunctor});
+    const std::vector<NodePtr> ins = {u, v};
+    const std::vector<double> opsAdj     = tape.adjoints(fromOps, ins);
+    const std::vector<double> functorAdj = tape.adjoints(fromFunctor, ins);
+    for (std::size_t i = 0; i < ins.size(); ++i) {
+        SCOPED_TRACE(ins[i]->name());
+        expectWithin(functorAdj[i], opsAdj[i], 1e-13);
+        const std::vector<double> t = tape.tangents({{ins[i], 1.0}});
+        expectWithin(t[0], opsAdj[i], 1e-13);
+        expectWithin(t[1], opsAdj[i], 1e-13);
+    }
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

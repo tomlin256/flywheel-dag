@@ -132,10 +132,26 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
                                     [](double v) { return -2.0 / std::sqrt(kPi) * std::exp(-v * v); }},
         {"abs",  dag::aad::abs<1>,  [](double v) { return std::abs(v); },
                                     [](double v) { return v > 0.0 ? 1.0 : -1.0; }},
+        {"tan",  dag::aad::tan<1>,  [](double v) { return std::tan(v); },
+                                    [](double v) { return 1.0 / (std::cos(v) * std::cos(v)); }},
+        {"asin", dag::aad::asin<1>, [](double v) { return std::asin(v); },
+                                    [](double v) { return 1.0 / std::sqrt(1.0 - v * v); }},
+        {"acos", dag::aad::acos<1>, [](double v) { return std::acos(v); },
+                                    [](double v) { return -1.0 / std::sqrt(1.0 - v * v); }},
+        {"atan", dag::aad::atan<1>, [](double v) { return std::atan(v); },
+                                    [](double v) { return 1.0 / (1.0 + v * v); }},
+    };
+    // The points, moved where a function needs them: abs to either side of its
+    // kink, and asin and acos inside [−1, 1].
+    const auto pointFor = [](const Case& c, double v) {
+        const std::string name = c.name;
+        if (name == "abs") return v - 2.0;
+        if (name == "asin" || name == "acos") return v / 5.0;
+        return v;
     };
     for (const Case& c : cases) {
         for (const double v : {0.3, 1.7, 4.2}) {
-            const double at = (c.name == std::string("abs")) ? v - 2.0 : v;
+            const double at = pointFor(c, v);
             const Dual<1> r = c.f(arg<1>(at, 0));
             EXPECT_EQ(r.value, c.value(at)) << c.name << " at " << at;
             EXPECT_NEAR(r.d[0], c.slope(at), 1e-15 * std::max(1.0, std::abs(c.slope(at))))
@@ -168,6 +184,53 @@ TEST(AadDual, PowCoversEachMix) {
     EXPECT_EQ(r.d[1], 0.0);
     r = pow(arg<2>(0.0, 0), arg<2>(0.0, 1));
     EXPECT_EQ(r.d[0], 0.0);
+}
+
+// y first, as std::atan2. At (3, −4), in the second quadrant, the partials are
+// b/(a² + b²) = −4/25 and −a/(a² + b²) = −3/25.
+TEST(AadDual, Atan2CoversEachMix) {
+    const Dual<2> a = arg<2>(3.0, 0);
+    const Dual<2> b = arg<2>(-4.0, 1);
+
+    Dual<2> r = atan2(a, b);
+    EXPECT_DOUBLE_EQ(r.value, std::atan2(3.0, -4.0));
+    EXPECT_DOUBLE_EQ(r.d[0], -4.0 / 25.0);
+    EXPECT_DOUBLE_EQ(r.d[1], -3.0 / 25.0);
+
+    r = atan2(a, -4.0);
+    EXPECT_DOUBLE_EQ(r.value, std::atan2(3.0, -4.0));
+    EXPECT_DOUBLE_EQ(r.d[0], -4.0 / 25.0);
+    EXPECT_EQ(r.d[1], 0.0);
+
+    r = atan2(3.0, b);
+    EXPECT_DOUBLE_EQ(r.value, std::atan2(3.0, -4.0));
+    EXPECT_EQ(r.d[0], 0.0);
+    EXPECT_DOUBLE_EQ(r.d[1], -3.0 / 25.0);
+}
+
+// A Dual takes its partials from the op's Derivative<Op>, so the two agree bit
+// for bit, including where the textbook forms go wrong: asin next to 1, and
+// atan2 where a² + b² underflows or overflows.
+TEST(AadDual, TrigSharesTheOpsPartials) {
+    namespace ops = dag::ops;
+    const double nearOne = 1.0 - std::ldexp(1.0, -27);
+    for (const double v : {-0.8, 0.3, nearOne}) {
+        const Dual<1> x = arg<1>(v, 0);
+        EXPECT_EQ(sin(x).d[0],  ops::Derivative<ops::SinOp<double>>::d(v)) << "at " << v;
+        EXPECT_EQ(cos(x).d[0],  ops::Derivative<ops::CosOp<double>>::d(v)) << "at " << v;
+        EXPECT_EQ(tan(x).d[0],  ops::Derivative<ops::TanOp<double>>::d(v)) << "at " << v;
+        EXPECT_EQ(asin(x).d[0], ops::Derivative<ops::AsinOp<double>>::d(v)) << "at " << v;
+        EXPECT_EQ(acos(x).d[0], ops::Derivative<ops::AcosOp<double>>::d(v)) << "at " << v;
+        EXPECT_EQ(atan(x).d[0], ops::Derivative<ops::AtanOp<double>>::d(v)) << "at " << v;
+    }
+    for (const int e : {0, -600, 600}) {
+        const double a = std::ldexp(3.0, e);
+        const double b = std::ldexp(-4.0, e);
+        const Dual<2> r = atan2(arg<2>(a, 0), arg<2>(b, 1));
+        const auto [pa, pb] = ops::Derivative<ops::Atan2Op<double>>::d(a, b);
+        EXPECT_EQ(r.d[0], pa) << "at (3, -4) * 2^" << e;
+        EXPECT_EQ(r.d[1], pb) << "at (3, -4) * 2^" << e;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -192,6 +192,10 @@ std::vector<double> tangents(const std::vector<NodePtr>& roots, const std::vecto
 // compile at Dual<N>: a compile error, not a wrong answer. chain() lifts any
 // other function whose derivative is known.
 //
+// The quotient, exp, log, sqrt, pow and the trigonometric functions take their
+// partials from the ops' Derivative<Op>, so a Dual and an op node agree to the
+// bit.
+//
 // Comparisons read the value alone, so a functor can branch. Its derivative is
 // then the derivative of the branch it took, as a ConditionNode's is.
 //
@@ -264,6 +268,10 @@ template<std::size_t N> Dual<N> log(const Dual<N>& x);
 template<std::size_t N> Dual<N> sqrt(const Dual<N>& x);
 template<std::size_t N> Dual<N> sin(const Dual<N>& x);
 template<std::size_t N> Dual<N> cos(const Dual<N>& x);
+template<std::size_t N> Dual<N> tan(const Dual<N>& x);
+template<std::size_t N> Dual<N> asin(const Dual<N>& x);
+template<std::size_t N> Dual<N> acos(const Dual<N>& x);
+template<std::size_t N> Dual<N> atan(const Dual<N>& x);
 template<std::size_t N> Dual<N> tanh(const Dual<N>& x);
 template<std::size_t N> Dual<N> erf(const Dual<N>& x);
 template<std::size_t N> Dual<N> erfc(const Dual<N>& x);
@@ -273,6 +281,12 @@ template<std::size_t N> Dual<N> abs(const Dual<N>& x);
 template<std::size_t N> Dual<N> pow(const Dual<N>& a, const Dual<N>& b);
 template<std::size_t N> Dual<N> pow(const Dual<N>& a, double b);
 template<std::size_t N> Dual<N> pow(double a, const Dual<N>& b);
+
+/// y first, as std::atan2. With ops::Atan2Node's partials, which neither
+/// overflow nor underflow.
+template<std::size_t N> Dual<N> atan2(const Dual<N>& a, const Dual<N>& b);
+template<std::size_t N> Dual<N> atan2(const Dual<N>& a, double b);
+template<std::size_t N> Dual<N> atan2(double a, const Dual<N>& b);
 
 template<std::size_t N> Dual<N> min(const Dual<N>& a, const Dual<N>& b);
 template<std::size_t N> Dual<N> min(const Dual<N>& a, double b);
