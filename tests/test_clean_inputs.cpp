@@ -409,13 +409,17 @@ TEST_P(TopKind, StaysDirtyWithItsInput) {
     const NodePtr top = GetParam().make(c);
     EvalContext ctx;
     const double before = valueOf(top, ctx);
-    if (GetParam().of) EXPECT_DOUBLE_EQ(before, GetParam().of(minusTwoXPlusThree(g.x)));
+    if (GetParam().of) {
+        EXPECT_DOUBLE_EQ(before, GetParam().of(minusTwoXPlusThree(g.x)));
+    }
     EXPECT_TRUE(c->dirty());
     EXPECT_TRUE(top->dirty());
 
     g.x->set(5.0);
     const double after = valueOf(top, ctx);
-    if (GetParam().of) EXPECT_DOUBLE_EQ(after, GetParam().of(minusTwoXPlusThree(g.x)));
+    if (GetParam().of) {
+        EXPECT_DOUBLE_EQ(after, GetParam().of(minusTwoXPlusThree(g.x)));
+    }
     EXPECT_TRUE(top->dirty());
 }
 
