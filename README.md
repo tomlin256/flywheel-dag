@@ -188,6 +188,8 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
 - **Eager or Lazy, per node.** An `Eager` node recomputes whenever anything upstream fired — the
   right answer for any node whose output is not a pure function of its inputs' values, such as
   every stateful time-series node. A `Lazy` node recomputes only when an input's value changed.
+  A `ConditionNode` passes on only what its condition and the branch it took say, so a move of
+  the other branch reaches none of its consumers.
 - **Sources and the engine.** Feed threads `post()` into async sources. On each wake the engine
   flushes every source, evaluates the dirty outputs, and fires a callback only when an output's
   value changed.

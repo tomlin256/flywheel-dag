@@ -48,6 +48,10 @@ warning fails it. Turn the option on locally to see what CI will see.
   `const ValuePtr v = node->eval(ctx); const T& x = get_value<T>(v);`. A
   reference bound to `get_value()` of the temporary relies on the producer's
   `cached_` alone, and GCC's `-Wdangling-reference` rejects it.
+- **Brace an `if` whose body is a gtest check.** `EXPECT_…` and `ASSERT_…` expand
+  to an `if` with an `else` of their own, and GCC's `-Wdangling-else` rejects one
+  under an unbraced `if`. Apple Clang does not warn, so only CI's GCC leg sees it
+  (flywheel-dag#18).
 - **The flags are the top level's alone.** Never put a flag on `flywheel_dag`'s
   `INTERFACE` or in the cache: a consumer's flags are its own.
   `test_warning_flags` checks that every translation unit of this project gets
@@ -121,7 +125,10 @@ auto node = ComputeNode<double, double, double>::make(
 | `PredicateEqualityPolicy` | Custom comparison logic |
 
 **Lazy evaluation** — Nodes cache a value and a `Dirtiness` state. `eval()` runs
-only when not `Clean`. `Input::set()` propagates downstream.
+only when not `Clean`. `Input::set()` propagates downstream. A node is clean only
+when every input it read still is: an evaluation that a "maybe" reaches before it
+ends leaves the node dirty, and tells its consumers (flywheel-dag#18; see
+`dag::NodeBase` below).
 
 **`InvalidationMode` — per node, set at construction, never changed:**
 
@@ -263,6 +270,17 @@ evaluated. An equal tweak only freezes, and `cached_` keeps its identity
 Maybe, so a Lazy consumer skips when the recomputed value equals the frozen one
 (flywheel-dag#8).
 
+**`ConditionNode` hears only the branch it took** (flywheel-dag#18). It pulls the
+condition and the branch the condition selects, never the other, and each branch
+reaches it through a listener of its own, which passes an invalidation on only
+while the node takes that branch. A move of the other branch reaches none of its
+consumers: an `Eager` node below it does not recompute for it, a stateful one does
+not tick, and a sensitivity node does not record. A switch arrives through the
+condition, which the node always hears, and reads the branch fresh. Hearing both
+branches gave a stale value: a consumer's later pull could evaluate the stale
+branch after the consumer had read the `ConditionNode`, and the consumer ended
+clean over it. The `UntakenBranch` tests in `test_clean_inputs.cpp` pin it.
+
 **Custom node design** — Compose `ComputeNode` (+ captured mutable state), or a
 `dag::ts::StatefulNodeBase` for incremental time-series state, or a
 `dag::ops::OpNodeImpl<Derived>`-based op (see below) for a stateless arithmetic
@@ -274,28 +292,64 @@ engine calls through, not a base to build on.
 
 **`dag::NodeBase` — the one copy of the dirty/downstream protocol.** It owns
 `downstream_`, the dirty flag, and `dirty()` / `invalidate()` / `addDownstream()`
-/ `notifyDownstream()`. Every node in the engine derives from it: `Input`,
-`ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`,
-`AsyncInput`, `AsyncQueue`, `MemoizedComputeNode`, `ReplayInput`, `ReplayQueue`,
-`ts::NodeImpl`, `ops::OpNodeImpl`, `aad::DifferentiableNode`, `aad::GradientNode`
-and `aad::TangentNode` — and so should any node an application defines.
+/ `notifyDownstream()`, and the bracket around an evaluation that pulls,
+`beginEval()` / `endEval()`. Every node in the engine derives from it: `Input`,
+`ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode` (and
+its branch listeners), `AsyncInput`, `AsyncQueue`, `MemoizedComputeNode`,
+`ReplayInput`, `ReplayQueue`, `ts::NodeImpl`, `ops::OpNodeImpl`,
+`aad::DifferentiableNode`, `aad::GradientNode` and `aad::TangentNode` — and so
+should any node an application defines.
 
 `downstream_` is **private**. Reaching downstream goes through
 `notifyDownstream()` — several of the twelve copies this replaced walked the
 vector inline instead of calling their own helper, which is how one idea drifted
 into four spellings of it.
 
+**A node is clean only when every input it read still is** (flywheel-dag#18). The
+cascade's guard stops at a node that is already dirty, which is safe only while a
+clean node's inputs are clean. An evaluation breaks that when an input it has
+already read goes dirty again before it ends, as when an always-dirty node, pulled
+again through a later input, tells the earlier input's nodes. That input sends a
+"maybe" cascade, which reaches the node while it is still evaluating, so a "maybe"
+is the signal: `propagate()` records every one.
+
+- A node that pulls calls `beginEval()` before its first pull, which forgets the
+  "maybe"s that came before the evaluation, and `endEval()` in place of
+  `markClean()` wherever its evaluation ends, skip paths included.
+- `endEval()` marks the node clean, unless a "maybe" reached it during the
+  evaluation. Then the node keeps the state its evaluation left it in, so a Lazy
+  node that read an input since evaluated again still recomputes, and tells its
+  consumers "maybe", so the one evaluating it now stays dirty too.
+- Sources, and a tweaked node returning its frozen value, pull nothing and call
+  `markClean()`. A node of your own that pulls should use the pair: one that calls
+  `markClean()` works as before, and keeps the exposure.
+- Asking each input for `dirty()` instead would leave every consumer of an
+  always-dirty node dirty for good, and cost a virtual call per input.
+- The stay is `[[gnu::cold, gnu::noinline]]`. Inlined into every evaluation, the
+  rule cost `bench_hot_path`'s chain row 2.4%; out of line, 1 to 2%.
+- `test_clean_inputs.cpp` pins the rule for every node kind that pulls, with the
+  always-dirty test nodes in `tests/test_nodes.hpp`.
+
 Overriding `dirty()` or `propagate()` — the one override point for invalidation,
 since `invalidate()` and `invalidateMaybe()` are `final` — needs a reason, and
-only two are known:
+only three are known:
 
 | Node | Override | Why |
 |---|---|---|
 | `TweakableComputeNode` | `propagate()` absorbs while frozen | A tweaked value does not depend on its inputs. |
+| A `ConditionNode`'s branch listener | `propagate()` passes the invalidation on to the node, as the same kind, while the node takes its branch | The node's value does not depend on the other branch (flywheel-dag#18). |
 | A clock-driven node (application-defined) | `dirty()` is always `true`; `propagate()` forwards unconditionally | Its output is a function of a clock, so it is never clean, and the inherited `state_` guards in `propagate()` would swallow every invalidation after the first. |
 
 Anything else overriding these is re-implementing the protocol rather than using
 it.
+
+A clock-driven node reached by two paths leaves the node where they meet dirty
+after every evaluation, so that node, and everything below it, evaluates again on
+every pull and every engine cycle. And the clean-inputs rule cannot see through a
+clock-driven node that forwards with `notifyDownstream()`, which says "changed":
+if a node above it went dirty again during a consumer's evaluation, the consumer
+would hear "changed" and end clean. That needs a second always-dirty node, or a
+forced evaluation, above the first.
 
 ---
 
@@ -548,7 +602,9 @@ node that does not implement the mixin. A tape does not follow a barrier's input
 
 - **A tape evaluates nothing.** Every root must be clean, or the tape throws
   `std::invalid_argument`. `partials()` pulls inputs with `eval()`, and a clean
-  node's named inputs are clean too, so every pull returns a cached value. Never
+  node's named inputs are clean too (flywheel-dag#18), so every pull returns a
+  cached value. An always-dirty node is the exception, and so is the root a
+  sensitivity node records right after its pull (below). Never
   make a tape evaluate a dirty root for its caller: `Engine::cycle()` snapshots its
   outputs' dirty flags before evaluating them, so a registered output evaluated
   between cycles reads as clean, and its callback misses the change. A pass runs in
@@ -596,22 +652,32 @@ and sweeps it, in reverse or forward.
   still covers a root that is also a registered output, registered before or after
   the node.
 - **A `TangentNode` records each root right after its pull,** into one tape, through
-  the private `Tape::add()`. A later root's pull can leave an earlier root dirty
-  again, through a stale node on a branch not taken (flywheel-dag#18), so a tape
-  recorded after every pull would throw. Recorded right after its pull, each root is
-  clean, and a later pull evaluates only nodes the tape does not hold yet, so it
-  moves no value the tape recorded, and one forward sweep serves every root. `add()`
-  is private because between two calls nothing may move the graph but the next
-  root's pull. `AadTangentNode.OneTapeServesEveryRoot` goes red on a tape per root.
-- **A sensitivity node is clean only when its roots are.** A root can be dirty again
-  after the recording: a later root's pull left it so, or the tape's pull evaluated
-  an always-dirty node, such as an application's clock-driven node, on its path.
-  Marked clean then, the node would miss the next change, which stops at the dirty
-  root (flywheel-dag#19). So it stays dirty and recomputes on its next evaluation.
-  `AadGradientNode.StaysDirtyWhileItsRootIs`,
-  `AadTangentNode.ARootLeftDirtyByAnotherKeepsTheNodeDirty` and
-  `AadTangentNode.AnAlwaysDirtyNodeKeepsItDirty` pin it, with the always-dirty test
-  node `aad_test::AlwaysFiring`.
+  the private `Tape::record()`. A later root's pull can leave an earlier root dirty
+  again, through an always-dirty node that reaches both. Recorded right after its
+  pull, each root is recorded at the values its pull left, and a later pull
+  evaluates only nodes the tape does not hold yet, an always-dirty node apart, so
+  one forward sweep serves every root. Until flywheel-dag#18's fix, a stale node on a
+  branch not taken did the same, and a tape recorded after every pull threw.
+  `record()` is private because between two calls nothing may move the graph but
+  the next root's pull. `AadTangentNode.OneTapeServesEveryRoot` goes red on a tape
+  per root.
+- **A sensitivity node records the root it has just pulled, clean or not,**
+  through `Tape::record()`, which skips `add()`'s clean check. A root that an
+  always-dirty node reaches by two paths stays dirty after its own pull, and
+  requiring it clean would make the node throw on every evaluation. The tape's walk
+  then evaluates what went dirty again, as it evaluates any always-dirty node it
+  meets. The public `Tape` constructor still requires clean roots.
+  `AadGradientNode.RecordsARootThatStaysDirty` and
+  `AadTangentNode.RecordsARootThatStaysDirty` go red through `add()`.
+- **A sensitivity node stays dirty when a root goes dirty again during its
+  evaluation,** as every node now does (`NodeBase::endEval()`): a later root's pull,
+  or the tape's pull of an always-dirty node such as an application's clock-driven
+  node, can leave one so. Marked clean then, the node would miss the next change,
+  which stops at the dirty root (flywheel-dag#19), and `endEval()` tells the nodes
+  over it too (flywheel-dag#18). `AadGradientNode.StaysDirtyWhileItsRootIs`,
+  `AadTangentNode.AnAlwaysDirtyNodeKeepsItDirty` and
+  `CleanInputs.ASensitivityNodesConsumerStaysDirtyWithIt` pin it, with the
+  always-dirty test node `test_nodes::AlwaysFiring`.
 - **`eval()` throws what the tape throws, and leaves the node dirty,** so the next
   `eval()` retries: `std::domain_error` for a barrier with a `wrt` or seed node
   upstream, `std::invalid_argument` for a root, `wrt` or seed node on the tape that
@@ -653,6 +719,9 @@ see them.
   Wire a downstream `ComputeNode<R, std::vector<T>>` for aggregation.
 - **Deterministic tests:** drive the engine with `Engine::step()` and bounded
   cycle counts — never `sleep_for` or wall-clock timeouts.
+- **Always-dirty test nodes** stand in for an application's clock-driven node, in
+  `tests/test_nodes.hpp`: `AlwaysFiring` tells its consumers on every pull, and
+  `Tripwire` once, on the pull a test arms it for.
 - **`LatchedDebounceNode` test checklist:** onset fires exactly once after N ticks;
   `nullopt` on every subsequent tick while latched; resolved fires exactly once on first
   `false`; count resets if upstream goes `false` before N ticks; state save/restore
