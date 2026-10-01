@@ -56,8 +56,8 @@ template<typename T>
 constexpr bool isDual() { return !std::is_same_v<std::decay_t<T>, double>; }
 
 // The graph of flywheel-dag#18. sel takes e^x, so b, on the branch it did not
-// take, is pulled only by root2. When b moves, root2's pull evaluates it, b
-// tells sel, and root1 is dirty again after its own pull.
+// take, is pulled only by root2. When b moves, root2's pull evaluates it. sel
+// does not hear it, because it did not take b, so root1 stays clean.
 struct StaleBranch {
     InputPtr<bool>   cond  = Input<bool>::make("cond", true);
     InputPtr<double> x     = Input<double>::make("x", 1.0);
@@ -199,23 +199,22 @@ TEST(AadTangentNode, AnUnchangedTangentIsNotDelivered) {
 // Roots that leave each other dirty
 // ─────────────────────────────────────────────────────────────────────────────
 
-// After y moves, the pull of root2 leaves root1 dirty. The node recorded root1
-// before that, so its tangents are right, and it stays dirty with root1. The
-// later move of x stops at sel, which is still dirty, but the node is dirty
-// already, so it recomputes. A tape recorded after both pulls throws.
-TEST(AadTangentNode, ARootLeftDirtyByAnotherKeepsTheNodeDirty) {
+// After y moves, the pull of root2 evaluates b, and sel does not hear it, so
+// root1 stays clean and the node ends clean. x's move then reaches the node,
+// and a tape recorded after both pulls holds both roots. Before
+// flywheel-dag#18's fix, root1 was dirty again after the pull of root2, so the
+// node stayed dirty and that tape threw.
+TEST(AadTangentNode, ABranchNotTakenLeavesNoRootDirty) {
     StaleBranch g;
     auto tangents = aad::TangentNode::make("tangents", {g.root1, g.root2}, {{g.x, 1.0}, {g.y, 1.0}});
     EvalContext ctx;
     tangents->eval(ctx);
-    EXPECT_TRUE(tangents->dirty());   // b is new, and its first pull told sel
-    tangents->eval(ctx);
-    EXPECT_FALSE(tangents->dirty());
+    EXPECT_FALSE(tangents->dirty());   // b is new, and its first pull did not reach sel
 
     g.y->set(9.0);
     const ValuePtr afterY = tangents->eval(ctx);
-    EXPECT_TRUE(g.root1->dirty());
-    EXPECT_TRUE(tangents->dirty());
+    EXPECT_FALSE(g.root1->dirty());
+    EXPECT_FALSE(tangents->dirty());
     const Tangents& t = get_value<Tangents>(afterY);
     ASSERT_EQ(t.size(), 2u);
     expectClose(t[0], 2.0 * std::exp(1.0));   // root1 = 2·e^x
@@ -232,8 +231,8 @@ TEST(AadTangentNode, ARootLeftDirtyByAnotherKeepsTheNodeDirty) {
     h.y->set(9.0);
     h.root1->eval(ctx);
     h.root2->eval(ctx);
-    EXPECT_TRUE(h.root1->dirty());
-    EXPECT_THROW(aad::Tape({h.root1, h.root2}), std::invalid_argument);
+    EXPECT_FALSE(h.root1->dirty());
+    EXPECT_NO_THROW(aad::Tape({h.root1, h.root2}));
 }
 
 // k is always dirty, and the tape's pulls evaluate it again, so the roots end
@@ -262,9 +261,10 @@ TEST(AadTangentNode, AnAlwaysDirtyNodeKeepsItDirty) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The first root is sel·x, where sel picks e^x or a counted functor of y. With
-// the exponential taken, a move of y reaches the node through the untaken
-// branch. The node records a tape, as the dual calls show, without reading
-// that branch, although a seed sits on the branch's node.
+// the exponential taken, sel does not hear a move of y, so the node stays clean
+// (flywheel-dag#18). When x moves and moves back, the node records a tape, as
+// the dual calls show, without reading the branch not taken, although a seed
+// sits on that branch's node.
 TEST(AadTangentNode, EvaluatesOnlyWhatItsRootsDo) {
     auto x    = Input<double>::make("x", 2.0);
     auto y    = Input<double>::make("y", 3.0);
@@ -300,6 +300,11 @@ TEST(AadTangentNode, EvaluatesOnlyWhatItsRootsDo) {
     const int dualsBefore = duals;
 
     y->set(4.0);
+    EXPECT_TRUE(counted->dirty());
+    EXPECT_FALSE(tangents->dirty());
+
+    x->set(3.0);
+    x->set(2.0);
     EXPECT_TRUE(tangents->dirty());
     const ValuePtr after = tangents->eval(ctx);
     EXPECT_EQ(duals, dualsBefore + 1);

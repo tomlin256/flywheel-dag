@@ -184,9 +184,10 @@ TEST(AadGradientNode, AnEqualityPolicyGatesDelivery) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The root is sel·x, where sel picks e^x or a counted functor of y. With the
-// exponential taken, a move of y reaches the node through the untaken branch.
-// The node records a tape, as the dual calls show, without reading that
-// branch, although the branch's node is one of its wrt nodes.
+// exponential taken, sel does not hear a move of y, so the node stays clean
+// (flywheel-dag#18). When x moves and moves back, the node records a tape, as
+// the dual calls show, without reading the branch not taken, although that
+// branch's node is one of its wrt nodes.
 TEST(AadGradientNode, EvaluatesOnlyWhatItsRootDoes) {
     auto x    = Input<double>::make("x", 2.0);
     auto y    = Input<double>::make("y", 3.0);
@@ -219,6 +220,11 @@ TEST(AadGradientNode, EvaluatesOnlyWhatItsRootDoes) {
     const int dualsBefore = duals;
 
     y->set(4.0);
+    EXPECT_TRUE(counted->dirty());
+    EXPECT_FALSE(grad->dirty());
+
+    x->set(3.0);
+    x->set(2.0);
     EXPECT_TRUE(grad->dirty());
     const ValuePtr after = grad->eval(ctx);
     EXPECT_EQ(duals, dualsBefore + 1);

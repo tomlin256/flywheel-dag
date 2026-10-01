@@ -440,6 +440,6 @@ Commits: `docs: describe the clean-inputs rule`, `build: release v0.1.12` and
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — A `ConditionNode` hears only the branch it took | Not started | |
+| 1 — A `ConditionNode` hears only the branch it took | Done | ctest 36 / 36, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_clean_inputs` has the five `UntakenBranch` tests. Against v0.1.11's headers the first three failed as stated: c stayed 2e + 4 with root1 dirty, the engine made two callbacks, and the `Eager` node's functor ran. The other two passed there. The three rewritten AAD tests failed against v0.1.11's headers too. Each hand-made change failed exactly the tests stated, across every suite |
 | 2 — A node is clean only when every input it read still is | Not started | |
 | 3 — Docs and release | Not started | |

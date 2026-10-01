@@ -559,7 +559,13 @@ inline std::shared_ptr<ConditionNode> ConditionNode::make(
     auto self = std::shared_ptr<ConditionNode>(
         new ConditionNode(std::move(name), condition, trueBranch, falseBranch,
                           std::move(eq)));
-    wire(self, self->inputs());
+    // Not wire(): the condition reaches the node itself, but each branch reaches
+    // it through its listener, which drops what the branch not taken says.
+    self->onTrue_  = std::make_shared<BranchListener>(self, true);
+    self->onFalse_ = std::make_shared<BranchListener>(self, false);
+    condition->addDownstream(self);
+    trueBranch->addDownstream(self->onTrue_);
+    falseBranch->addDownstream(self->onFalse_);
     return self;
 }
 
@@ -570,9 +576,15 @@ inline std::shared_ptr<ConditionNode> ConditionNode::make(
 // itself moved. That is a spurious recompute, never a stale value — the branch
 // is pulled before its value is used — and it is asserted as such in
 // test_lazy_invalidation.cpp.
+//
+// taken_ is set before the branch is pulled, so that a branch which changes as
+// it is pulled is heard, as any input's change is. taken_ is out of date only
+// once the condition has published a new value, which made this node Dirty, and
+// a Dirty node drops whatever a listener passes on.
 inline ValuePtr ConditionNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
     const bool cond = get_value<bool>(condition_->eval(ctx));
+    taken_ = cond;
     const ValuePtr newV = cond ? trueBranch_->eval(ctx) : falseBranch_->eval(ctx);
     if (skipRecompute(ctx)) { markClean(); return cached_; }
     if (!eq_->equal(cached_, newV)) {
@@ -604,14 +616,42 @@ inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
 // Lazy, fixed in the class: this is pure selection over three inputs, with no
 // functor at all for an author to get wrong. The one asymmetry — only the taken
 // branch is pulled — predates lazy invalidation and is what
-// dag_timeseries.hpp's "un-observed branches never compute" relies on; it can
-// cost a spurious recompute after a switch, never a stale value, because the
-// branch is evaluated on the way past. See test_lazy_invalidation.cpp Case6.
+// dag_timeseries.hpp's "un-observed branches never compute" relies on. It can
+// cost a spurious recompute after a switch, because the branch is evaluated on
+// the way past (test_lazy_invalidation.cpp Case6). Its consumers never see a
+// stale value from it, because the node does not hear the branch it did not
+// take (flywheel-dag#18).
 inline ConditionNode::ConditionNode(
     std::string name, NodePtr cond, NodePtr tb, NodePtr fb,
     EqualityPolicyPtr eq)
     : NodeBase(InvalidationMode::Lazy), name_(std::move(name)), condition_(cond)
     , trueBranch_(tb), falseBranch_(fb), eq_(std::move(eq)) {}
+
+inline ConditionNode::BranchListener::BranchListener(
+    std::weak_ptr<ConditionNode> owner, bool branch)
+    : owner_(std::move(owner)), branch_(branch) {}
+
+inline ValuePtr ConditionNode::BranchListener::eval(EvalContext&) {
+    throw std::logic_error("ConditionNode: " + name() + " is not a node and has no value");
+}
+
+inline std::string ConditionNode::BranchListener::name() const {
+    const auto owner = owner_.lock();
+    return (owner ? owner->name() : std::string("a released node"))
+         + (branch_ ? "'s true-branch listener" : "'s false-branch listener");
+}
+
+inline std::vector<NodePtr> ConditionNode::BranchListener::inputs() const { return {}; }
+
+// The same kind passes on: a branch's "changed" is the node's "an input of mine
+// changed", and its "maybe" the node's "maybe". The node's own state then does
+// what it does for any input.
+inline void ConditionNode::BranchListener::propagate(Dirtiness incoming) {
+    const auto owner = owner_.lock();
+    if (!owner || owner->taken_ != branch_) return;
+    if (incoming == Dirtiness::Dirty) owner->invalidate();
+    else                              owner->invalidateMaybe();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Graph

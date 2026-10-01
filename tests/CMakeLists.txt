@@ -7,6 +7,7 @@ set(FLYWHEEL_DAG_TESTS
   test_aad_partials
   test_aad_reverse
   test_aad_tangent_node
+  test_clean_inputs
   test_compute_module
   test_dag
   test_dag_async

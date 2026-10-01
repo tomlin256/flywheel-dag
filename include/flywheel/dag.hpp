@@ -330,6 +330,8 @@ public:
 //
 //   • TweakableComputeNode::propagate() — absorbs while frozen; the tweaked
 //     value does not depend on inputs.
+//   • ConditionNode's branch listeners' propagate() — passes an invalidation
+//     from a branch on to the node only while the node takes that branch.
 //   • A clock-driven node (its output is a function of time, not only of its
 //     inputs) — dirty() is always true, so the state_ guards below would swallow
 //     every invalidation; it forwards unconditionally instead.
@@ -369,9 +371,13 @@ protected:
     // breaks no test, and is invisible. Overriding propagate() cannot do it,
     // because both entry points come through here.
     //
-    // The two kinds of override, and what each does with `incoming`:
+    // The three kinds of override, and what each does with `incoming`:
     //   TweakableComputeNode  — ignores it entirely while frozen (a tweaked
     //                           value does not depend on its inputs).
+    //   a ConditionNode's     — passes it on to the node, as the same kind,
+    //   branch listener         while the node takes its branch, and drops it
+    //                           otherwise (the node's value does not depend on
+    //                           the other branch).
     //   a clock-driven node   — always cascades; its output is a function of a
     //                           clock, so it has no clean state for the guards
     //                           below to key off.
@@ -823,6 +829,22 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConditionNode — selects between two branches at runtime.
+//
+// It pulls the condition and the branch the condition selects, never the other
+// branch, so a node on the other branch can be stale. dag_timeseries.hpp's
+// "un-observed branches never compute" relies on that.
+//
+// WHAT IT HEARS. The condition, and the branch its last eval() took. Each
+// branch is wired to a listener of its own rather than to the node, and the
+// listener passes an invalidation on only while its branch is the one taken.
+// The node's value does not depend on the other branch, and a switch to it
+// arrives through the condition, which the node always hears.
+//
+// Hearing both branches gave a stale value, not just a spurious recompute
+// (flywheel-dag#18). A consumer that had read this node could go on to pull a
+// node on the branch not taken, which then moved and made this node dirty
+// again. The consumer ended its evaluation clean over a dirty input, and every
+// later change stopped at this node, which was dirty already.
 // ─────────────────────────────────────────────────────────────────────────────
 class ConditionNode
     : public NodeBase
@@ -847,10 +869,35 @@ private:
     ConditionNode(std::string name, NodePtr cond, NodePtr tb, NodePtr fb,
                   EqualityPolicyPtr eq);
 
+    // Hears one branch for the node. Not a node: nothing names a listener as
+    // an input, so nothing pulls one, and its eval() throws.
+    class BranchListener : public NodeBase {
+    public:
+        BranchListener(std::weak_ptr<ConditionNode> owner, bool branch);
+
+        ValuePtr eval(EvalContext&) override;
+        std::string name() const override;
+        std::vector<NodePtr> inputs() const override;
+        NodeKind kind() const override { return NodeKind::Compute; }
+
+    private:
+        /// Passes the invalidation on to the node, as the same kind, while the
+        /// node takes this listener's branch. Drops it otherwise.
+        void propagate(Dirtiness incoming) override;
+
+        /// Weak: the node owns its listeners.
+        std::weak_ptr<ConditionNode> owner_;
+        const bool branch_;
+    };
+
     std::string name_;
     NodePtr condition_, trueBranch_, falseBranch_;
     EqualityPolicyPtr eq_;
     ValuePtr cached_;
+    /// The branch eval() last pulled. Empty until the first eval(), so the
+    /// listeners pass nothing on before it: the node is dirty until then anyway.
+    std::optional<bool> taken_;
+    std::shared_ptr<BranchListener> onTrue_, onFalse_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
