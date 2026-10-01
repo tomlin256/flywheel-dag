@@ -174,6 +174,7 @@ ComputeNodePtr<Out, Ins...> ComputeNode<Out, Ins...>::make(
 template<typename Out, typename... Ins>
 ValuePtr ComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     return applyInputs(ctx, std::index_sequence_for<Ins...>{});
 }
 
@@ -184,7 +185,7 @@ ValuePtr ComputeNode<Out, Ins...>::publish(Out&& result) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 
@@ -248,11 +249,11 @@ ValuePtr ComputeNode<Out, Ins...>::applyInputs(
         // Every input has now been pulled, so any of them that really changed
         // has already called our invalidate(). Still only Maybe means nothing
         // moved.
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         return publish(fn_(std::get<Is>(vals)...));
     } else {
         const ValuePtr held[] = { std::get<Is>(inputs_)->eval(ctx)... };
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         return publish(fn_(get_value<Ins>(held[Is])...));
     }
 }
@@ -308,6 +309,7 @@ std::shared_ptr<InPlaceComputeNode<Out, Ins...>> InPlaceComputeNode<Out, Ins...>
 template<typename Out, typename... Ins>
 ValuePtr InPlaceComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     return applyInputs(ctx, std::index_sequence_for<Ins...>{});
 }
 
@@ -318,7 +320,7 @@ ValuePtr InPlaceComputeNode<Out, Ins...>::publish() {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 
@@ -352,11 +354,11 @@ ValuePtr InPlaceComputeNode<Out, Ins...>::applyInputs(
         // which is exactly what cached_ already points at — the class contract
         // (the functor must overwrite everything it owns) is about the functor
         // RUNNING, and it did not run.
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         fn_(scratch_, std::get<Is>(vals)...);
     } else {
         const ValuePtr held[] = { std::get<Is>(inputs_)->eval(ctx)... };
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         fn_(scratch_, get_value<Ins>(held[Is])...);
     }
     return publish();
@@ -429,6 +431,7 @@ ValuePtr TweakableComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
 
     // Normal computation path.
+    beginEval();
     return applyInputs(ctx, std::index_sequence_for<Ins...>{});
 }
 
@@ -439,7 +442,7 @@ ValuePtr TweakableComputeNode<Out, Ins...>::publish(Out&& result) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 
@@ -530,11 +533,11 @@ ValuePtr TweakableComputeNode<Out, Ins...>::applyInputs(
     if constexpr ((std::is_trivially_copyable_v<Ins> && ...)) {
         const std::tuple<Ins...> vals{
             get_value<Ins>(std::get<Is>(inputs_)->eval(ctx))... };
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         return publish(fn_(std::get<Is>(vals)...));
     } else {
         const ValuePtr held[] = { std::get<Is>(inputs_)->eval(ctx)... };
-        if (skipRecompute(ctx)) { markClean(); return cached_; }
+        if (skipRecompute(ctx)) { endEval(); return cached_; }
         return publish(fn_(get_value<Ins>(held[Is])...));
     }
 }
@@ -583,15 +586,16 @@ inline std::shared_ptr<ConditionNode> ConditionNode::make(
 // a Dirty node drops whatever a listener passes on.
 inline ValuePtr ConditionNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     const bool cond = get_value<bool>(condition_->eval(ctx));
     taken_ = cond;
     const ValuePtr newV = cond ? trueBranch_->eval(ctx) : falseBranch_->eval(ctx);
-    if (skipRecompute(ctx)) { markClean(); return cached_; }
+    if (skipRecompute(ctx)) { endEval(); return cached_; }
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 

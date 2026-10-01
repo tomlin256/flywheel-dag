@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
+#include "test_nodes.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
 #include "flywheel/dag_engine.hpp"
@@ -261,7 +262,7 @@ TEST(AadGradientNode, DoesNotAdvanceAStatefulNode) {
 // then reaches the node, although the cascade stops at the root
 // (flywheel-dag#19).
 TEST(AadGradientNode, StaysDirtyWhileItsRootIs) {
-    auto k    = aad_test::AlwaysFiring::make(2.0);
+    auto k    = test_nodes::AlwaysFiring::make(2.0);
     auto x    = Input<double>::make("x", 3.0);
     auto root = ops::ProductNode<>::make("root", {k, x, x});
     auto grad = aad::GradientNode::make("grad", root, {x});
@@ -275,6 +276,26 @@ TEST(AadGradientNode, StaysDirtyWhileItsRootIs) {
     EXPECT_TRUE(grad->dirty());
     const ValuePtr after = grad->eval(ctx);
     EXPECT_EQ(get_value<Gradient>(after), (Gradient{20.0}));
+}
+
+// k·x·x − (k + 1), where k is always dirty and reaches the root by two paths.
+// The root's own evaluation pulls k twice, and the second pull leaves k·x·x
+// dirty again, so the root stays dirty after its pull. The node records it
+// anyway: an always-dirty node neither hangs nor throws a sensitivity node
+// (flywheel-dag#18).
+TEST(AadGradientNode, RecordsARootThatStaysDirty) {
+    auto k    = test_nodes::AlwaysFiring::make(2.0);
+    auto x    = Input<double>::make("x", 3.0);
+    auto root = ops::DiffNode<>::make("root", ops::ProductNode<>::make("k.x.x", {k, x, x}),
+                                      ops::SumNode<>::make("k+1", {k, Input<double>::make("one", 1.0)}));
+    auto grad = aad::GradientNode::make("grad", root, {x});
+    EvalContext ctx;
+    EXPECT_EQ(get_value<Gradient>(grad->eval(ctx)), (Gradient{12.0}));
+    EXPECT_TRUE(root->dirty());
+    EXPECT_TRUE(grad->dirty());
+
+    x->set(5.0);
+    EXPECT_EQ(get_value<Gradient>(grad->eval(ctx)), (Gradient{20.0}));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

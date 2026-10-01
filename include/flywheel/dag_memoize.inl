@@ -68,6 +68,7 @@ MemoizedComputeNode<Out, Ins...>::make(
 template<typename Out, typename... Ins>
 ValuePtr MemoizedComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
 
     // Evaluate all upstream inputs; values are now stable for this cycle.
     // evalInputs COPIES into a tuple, so unlike ComputeNode there is no borrowed
@@ -77,7 +78,7 @@ ValuePtr MemoizedComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     // Every input has been pulled and we are still only Maybe: nothing upstream
     // moved, so the hash would land on the same key and the cache on the same
     // value. Skipping saves the hash and the lookup as well as the functor.
-    if (skipRecompute(ctx)) { markClean(); return cached_; }
+    if (skipRecompute(ctx)) { endEval(); return cached_; }
 
     // Build cache key: hash(node_name, input_values).
     std::size_t key = detail::hash_tuple(
@@ -101,7 +102,7 @@ ValuePtr MemoizedComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 

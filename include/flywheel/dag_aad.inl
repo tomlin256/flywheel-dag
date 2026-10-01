@@ -34,13 +34,22 @@ inline std::size_t Tape::size() const noexcept { return entries_.size(); }
 //
 // The walk reads each node twice when it first reaches it: eval() to learn what
 // the node holds, and partials(). Both read a clean node, so both return cached
-// values. The root is checked clean, and a clean node's named inputs are clean
-// too, because an input that moves invalidates its consumers.
+// values. add() checks the root clean, and a clean node's named inputs are clean
+// too: an input that moves invalidates its consumers, and a node does not end
+// an evaluation clean over an input that went dirty again (flywheel-dag#18).
 inline void Tape::add(const NodePtr& root) {
     if (!root) throw std::invalid_argument("aad::Tape: a root is null");
     if (root->dirty())
         throw std::invalid_argument("aad::Tape: root " + root->name()
             + " is dirty. A tape reads only evaluated values: evaluate it first");
+    record(root);
+}
+
+// No clean check: a sensitivity node records the root it has just pulled. A
+// root that an always-dirty node reaches by two paths stays dirty after its own
+// pull, and the walk's eval() and partials() then evaluate what went dirty
+// again, as they evaluate any always-dirty node they meet.
+inline void Tape::record(const NodePtr& root) {
     EvalContext ctx;
     const ValuePtr rootValue = root->eval(ctx);
     if (!rootValue || rootValue->type() != std::type_index(typeid(double)))
@@ -467,6 +476,7 @@ DifferentiableNode<N>::DifferentiableNode(std::string name, Inputs ins, Fn fn, D
 template<std::size_t N>
 ValuePtr DifferentiableNode<N>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     return applyInputs(ctx, std::make_index_sequence<N>{});
 }
 
@@ -477,13 +487,13 @@ template<std::size_t N>
 template<std::size_t... Is>
 ValuePtr DifferentiableNode<N>::applyInputs(EvalContext& ctx, std::index_sequence<Is...>) {
     const std::array<double, N> x{ get_value<double>(inputs_[Is]->eval(ctx))... };
-    if (skipRecompute(ctx)) { markClean(); return cached_; }
+    if (skipRecompute(ctx)) { endEval(); return cached_; }
     const ValuePtr newV = slot_.emit(fn_(x[Is]...));
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();
     }
-    markClean();
+    endEval();
     return cached_;
 }
 
@@ -542,19 +552,24 @@ inline GradientNode::GradientNode(std::string name, NodePtr root, std::vector<No
 // Pulling the root leaves it clean, so the tape reads it and evaluates nothing
 // more. A throw from the tape leaves this node dirty, and cached_ as it was.
 //
-// A node that is always dirty is the exception: the tape's pull evaluates it
-// again, and it can mark the root dirty again (flywheel-dag#19). This node then
-// stays dirty too. Marked clean, it would never see the next change, which
-// stops at the root because the root is already dirty.
+// A node that is always dirty is the exception. Reaching the root by two paths,
+// it leaves the root dirty after its own pull, which record() allows. And the
+// tape's pull evaluates it again, which can mark the root dirty again
+// (flywheel-dag#19). This node then hears a "maybe", and endEval() keeps it
+// dirty and tells its consumers: marked clean, it would never see the next
+// change, which stops at the root because the root is already dirty.
 inline ValuePtr GradientNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     root_->eval(ctx);
-    const ValuePtr newV = slot_.emit(Tape({root_}).adjoints(root_, wrt_));
+    Tape tape;
+    tape.record(root_);
+    const ValuePtr newV = slot_.emit(tape.adjoints(root_, wrt_));
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();
     }
-    if (!root_->dirty()) markClean();
+    endEval();
     return cached_;
 }
 
@@ -591,25 +606,25 @@ inline TangentNode::TangentNode(std::string name, std::vector<NodePtr> roots,
     : NodeBase(InvalidationMode::Eager), name_(std::move(name)), roots_(std::move(roots))
     , seeds_(std::move(seeds)), eq_(std::move(eq)) {}
 
-// Each root is recorded right after its pull, while it is clean. A later root's
-// pull evaluates only nodes the tape does not hold yet, so it moves nothing the
-// tape recorded, but it can leave an earlier root dirty again. The node then
-// stays dirty, as a GradientNode does while its root is.
+// Each root is recorded right after its pull. A later root's pull evaluates
+// only nodes the tape does not hold yet, an always-dirty node apart, so it moves
+// nothing else the tape recorded. It can leave an earlier root dirty again,
+// through an always-dirty node that reaches both. The node then hears a
+// "maybe", and endEval() keeps it dirty, as for a GradientNode.
 inline ValuePtr TangentNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
     Tape tape;
     for (const auto& root : roots_) {
         root->eval(ctx);
-        tape.add(root);
+        tape.record(root);
     }
     const ValuePtr newV = slot_.emit(tape.tangents(seeds_));
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();
     }
-    if (std::none_of(roots_.begin(), roots_.end(),
-                     [](const NodePtr& root) { return root->dirty(); }))
-        markClean();
+    endEval();
     return cached_;
 }
 

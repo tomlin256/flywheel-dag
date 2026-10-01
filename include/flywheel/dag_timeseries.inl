@@ -26,7 +26,7 @@ void NodeImpl<Derived>::notifyDownstream(
         cached_ = newV;
         this->NodeBase::notifyDownstream();
     }
-    this->markClean();
+    this->endEval();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +55,7 @@ ValuePtr StatefulNodeBase<Derived, Out, In, State>::eval(EvalContext& ctx) {
         decltype(&Derived::doCompute), Derived*, const In&, State&>,
         "Derived must implement Out doCompute(const In&, State&)");
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     // Hold the pulled value while doCompute() reads it, as the ops do: inp
     // refers into it, and the ValuePtr is what keeps the producer's ValueSlot
     // buffer from being recycled underneath. Bound straight to get_value() of
@@ -572,6 +573,7 @@ inline ZScoreNode::ZScoreNode(std::string n, NodePtr up,
 
 inline ValuePtr ZScoreNode::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     double x  = get_value<double>(upstream_->eval(ctx));
     stats_->eval(ctx);
     double mu = stats_->prevMean();
@@ -620,6 +622,7 @@ inline OutlierGateNode::OutlierGateNode(std::string n, NodePtr up,
 
 inline ValuePtr OutlierGateNode::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     double x  = get_value<double>(upstream_->eval(ctx));
     double z  = get_value<double>(zNode_->eval(ctx));
     double mu = zNode_->stats().mean();

@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
+#include "test_nodes.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
 #include "flywheel/dag_engine.hpp"
@@ -239,7 +240,7 @@ TEST(AadTangentNode, ABranchNotTakenLeavesNoRootDirty) {
 // every evaluation dirty, and the node with them. It neither hangs nor throws,
 // and the move of x still reaches it.
 TEST(AadTangentNode, AnAlwaysDirtyNodeKeepsItDirty) {
-    auto k        = aad_test::AlwaysFiring::make(2.0);
+    auto k        = test_nodes::AlwaysFiring::make(2.0);
     auto x        = Input<double>::make("x", 3.0);
     auto kx       = ops::ProductNode<>::make("k.x", {k, x});
     auto kxx      = ops::ProductNode<>::make("k.x.x", {k, x, x});
@@ -254,6 +255,24 @@ TEST(AadTangentNode, AnAlwaysDirtyNodeKeepsItDirty) {
     const ValuePtr after = tangents->eval(ctx);
     EXPECT_EQ(get_value<Tangents>(after), (Tangents{2.0, 20.0}));
     EXPECT_TRUE(tangents->dirty());
+}
+
+// k·x·x − (k + 1), where k is always dirty and reaches the root by two paths,
+// so the root stays dirty after its own pull. The node records it anyway, as
+// AadGradientNode.RecordsARootThatStaysDirty does (flywheel-dag#18).
+TEST(AadTangentNode, RecordsARootThatStaysDirty) {
+    auto k        = test_nodes::AlwaysFiring::make(2.0);
+    auto x        = Input<double>::make("x", 3.0);
+    auto root     = ops::DiffNode<>::make("root", ops::ProductNode<>::make("k.x.x", {k, x, x}),
+                                          ops::SumNode<>::make("k+1", {k, Input<double>::make("one", 1.0)}));
+    auto tangents = aad::TangentNode::make("d/dx", {root}, {{x, 1.0}});
+    EvalContext ctx;
+    EXPECT_EQ(get_value<Tangents>(tangents->eval(ctx)), (Tangents{12.0}));
+    EXPECT_TRUE(root->dirty());
+    EXPECT_TRUE(tangents->dirty());
+
+    x->set(5.0);
+    EXPECT_EQ(get_value<Tangents>(tangents->eval(ctx)), (Tangents{20.0}));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

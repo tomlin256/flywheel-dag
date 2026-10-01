@@ -24,7 +24,7 @@ void OpNodeImpl<Derived>::notifyDownstream(const ValuePtr& newV, const EqualityP
         cached_ = newV;
         this->NodeBase::notifyDownstream();
     }
-    this->markClean();
+    this->endEval();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,11 +49,12 @@ UnaryOpNode<T,Op>::UnaryOpNode(std::string name, NodePtr a, EqualityPolicyPtr eq
 template<typename T, typename Op>
 ValuePtr UnaryOpNode<T,Op>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     // Hold the pulled value: the resolve check has to happen after the pull, and
     // the ValuePtr is what keeps the producer's ValueSlot buffer from being
     // recycled underneath the get_value() below.
     const ValuePtr av = a_->eval(ctx);
-    if (this->skipRecompute(ctx)) { this->markClean(); return this->cached_; }
+    if (this->skipRecompute(ctx)) { this->endEval(); return this->cached_; }
     T result = Op{}(get_value<T>(av));
     this->notifyDownstream(slot_.emit(std::move(result)), eq_);
     return this->cached_;
@@ -102,9 +103,10 @@ BinaryOpNode<T,Op>::BinaryOpNode(std::string name, NodePtr a, NodePtr b,
 template<typename T, typename Op>
 ValuePtr BinaryOpNode<T,Op>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     const ValuePtr av = a_->eval(ctx);
     const ValuePtr bv = b_->eval(ctx);
-    if (this->skipRecompute(ctx)) { this->markClean(); return this->cached_; }
+    if (this->skipRecompute(ctx)) { this->endEval(); return this->cached_; }
     T result = Op{}(get_value<T>(av), get_value<T>(bv));
     this->notifyDownstream(slot_.emit(std::move(result)), eq_);
     return this->cached_;
@@ -169,9 +171,10 @@ NAryOpNode<T,Op>::NAryOpNode(std::string name, std::vector<NodePtr> ins,
 template<typename T, typename Op>
 ValuePtr NAryOpNode<T,Op>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
+    this->beginEval();
     if (!ctx.forceRecompute) {
         for (auto& in : inputs_) in->eval(ctx);
-        if (this->skipRecompute(ctx)) { this->markClean(); return this->cached_; }
+        if (this->skipRecompute(ctx)) { this->endEval(); return this->cached_; }
     }
     T total = Op::identity();
     Op op{};

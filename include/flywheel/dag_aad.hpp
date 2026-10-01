@@ -112,7 +112,6 @@
 #include "dag.hpp"
 #include "dag_ops.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -165,7 +164,9 @@ public:
     std::size_t size() const noexcept;
 
 private:
-    // TangentNode records its roots one at a time, each right after its pull.
+    // The sensitivity nodes record each root right after they pull it, through
+    // record(), and TangentNode records its roots one at a time.
+    friend class GradientNode;
     friend class TangentNode;
 
     struct Edge {
@@ -189,6 +190,12 @@ private:
     /// calls nothing may move the graph but the pull of the next root: a caller
     /// that moved an input between them would get a tape that mixes two points.
     void add(const NodePtr& root);
+    /// add() without the clean check, for a root the caller has just pulled.
+    /// An always-dirty node that reaches the root by two paths leaves it dirty
+    /// after its pull, and the walk then evaluates what went dirty again, as it
+    /// evaluates any always-dirty node it meets. Throws std::invalid_argument
+    /// unless root holds a double.
+    void record(const NodePtr& root);
     std::size_t rootPosition(const NodePtr& root) const;
     void checkWrt(const std::vector<NodePtr>& wrt) const;
     /// `target` names what the barriers were reached from, for the message.
@@ -445,20 +452,29 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // still, and x·y at (2, 3) and at (3, 2) is exactly that case.
 //
 // It evaluates what the root's eval() evaluates, and nothing more: the tape then
-// reads clean nodes alone. Pulling the root is what any consumer does to its
-// input, so it is not the evaluation the tape's rules forbid, and the engine's
-// dirty snapshot still covers a root that is a registered output too.
+// reads clean nodes alone, an always-dirty node apart (below). Pulling the root
+// is what any consumer does to its input, so it is not the evaluation the tape's
+// rules forbid, and the engine's dirty snapshot still covers a root that is a
+// registered output too.
 //
 // eval() throws what the tape throws, and the node stays dirty, so the next
 // eval() tries again: std::domain_error for a barrier with a wrt node upstream,
 // and std::invalid_argument for a root, or a wrt node on the tape, that does not
 // hold a double. make() cannot check either, because both depend on values.
 //
-// It is clean only when its root is. The tape's pulls can evaluate a node that
-// is always dirty, such as an application's clock-driven node, which then marks
-// the root dirty again. Marked clean, this node would never see the next change,
-// which stops at the root, so it stays dirty and recomputes on its next
-// evaluation (flywheel-dag#19).
+// It stays dirty when its root goes dirty again during its evaluation, as any
+// node does when an input it read does (NodeBase::endEval()). The tape's pulls
+// can evaluate a node that is always dirty, such as an application's
+// clock-driven node, which then marks the root dirty again. Marked clean, this
+// node would never see the next change, which stops at the root
+// (flywheel-dag#19). It tells its consumers too, so a node over it sees that
+// change as well (flywheel-dag#18).
+//
+// It records the root it has just pulled, clean or not (Tape::record()). An
+// always-dirty node that reaches the root by two paths leaves the root dirty
+// after its own pull, and requiring it clean would make this node throw on
+// every evaluation. Recorded anyway, the tape's walk evaluates what went dirty
+// again, which the caveat on always-dirty nodes already allows.
 //
 // COST. Every recompute records a new tape, which costs about 20 evaluations of
 // the root, and an Eager node recomputes on every change upstream of its root,
@@ -515,17 +531,18 @@ using GradientNodePtr = std::shared_ptr<GradientNode>;
 //
 // ONE TAPE. Each recompute pulls the roots in turn, and records each root right
 // after its pull, not after all of them. A later root's pull can leave an
-// earlier root dirty again: a stale node on the branch a ConditionNode did not
-// take moves when the later root pulls it, and tells the ConditionNode. A tape
-// recorded after every pull would then throw. Recorded right after its pull,
-// each root is clean, and a later pull evaluates only nodes the tape does not
-// hold yet, so it moves no value the tape recorded. One forward sweep of the
-// one tape serves every root.
+// earlier root dirty again, when an always-dirty node reaches both. Recorded
+// right after its pull, each root is recorded at the values its pull left, and
+// a later pull evaluates only nodes the tape does not hold yet, an always-dirty
+// node apart, so it moves no other value the tape recorded. One forward sweep of
+// the one tape serves every root. (Before flywheel-dag#18's fix, a stale node on
+// the branch a ConditionNode did not take did the same, and a tape recorded
+// after every pull threw.)
 //
-// It is clean only when every root is, for GradientNode's reason: a root left
-// dirty, by a later root's pull or by an always-dirty node the tape pulled,
-// would stop the next change before it reached this node. So the node stays
-// dirty, and recomputes on its next evaluation.
+// It stays dirty when a root goes dirty again during its evaluation, for
+// GradientNode's reason, whether a later root's pull or an always-dirty node
+// the tape pulled left it so, and it tells its consumers. It records a root
+// that stayed dirty after its own pull, as GradientNode does.
 //
 // COST. A recompute records one tape over every root's nodes, which costs about
 // 20 evaluations of them, and it happens on every change upstream of any root.

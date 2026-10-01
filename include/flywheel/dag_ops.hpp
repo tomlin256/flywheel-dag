@@ -84,7 +84,7 @@ protected:
     OpNodeImpl() noexcept : NodeBase(InvalidationMode::Lazy) {}
 
     /// Publish this evaluation's value: rebind cached_ and invalidate downstream
-    /// if the policy says it changed, then mark clean. The no-argument
+    /// if the policy says it changed, then endEval(). The no-argument
     /// NodeBase::notifyDownstream() it builds on stays reachable by that name.
     using NodeBase::notifyDownstream;
     void notifyDownstream(const ValuePtr& newV, const EqualityPolicyPtr& eq);

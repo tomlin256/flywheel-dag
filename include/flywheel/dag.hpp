@@ -326,6 +326,10 @@ public:
 // twelve copies of one idea drifted into four spellings of it. Everything that
 // wants to reach downstream goes through notifyDownstream().
 //
+// A node is clean only when every input it read still is. The cascade's guard
+// relies on it, and a node that pulls keeps it by bracketing each evaluation
+// with beginEval() and endEval() — see "Clean only over clean inputs" below.
+//
 // What a derived class may still override, and the only reasons known today:
 //
 //   • TweakableComputeNode::propagate() — absorbs while frozen; the tweaked
@@ -342,8 +346,9 @@ public:
 class NodeBase : public INode {
 public:
     /// True when this node may need re-evaluating — Maybe or Dirty. Cleared by
-    /// eval(). The engine's pre-eval dirty snapshot reads this and is unaffected
-    /// by the split.
+    /// eval(), unless an input it read went dirty again during it (endEval()).
+    /// The engine's pre-eval dirty snapshot reads this and is unaffected by the
+    /// split.
     bool dirty() const override { return state_ != Dirtiness::Clean; }
 
     /// Which of the two invalidation behaviours this node was built with.
@@ -383,6 +388,9 @@ protected:
     //                           below to key off.
     virtual void propagate(Dirtiness incoming) {
         if (incoming == Dirtiness::Maybe) {
+            // Every "maybe" counts, the one the guard below drops included: see
+            // "Clean only over clean inputs".
+            heardMaybe_ = true;
             // Same visited-guard as the old two-state cascade: a diamond's lower
             // half is walked once, not once per path.
             if (state_ != Dirtiness::Clean) return;
@@ -395,7 +403,7 @@ protected:
             // again would only re-set what it already set.
             if (!wasClean) return;
         }
-        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidateMaybe();
+        cascadeMaybe();
     }
 
     /// Invalidate every downstream node — "my value changed". Expired weak_ptrs
@@ -428,7 +436,51 @@ protected:
             && !ctx.forceRecompute;
     }
 
-    /// eval() calls this when it is up to date again.
+    // ── Clean only over clean inputs ─────────────────────────────────────────
+    //
+    // The cascade's guard stops at a node that is already dirty. That is safe
+    // only while a clean node's inputs are clean, and an evaluation breaks it
+    // when an input it has already read goes dirty again before it ends: an
+    // always-dirty node, such as an application's clock-driven node, pulled
+    // again through a later input, tells the earlier input's nodes. Marked
+    // clean then, the node would never see a later change, which stops at the
+    // dirty input (flywheel-dag#18).
+    //
+    // Such an input sends a "maybe" cascade, which reaches this node while it
+    // is still evaluating. In an evaluation where nothing goes dirty again, the
+    // inputs only go from dirty to clean, and one whose value moved says
+    // "changed". So a "maybe" is the signal, and propagate() records every one.
+    // beginEval() forgets those that came before the evaluation began, which a
+    // diamond sends while the node waits to be pulled. A false alarm, from an
+    // input not read yet or from one a later pull repaired, costs one more
+    // evaluation and never a stale value.
+    //
+    // A node that pulls calls beginEval() before its first pull and endEval()
+    // in place of markClean() wherever its evaluation ends, skips included. A
+    // node of your own that pulls should do the same: one that calls
+    // markClean() keeps working, and keeps the exposure.
+
+    /// eval() calls this before its first pull.
+    void beginEval() noexcept { heardMaybe_ = false; }
+
+    /// eval() calls this once it is up to date with what it read. The node is
+    /// clean, unless a "maybe" reached it since beginEval(). Then it keeps the
+    /// state its evaluation left it in, and tells each consumer "maybe".
+    ///
+    /// It keeps its state rather than going Maybe because an input it read may
+    /// have been evaluated again since, by a later input's pull, with a new
+    /// value. That input's "changed" left this node Dirty, and a Lazy node sent
+    /// to Maybe would skip its next evaluation and keep the old value. It tells
+    /// its consumers for the one evaluating now, which has read this node and
+    /// must not end clean over it either. The rest are dirty already.
+    void endEval() {
+        if (!heardMaybe_) { state_ = Dirtiness::Clean; return; }
+        stayDirty();
+    }
+
+    /// A node that pulls nothing calls this when it is up to date again: a
+    /// source, or a tweaked node returning its frozen value. A node that pulls
+    /// calls endEval() instead.
     void markClean() noexcept { state_ = Dirtiness::Clean; }
     /// Mark self dirty WITHOUT cascading — for sources staging a new value and
     /// for tweak() publishing a frozen one. Both cascade separately via
@@ -438,9 +490,22 @@ protected:
     Dirtiness state() const noexcept { return state_; }
 
 private:
+    /// "An ancestor of yours may have changed", to every downstream node.
+    void cascadeMaybe() {
+        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidateMaybe();
+    }
+
+    /// endEval()'s rare path, out of line. With it inlined into every
+    /// evaluation, the rule cost bench_hot_path's chain row 2.4%; with it out
+    /// of line, 1 to 2%. GCC and Clang, the compilers CI builds with, both take
+    /// the attributes.
+    [[gnu::cold, gnu::noinline]] void stayDirty() { cascadeMaybe(); }
+
     Dirtiness state_ = Dirtiness::Dirty;
     /// const: chosen once, at construction, by the code that wrote the functor.
     const InvalidationMode mode_;
+    /// A "maybe" reached this node since its last beginEval().
+    bool heardMaybe_ = false;
     std::vector<std::weak_ptr<INode>> downstream_;
 };
 // ─────────────────────────────────────────────────────────────────────────────
@@ -536,7 +601,7 @@ private:
     /// than in eval().
     template<std::size_t... Is>
     ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
-    /// Emit, compare, notify, mark clean — the tail of every evaluation.
+    /// Emit, compare, notify, endEval() — the tail of every evaluation.
     ValuePtr publish(Out&& result);
     template<std::size_t... Is>
     std::vector<NodePtr> collectInputs(std::index_sequence<Is...>) const;
