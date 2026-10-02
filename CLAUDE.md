@@ -262,6 +262,27 @@ wait on a cycle that cannot finish.
 > allocations (the batch vector and its `TypedValue`) and goes red if a local
 > comes back.
 
+**A cycle that throws** (flywheel-dag#20) — `Engine::cycle()` marks each output
+due when its node is dirty, before it evaluates any of them, and clears the mark
+when it reaches the output. A node's `eval()` or an output callback that throws
+ends the cycle, and the outputs after it stay due, so the next cycle delivers the
+value each holds then. The marks used to be a snapshot that each cycle
+overwrote, so an output that an earlier one had pulled clean read clean at the
+next cycle, and its callback missed the value its node held until that value
+moved again.
+
+- **An output whose node throws stays due.** The mark is cleared only once
+  `eval()` returns, whatever state the throw left the node in.
+- **A callback that throws has had its value.** The mark is cleared, and
+  `lastSeen` set, before the callback runs, so the engine does not offer that
+  value again, only the next one. Offering it again would call a callback that
+  throws on a value once more on every cycle, and hold back every output after
+  it.
+
+`EngineAbortedCycle` in `test_dag_async.cpp` pins both. A new output starts
+unmarked, so one registered on a node that is already clean waits for the node
+to move (flywheel-dag#23).
+
 **Tweakable nodes** — `TweakableComputeNode::tweak(v)` freezes output
 mid-graph. A changed tweak reaches the node's own engine output once, on the
 engine's next cycle, because `tweak()` leaves the node dirty until it is
@@ -682,8 +703,8 @@ and sweeps it, in reverse or forward.
   `eval()` retries: `std::domain_error` for a barrier with a `wrt` or seed node
   upstream, `std::invalid_argument` for a root, `wrt` or seed node on the tape that
   does not hold a `double`. The throw ends `Engine::run()`, which can then be called
-  again (flywheel-dag#16), but the aborted cycle can leave another output's callback
-  stale (flywheel-dag#20).
+  again (flywheel-dag#16), and the next cycle delivers the outputs the aborted one did
+  not reach (flywheel-dag#20).
 - **Cost.** Each recompute records a new tape, about 20 evaluations of the roots'
   nodes, and an `Eager` node recomputes on every change upstream of any root,
   including one its value does not depend on. Where sensitivities are wanted only

@@ -39,7 +39,10 @@
 //   check dirty() cheaply before committing to a full eval().  A callback fires
 //   only when eval() returns a ValuePtr that differs from the last one delivered
 //   — pointer identity is sufficient because nodes only update their cached_
-//   pointer when the equality policy says the value actually changed.
+//   pointer when the equality policy says the value actually changed.  An
+//   output stays due until a cycle reaches it, so a node or a callback that
+//   throws out of a cycle leaves the outputs the cycle did not reach to the
+//   next cycle.
 //
 // Input<T> (with wake hook)
 //   Use makeInput<T>() for config / parameter values you set from application
@@ -165,6 +168,9 @@ public:
 
     /// Register an output with a typed callback.
     /// The callback fires only when the output's value actually changes.
+    /// A cycle that a node or a callback throws out of leaves the outputs it did not reach to
+    /// the next cycle, which delivers the value each holds then (flywheel-dag#20). A callback
+    /// that throws has had its value: it is not offered that value again, only the next one.
     template<typename T>
     void addOutput(NodePtr node, std::function<void(const T&)> cb);
 
@@ -216,7 +222,8 @@ public:
     /// Block and run until stop() is called.
     /// Must be called from exactly one thread.
     /// An exception from a node's eval() or an output callback ends the run and leaves through
-    /// run(), which can then be called again (flywheel-dag#16).
+    /// run(), which can then be called again (flywheel-dag#16). The next cycle delivers the
+    /// outputs the aborted one did not reach (flywheel-dag#20).
     void run();
 
     /// Signal the engine to stop after the current cycle finishes.
