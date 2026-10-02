@@ -187,7 +187,7 @@ inline void Engine::addOutput(
     NodePtr node, std::function<void(const ValuePtr&)> cb)
 {
     outputs_.push_back({ std::move(node), nullptr, std::move(cb) });
-    dirtySnapshot_.push_back(false);
+    due_.push_back(false);
 }
 
 template<typename T>
@@ -301,20 +301,34 @@ inline void Engine::cycle() {
     //    the DAG.  Invalidations propagate forward synchronously from here.
     for (auto& s : sources_) s->flush();
 
-    // 2. Snapshot dirty flags before any eval() call clears them.
-    //    ComputeNode::eval() recursively calls eval() on its inputs, which
-    //    clears those inputs' dirty_ flags as a side effect.  Without the
-    //    snapshot, a leaf node (AsyncInput, Input) registered after a
-    //    downstream ComputeNode would see dirty_=false by the time the
-    //    engine reaches it and its callback would never fire.
+    // 2. Mark each output whose node is dirty as due, before any eval() call
+    //    clears the flags.  ComputeNode::eval() recursively calls eval() on
+    //    its inputs, which clears those inputs' dirty flags as a side effect.
+    //    Without this pass, a leaf node (AsyncInput, Input) registered after
+    //    a downstream ComputeNode would read clean by the time the engine
+    //    reaches it, and its callback would never fire.
+    //
+    //    Mark, never overwrite: an output stays due until step 3 reaches it.
+    //    A node or a callback that throws out of step 3 leaves the outputs
+    //    after it due.  One that an earlier output pulled clean reads clean
+    //    here, and overwritten, its callback would miss the value its node
+    //    holds until that value moved again (flywheel-dag#20).  A cycle that
+    //    does not throw clears every entry, so the next starts from none.
     for (std::size_t i = 0; i < outputs_.size(); ++i)
-        dirtySnapshot_[i] = outputs_[i].node->dirty();
+        if (outputs_[i].node->dirty()) due_[i] = true;
 
-    // 3. Evaluate and fire callbacks using the pre-eval snapshot.
+    // 3. Evaluate the due outputs and fire their callbacks.
     for (std::size_t i = 0; i < outputs_.size(); ++i) {
-        if (!dirtySnapshot_[i]) continue;         // fast path: nothing to do
+        if (!due_[i]) continue;                   // fast path: nothing to do
 
         ValuePtr val = outputs_[i].node->eval(ctx_);
+
+        // Reached.  Cleared after eval(), so an output whose node throws
+        // stays due, whatever state the throw left the node in.  Cleared
+        // before the callback, which has had the value once it is called:
+        // lastSeen holds it, and a callback that throws is not offered it
+        // again, only the next one.
+        due_[i] = false;
 
         // Pointer identity: if cached_ didn't change (equality policy
         // said equal), the node returns the same pointer it held before.

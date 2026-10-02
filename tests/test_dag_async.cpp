@@ -18,6 +18,7 @@
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
+//  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -1136,6 +1137,142 @@ TEST(EngineRun, ARunCalledWhileRunningThrowsAndLeavesTheRunGoing) {
     EXPECT_EQ(runAndCatch(engine), "");
     EXPECT_EQ(nested, "Engine::run() called while already running");
     EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A cycle that throws
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A cycle that throws must leave the outputs it did not reach due (flywheel-dag#20). a's output is
+// registered before b's, and a pulls b clean before its callback throws, so b reads clean when the
+// next cycle starts.
+TEST(EngineAbortedCycle, ALaterOutputGetsItsValueAfterACallbackThrows) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto b = ComputeNode<double, double>::make(
+        "b",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [](const double& v) { return v * 10.0; });
+    auto a = ComputeNode<double, double>::make(
+        "a",
+        std::make_tuple(std::static_pointer_cast<INode>(b)),
+        [](const double& v) { return v + 1.0; });
+    bool fail = false;
+    engine.addOutput<double>(a, [&fail](const double&) {
+        if (fail) {
+            fail = false;
+            throw std::runtime_error("from a callback");
+        }
+    });
+    std::vector<double> seenB;
+    engine.addOutput<double>(b, [&seenB](const double& v) { seenB.push_back(v); });
+
+    engine.step();
+    x->set(2.0);
+    fail = true;
+    EXPECT_THROW(engine.step(), std::runtime_error);   // a pulls b to 20, then a's callback throws
+    engine.step();
+    EXPECT_EQ(seenB, (std::vector<double>{10.0, 20.0}));
+}
+
+// The same when a's functor throws after it has pulled b. a stays dirty, so each cycle retries it,
+// and b's output waits for the one in which a succeeds.
+TEST(EngineAbortedCycle, ALaterOutputGetsItsValueAfterANodeThrows) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto b = ComputeNode<double, double>::make(
+        "b",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [](const double& v) { return v * 10.0; });
+    bool fail = false;
+    auto a = ComputeNode<double, double>::make(
+        "a",
+        std::make_tuple(std::static_pointer_cast<INode>(b)),
+        [&fail](const double& v) {
+            if (fail) throw std::domain_error("from a node");
+            return v + 1.0;
+        });
+    std::vector<double> seenA;
+    std::vector<double> seenB;
+    engine.addOutput<double>(a, [&seenA](const double& v) { seenA.push_back(v); });
+    engine.addOutput<double>(b, [&seenB](const double& v) { seenB.push_back(v); });
+
+    engine.step();
+    x->set(2.0);
+    fail = true;
+    EXPECT_THROW(engine.step(), std::domain_error);   // a pulls b to 20, then a's functor throws
+    EXPECT_THROW(engine.step(), std::domain_error);   // a is still dirty, so this cycle retries it
+    fail = false;
+    engine.step();
+    EXPECT_EQ(seenA, (std::vector<double>{11.0, 21.0}));
+    EXPECT_EQ(seenB, (std::vector<double>{10.0, 20.0}));
+}
+
+// Through run(), which an application can start again after a throw (flywheel-dag#16). The output
+// registered last is on halt, which the test sets before the second run(). Its callback stops the
+// engine, so that run ends after its first cycle, which reaches the other outputs first, and
+// neither run waits on a feed.
+TEST(EngineAbortedCycle, ARestartedRunDeliversWhatTheAbortedCycleDidNot) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto b = ComputeNode<double, double>::make(
+        "b",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [](const double& v) { return v * 10.0; });
+    auto a = ComputeNode<double, double>::make(
+        "a",
+        std::make_tuple(std::static_pointer_cast<INode>(b)),
+        [](const double& v) { return v + 1.0; });
+    bool fail = false;
+    engine.addOutput<double>(a, [&fail](const double&) {
+        if (fail) {
+            fail = false;
+            throw std::runtime_error("from a callback");
+        }
+    });
+    std::vector<double> seenB;
+    engine.addOutput<double>(b, [&](const double& v) {
+        seenB.push_back(v);
+        if (seenB.size() == 1) {
+            fail = true;
+            x->set(2.0);   // wakes the run for a cycle in which a's callback throws
+        }
+    });
+    auto halt = engine.makeInput<bool>("halt", false);
+    engine.addOutput<bool>(halt, [&engine](const bool& h) {
+        if (h) engine.stop();
+    });
+
+    EXPECT_EQ(runAndCatch(engine), "from a callback");
+    halt->set(true);
+    EXPECT_EQ(runAndCatch(engine), "");
+    EXPECT_EQ(seenB, (std::vector<double>{10.0, 20.0}));
+}
+
+// A callback that throws has had its value. The engine records the value as delivered before it
+// calls the callback, so it does not offer that value again, only the next one.
+TEST(EngineAbortedCycle, ACallbackThatThrowsHasHadItsValue) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    bool fail = false;
+    std::vector<double> seen;
+    engine.addOutput<double>(x, [&](const double& v) {
+        seen.push_back(v);
+        if (fail) {
+            fail = false;
+            throw std::runtime_error("from a callback");
+        }
+    });
+
+    engine.step();
+    x->set(2.0);
+    fail = true;
+    EXPECT_THROW(engine.step(), std::runtime_error);
+    engine.step();
+    EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0}));
+    x->set(3.0);
+    engine.step();
+    EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0, 3.0}));
 }
 
 int main(int argc, char** argv) {

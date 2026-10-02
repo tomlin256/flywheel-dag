@@ -270,7 +270,8 @@ private:
     std::vector<std::shared_ptr<IComputeModule>> modules_;
     std::vector<std::shared_ptr<IFlushable>>     sources_;
     std::vector<OutputEntry>                     outputs_;
-    std::vector<bool>                        dirtySnapshot_; // pre-allocated; resized in addOutput()
+    // One per output, pre-allocated in addOutput(). cycle() marks and clears it (flywheel-dag#20).
+    std::vector<bool>                        due_;
     EvalContext                              ctx_;
 
     std::mutex              mu_;

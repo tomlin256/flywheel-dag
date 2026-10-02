@@ -194,5 +194,5 @@ Commits: `docs: say what a cycle that throws leaves for the next`, `build: relea
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Not started | |
+| 1 — Tests, then the fix | Done | ctest 36 / 36, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the four `EngineAbortedCycle` tests. On v0.1.12 the first three failed with `b`'s callback at `{10}`, and the fourth passed. With the marking pass overwriting, the first three failed and nothing else in ctest did. With the clear and `lastSeen` after the callback, only `ACallbackThatThrowsHasHadItsValue` failed, its callback at `{1, 2, 2}`. Over five alternating runs of `bench_hot_path`, the medians were chain 264.6 ns/cycle against v0.1.12's 263.8 and ingest 118.9 against 118.7. idle-queues, whose 32 outputs are clean on every cycle, went from 258.5 to 234.3, probably because the marking pass only reads their flags, where the snapshot stored 32 bits into one word |
 | 2 — Docs and release | Not started | |
