@@ -4,7 +4,7 @@
 #
 #   FetchContent_Declare(flywheel_dag
 #     GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-#     GIT_TAG        v0.1.12)
+#     GIT_TAG        v0.1.13)
 #   FetchContent_MakeAvailable(flywheel_dag)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
@@ -17,7 +17,7 @@
 # 3.18 is a plain minimum, not a <min>...<max> range: a range flips every policy
 # up to <max> to NEW, which needs its own audit.
 cmake_minimum_required(VERSION 3.18)
-project(FLYWHEEL_DAG VERSION 0.1.12 LANGUAGES CXX)
+project(FLYWHEEL_DAG VERSION 0.1.13 LANGUAGES CXX)
 
 # Export compile_commands.json for clangd and other tooling.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
