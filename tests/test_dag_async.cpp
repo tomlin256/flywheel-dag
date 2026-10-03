@@ -18,7 +18,8 @@
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
-//  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due
+//  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
+//                    and a new output gets the value its node holds at its first cycle
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -30,6 +31,7 @@
 #include <functional>
 #include <future>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1273,6 +1275,123 @@ TEST(EngineAbortedCycle, ACallbackThatThrowsHasHadItsValue) {
     x->set(3.0);
     engine.step();
     EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0, 3.0}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// An output registered on a clean node
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// The graph of flywheel-dag#23: b = 10·x and a = b + 1.
+struct NewOutputGraph {
+    Engine                engine;
+    dag::InputPtr<double> x = engine.makeInput<double>("x", 1.0);
+    NodePtr               b = ComputeNode<double, double>::make(
+        "b",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [](const double& v) { return v * 10.0; });
+    NodePtr               a = ComputeNode<double, double>::make(
+        "a",
+        std::make_tuple(b),
+        [](const double& v) { return v + 1.0; });
+};
+
+// A module downstream of another: it is given a node the other built, and registers an output on
+// it in wire().
+struct OutputOnNodeModule : IComputeModule {
+    explicit OutputOnNodeModule(NodePtr n) : node(std::move(n)) {}
+
+    std::string name() const override { return "output-on-node"; }
+
+    void wire(Engine& engine) override {
+        engine.addOutput<double>(node, [this](const double& v) { seen.push_back(v); });
+    }
+
+    NodePtr             node;
+    std::vector<double> seen;
+};
+
+}  // namespace
+
+// A new output must get the value its node holds, though another output's cycle has pulled the
+// node clean (flywheel-dag#23). Registered before the first step(), b's output gets 10 on that
+// step, so what a callback sees must not depend on when it was registered.
+TEST(EngineNewOutput, GetsTheValueItsNodeHoldsAfterAnotherOutputPulledIt) {
+    NewOutputGraph g;
+    g.engine.addOutput<double>(g.a, [](const double&) {});
+    g.engine.step();
+    ASSERT_FALSE(g.b->dirty());   // a pulled b clean
+    std::vector<double> seenB;
+    g.engine.addOutput<double>(g.b, [&seenB](const double& v) { seenB.push_back(v); });
+
+    g.engine.step();
+    g.engine.step();
+    EXPECT_EQ(seenB, std::vector<double>{10.0});   // once, over two cycles
+    g.x->set(2.0);
+    g.engine.step();
+    EXPECT_EQ(seenB, (std::vector<double>{10.0, 20.0}));
+}
+
+// The same when a caller has evaluated the node.
+TEST(EngineNewOutput, GetsTheValueItsNodeHoldsAfterACallerEvaluatedIt) {
+    NewOutputGraph g;
+    EvalContext ctx;
+    const ValuePtr held = g.b->eval(ctx);
+    ASSERT_EQ(get_value<double>(held), 10.0);
+    ASSERT_FALSE(g.b->dirty());
+    std::vector<double> seenB;
+    g.engine.addOutput<double>(g.b, [&seenB](const double& v) { seenB.push_back(v); });
+
+    g.engine.step();
+    EXPECT_EQ(seenB, std::vector<double>{10.0});
+}
+
+// Through run(), which an application can call again once it has returned (flywheel-dag#16).
+// halt's callback stops the engine. halt starts dirty, and the test sets it again before the
+// second run(), so each run ends after its initial cycle, which reaches every output, b's
+// included, and neither waits on a feed.
+TEST(EngineNewOutput, ARunStartedAgainDeliversAnOutputRegisteredBetweenRuns) {
+    NewOutputGraph g;
+    g.engine.addOutput<double>(g.a, [](const double&) {});
+    auto halt = g.engine.makeInput<int>("halt", 1);
+    g.engine.addOutput<int>(halt, [&g](const int&) { g.engine.stop(); });
+
+    EXPECT_EQ(runAndCatch(g.engine), "");
+    ASSERT_FALSE(g.b->dirty());   // a pulled b clean
+    std::vector<double> seenB;
+    g.engine.addOutput<double>(g.b, [&seenB](const double& v) { seenB.push_back(v); });
+    halt->set(2);
+    EXPECT_EQ(runAndCatch(g.engine), "");
+    EXPECT_EQ(seenB, std::vector<double>{10.0});
+}
+
+// addFeedback() registers through addOutput(), so a feedback registered after a cycle sets its
+// input to the value its node holds.
+TEST(EngineNewOutput, AFeedbackRegisteredAfterACycleSetsItsInput) {
+    NewOutputGraph g;
+    g.engine.addOutput<double>(g.a, [](const double&) {});
+    g.engine.step();
+    ASSERT_FALSE(g.b->dirty());   // a pulled b clean
+    auto y = g.engine.makeInput<double>("y", 0.0);
+    g.engine.addFeedback<double>(g.b, y);
+
+    g.engine.step();
+    EXPECT_EQ(y->get(), 10.0);
+}
+
+// install() registers through the module's wire(), so a module installed after a cycle gets the
+// value its output's node holds.
+TEST(EngineNewOutput, AModuleInstalledAfterACycleGetsItsOutputsValue) {
+    NewOutputGraph g;
+    g.engine.addOutput<double>(g.a, [](const double&) {});
+    g.engine.step();
+    ASSERT_FALSE(g.b->dirty());   // a pulled b clean
+    auto downstream = std::make_shared<OutputOnNodeModule>(g.b);
+    g.engine.install(downstream);
+
+    g.engine.step();
+    EXPECT_EQ(downstream->seen, std::vector<double>{10.0});
 }
 
 int main(int argc, char** argv) {

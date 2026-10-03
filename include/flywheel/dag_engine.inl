@@ -187,7 +187,11 @@ inline void Engine::addOutput(
     NodePtr node, std::function<void(const ValuePtr&)> cb)
 {
     outputs_.push_back({ std::move(node), nullptr, std::move(cb) });
-    due_.push_back(false);
+    // Due from the start, so the next cycle reaches the output although its node may already be
+    // clean, because an earlier cycle pulled it as another output's input or a caller evaluated
+    // it. Started not due, the output waited for the node to move, and its callback never saw the
+    // value the node held when the output was registered (flywheel-dag#23).
+    due_.push_back(true);
 }
 
 template<typename T>
@@ -313,7 +317,8 @@ inline void Engine::cycle() {
     //    after it due.  One that an earlier output pulled clean reads clean
     //    here, and overwritten, its callback would miss the value its node
     //    holds until that value moved again (flywheel-dag#20).  A cycle that
-    //    does not throw clears every entry, so the next starts from none.
+    //    does not throw clears every entry, so the next starts with none due
+    //    but the outputs registered since (flywheel-dag#23).
     for (std::size_t i = 0; i < outputs_.size(); ++i)
         if (outputs_[i].node->dirty()) due_[i] = true;
 
@@ -332,7 +337,9 @@ inline void Engine::cycle() {
 
         // Pointer identity: if cached_ didn't change (equality policy
         // said equal), the node returns the same pointer it held before.
-        // The first time lastSeen is null, so every output fires once.
+        // A new output is due and its lastSeen is null, so every output
+        // fires once, on the first cycle after it is registered
+        // (flywheel-dag#23).
         if (val != outputs_[i].lastSeen) {
             outputs_[i].lastSeen = val;
             callbacks_.fetch_add(1, std::memory_order_relaxed);

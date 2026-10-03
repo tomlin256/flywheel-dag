@@ -277,7 +277,8 @@ private:
     std::vector<std::shared_ptr<IComputeModule>> modules_;
     std::vector<std::shared_ptr<IFlushable>>     sources_;
     std::vector<OutputEntry>                     outputs_;
-    // One per output, pre-allocated in addOutput(). cycle() marks and clears it (flywheel-dag#20).
+    // One per output, added set by addOutput(), so a new output is due (flywheel-dag#23). cycle()
+    // marks and clears it (flywheel-dag#20).
     std::vector<bool>                        due_;
     EvalContext                              ctx_;
 

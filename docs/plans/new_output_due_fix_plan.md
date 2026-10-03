@@ -209,5 +209,5 @@ Commits: `docs: say when an output may be registered and what it first gets`,
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Not started | |
+| 1 — Tests, then the fix | Done | ctest 36 / 36, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the five `EngineNewOutput` tests. On v0.1.13 all five failed: `b`'s callback at `{}` after another output pulled `b` clean, after a caller evaluated it, and between two `run()`s, `y` at 0, and the module's callback at `{}`. The first also saw `{20}` once `x` moved, where the fix gives `{10, 20}` |
 | 2 — Docs and release | Not started | |
