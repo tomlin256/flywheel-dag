@@ -50,9 +50,7 @@ template<typename T, typename Op>
 ValuePtr UnaryOpNode<T,Op>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;
     this->beginEval();
-    // Hold the pulled value: the resolve check has to happen after the pull, and
-    // the ValuePtr is what keeps the producer's ValueSlot buffer from being
-    // recycled underneath the get_value() below.
+    // Hold the pulled value: the resolve check sits between the pull and the call.
     const ValuePtr av = a_->eval(ctx);
     if (this->skipRecompute(ctx)) { this->endEval(); return this->cached_; }
     T result = Op{}(get_value<T>(av));
@@ -155,19 +153,14 @@ NAryOpNode<T,Op>::NAryOpNode(std::string name, std::vector<NodePtr> ins,
                              EqualityPolicyPtr eq)
     : name_(std::move(name)), inputs_(std::move(ins)), eq_(std::move(eq)) {}
 
-// The n-ary node is the one place the resolve check costs something, and only
-// when it is Lazy. Its pulls and its fold are the same loop, so there is no
-// point between "every input pulled" and "the functor has run" to check at —
-// hence the separate pull pass. Two things keep the cost where it belongs:
+// The n-ary node is the one place the resolve check costs something. Its pulls
+// and its fold are the same loop, so there is no point between "every input
+// pulled" and "the functor has run" to check at — hence the separate pull pass.
+// A node that does NOT skip re-pulls each input, but every one of them is Clean
+// by then, so the second pull is a virtual call returning cached_.
 //
-//   • an Eager node never enters it, so it pays one enum compare, the same as
-//     every other node;
-//   • a Lazy node that does NOT skip re-pulls each input, but every one of them
-//     is Clean by then, so the second pull is a virtual call returning cached_.
-//
-// The alternative — retaining the pulled ValuePtrs in a member vector — is
-// ruled out: it pins a ValueSlot buffer and pushes the producer back into
-// allocating.
+// Retaining the pulled ValuePtrs in a member vector instead would pin a
+// ValueSlot buffer and push the producer back into allocating.
 template<typename T, typename Op>
 ValuePtr NAryOpNode<T,Op>::eval(EvalContext& ctx) {
     if (!this->dirty() && !ctx.forceRecompute) return this->cached_;

@@ -12,24 +12,28 @@
 //
 // Design principles
 // ─────────────────
-//  • Each node stores only the state needed for its O(1) incremental update.
-//  • The DAG's lazy invalidation means un-observed branches never compute.
-//  • IEqualityPolicy on each node's output controls downstream propagation.
+//  • Each node keeps only the state its incremental update needs.
+//  • Evaluation is pull-based: a node nothing pulls never computes.
+//  • Each node takes an IEqualityPolicy for its output; see IEqualityPolicy
+//    (dag.hpp) for what that gates.
 //
 // Node catalogue
 // ──────────────
 //  WindowNode<T>       — keeps the last N values as a std::deque<T>
 //  RollingStats        — single node: incremental mean + stddev (Welford)
 //                        exposes mean(), stddev(), variance() directly
+//  RollingSumNode      — sum of the last N values, maintained incrementally
 //  RollingMinMaxNode   — sliding min/max via monotonic deque, O(1) amort.
 //                        output: std::pair<double,double> {min, max}
 //  EWMANode            — exponential weighted moving average (alpha)
+//  EWMATickRateNode    — EWMA-smoothed tick occurrence rate (alpha)
 //  DeltaNode<T>        — first difference (value − previous)
 //  DelayNode<T>        — N-tick ring buffer; output is value from N ticks ago
-//  ThresholdNode<T>    — bool: value crosses a level, optional hysteresis
+//  makeTimeDelayNode<T> — time-based delay: the value as of now − horizonUs
+//  ThresholdNode<T>    — bool: level detector, optional hysteresis
 //  ZScoreNode          — (x − μ) / σ  using a RollingStats internally
 //  OutlierGateNode     — passes raw value if |z| < threshold, else mean
-//  RateLimiterNode<T>  — suppresses downstream if |Δ| < minDelta
+//  RateLimiterNode<T>  — holds its last emitted value while |Δ| < minDelta
 //  DebounceCountNode       — bool: only true after N consecutive true ticks
 //  LatchedDebounceNode     — std::optional<bool>: edge-triggered onset/resolved with debounce
 
@@ -46,8 +50,9 @@
 namespace dag::ts {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal CRTP helper — provides the dirty/downstream boilerplate.
-// Concrete node: inherit NodeImpl<Self>, implement compute(EvalContext&).
+// NodeImpl<Derived> — internal CRTP helper: reports NodeKind::TimeSeries and
+// holds cached_ with the publish helper below. A concrete node derives
+// StatefulNodeBase, not this.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Derived>
 class NodeImpl : public NodeBase, public std::enable_shared_from_this<Derived> {
@@ -67,8 +72,8 @@ protected:
 // ─────────────────────────────────────────────────────────────────────────────
 // StatefulNodeBase<Derived, Out, In, State>
 //
-// Eliminates per-node boilerplate: name, upstream, equality policy, dirty flag,
-// cache, downstream wiring, and the IStatefulNode mixin.
+// Holds what every single-input stateful node shares: name, upstream, equality
+// policy, cache, and the IStatefulNode mixin.
 //
 // Derived must implement three CRTP methods (enforced via static_assert):
 //   Out  doCompute(const In& input, State& state)
@@ -212,7 +217,7 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // RollingStats  —  single node: incremental mean + variance (Welford online).
 // Output: double (the mean — use stddev()/variance() for the rest).
-// Sharing one node avoids duplicating the O(1) state for ZScore etc.
+// Sharing one node avoids duplicating its state for ZScore etc.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingStats
     : public StatefulNodeBase<RollingStats, double, double, RollingStatsState>,
@@ -248,8 +253,6 @@ private:
     void push(double x, State& s);
 
     std::size_t window_;
-    /// Weak ref to avoid strong cycle: the companion node holds *this strongly
-    /// via inputs_ AND the lambda capture. Downstream consumers keep it alive.
     mutable std::weak_ptr<INode> windowStatusNode_;
 };
 
@@ -259,15 +262,14 @@ using RollingStatsPtr = std::shared_ptr<RollingStats>;
 // RollingSumNode — sum of the last `window` values, maintained incrementally.
 // Output: double
 //
-// Replaces the WindowNode + fold idiom, which re-summed the whole window every
-// tick after copying it twice (once out of the node, once into the functor's
-// argument tuple). This holds one running total and adjusts it by the value
-// entering and the value leaving: O(1) per tick, no copies.
+// A WindowNode plus a fold copies the whole window out and re-sums it every
+// tick. This holds one running total and adjusts it by the value entering and
+// the value leaving: O(1) per tick, no copies.
 //
 // Drift control: an add/subtract running total accumulates floating-point error
-// without bound, and this node runs for days. Every `window` pushes it re-sums
-// the buffer exactly, which caps the error at `window` incremental steps and
-// costs O(1) amortised — the re-sum is a contiguous scan, not a deque walk.
+// without bound, and this node can run indefinitely. Every `window` pushes it
+// re-sums the buffer exactly, which caps the error at `window` incremental steps
+// and costs O(1) amortised — the re-sum is a contiguous scan, not a deque walk.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingSumNode
     : public StatefulNodeBase<RollingSumNode, double, double, RollingSumNodeState>,
@@ -318,7 +320,7 @@ public:
     static std::shared_ptr<RollingMinMaxNode> make(
         std::string name, NodePtr upstream, std::size_t window);
 
-    // IWindowed — filled = min(tick, window) because each push advances tick_
+    // IWindowed — filled = min(tick, window) because each push advances state_.tick
     std::size_t capacity() const noexcept override { return window_; }
     std::size_t filled()   const noexcept override {
         return state_.tick < window_ ? state_.tick : window_;
@@ -366,7 +368,8 @@ private:
 // EWMATickRateNode — EWMA-smoothed tick occurrence rate
 // Counts trigger firings (each eval = 1 occurrence) via exponential decay.
 // Unlike EWMANode, the upstream value is ignored — only its firing matters.
-// Output: double converging toward 1.0 as ticks keep arriving at rate ≥ alpha.
+// Output: double. Each eval sets rate = alpha + (1 − alpha)·rate from an initial
+// 0, so it converges toward 1.0 as evaluations continue.
 // ─────────────────────────────────────────────────────────────────────────────
 class EWMATickRateNode
     : public StatefulNodeBase<EWMATickRateNode, double, double, EWMATickRateNodeState> {
@@ -408,10 +411,12 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ThresholdNode<T>
-// Output: bool — true on the tick when the value crosses the level.
-// Hysteresis: once triggered, value must move back by `hysteresis` before
-// the node can trigger again.
+// ThresholdNode<T> — a level detector with hysteresis.
+// Output: bool — true from the tick the value crosses the level until it moves
+// back by more than `hysteresis` the other way. Above: x > level triggers and
+// x < level − hysteresis releases; Below mirrors it. Hysteresis prevents chatter
+// near the level.
+// Pair with DebounceCountNode to require N consecutive true ticks.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class ThresholdNode
@@ -424,11 +429,6 @@ public:
         std::string name, NodePtr upstream,
         T level, Direction dir = Direction::Above, T hysteresis = T{});
 
-    // ThresholdNode is a LEVEL DETECTOR:
-    // • Output is true while the value is on the trigger side of the level.
-    // • Hysteresis: once triggered, stays true until value crosses back by hys_.
-    //   (prevents chatter near the threshold)
-    // Pair with DebounceCountNode to require N consecutive true ticks.
     bool doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
@@ -441,7 +441,8 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ZScoreNode
-// (x − μ) / σ  using a single shared RollingStats node.
+// (x − μ) / σ  using a single shared RollingStats node, with μ and σ taken
+// before x joins the window. 0 while σ < 1e-12, as on the first samples.
 // Output: double
 // Overrides eval() to also drive the inner RollingStats node each cycle.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -512,7 +513,8 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RateLimiterNode<T>
-// Only emits a new value downstream if |Δ from last emission| >= minDelta.
+// Only emits a new value downstream if |Δ from last emission| >= minDelta; the
+// first value is always emitted.
 // Works on any numeric T that supports operator- and std::abs.
 // Output: T (last emitted value)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -525,27 +527,14 @@ public:
     static std::shared_ptr<RateLimiterNode<T>> make(
         std::string name, NodePtr upstream, T minDelta);
 
-    // NO invalidation override. It used to absorb upstream invalidation without
-    // forwarding, and the tri-state protocol makes that both unnecessary and
-    // wrong:
-    //
-    //   • Unnecessary, because NodeBase's default IS the behaviour the override
-    //     was hand-writing — mark self Dirty, tell downstream Maybe. "Maybe" is
-    //     exactly the suppression flag a limiter needs: a consumer is
-    //     told something upstream moved, and finds out whether it matters by
-    //     pulling. If this node does not emit, a Lazy consumer skips.
-    //
-    //   • Wrong, because absorbing meant a consumer was never dirtied, so in a
-    //     pull-based graph it never pulled this node, so this node never reached
-    //     the eval() that would have released — and a limiter wired MID-GRAPH
-    //     never propagated its release at all. It only ever worked when
-    //     registered directly as an engine output. See
-    //     ValueSlot.RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine.
-    //
-    // The trade this makes, stated plainly: an EAGER consumer now recomputes on
-    // every upstream change where it used to recompute on none. That is what
-    // Eager means, and it gains the release it never used to get. Suppression is
-    // now opt-in, by declaring the consumer Lazy.
+    // No invalidation override: NodeBase's default — mark self Dirty, tell
+    // downstream Maybe — is the suppression a limiter needs. A consumer is told
+    // something upstream moved, and finds out whether it matters by pulling. If
+    // this node does not emit, a Lazy consumer skips; an EAGER consumer
+    // recomputes on every upstream change, as Eager means. Suppression is opt-in,
+    // by declaring the consumer Lazy. A limiter wired mid-graph propagates its
+    // release: see
+    // ValueSlot.RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine.
 
     T    doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
@@ -615,7 +604,7 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // DelayNode<T>
 // N-tick ring buffer.  Returns the value from exactly N ticks ago.
-// On the first N−1 ticks the output is `initialValue` (default T{}).
+// On the first N ticks the output is `initialValue` (default T{}).
 // Output: T
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
@@ -672,10 +661,11 @@ private:
 //   (warm-up), so downstream gates on has_value(); the default
 //   TypedEqualityPolicy<optional<T>> suppresses the nullopt==nullopt stretch.
 //
-// State is a captured (time,value) ring — the "ComputeNode + captured state"
-// pattern (a two-input node cannot use single-input StatefulNodeBase). It is
-// deliberately NOT persisted: timestamps are clock-epoch-relative (a restart
-// resets steady_clock's epoch), so a restored buffer would be meaningless, and at
+// State is a captured deque of (time, value) samples — the "ComputeNode +
+// captured state" pattern (a two-input node cannot use single-input
+// StatefulNodeBase), so the node is Eager, the default. It is deliberately NOT
+// persisted: timestamps are relative to the supplied clock, whose epoch need not
+// survive a restart, so a restored buffer could be meaningless, and at
 // seconds-scale horizons re-warming costs nothing.
 template<typename T>
 ComputeNodePtr<std::optional<T>, T, std::int64_t>

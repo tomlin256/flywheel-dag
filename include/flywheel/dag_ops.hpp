@@ -13,23 +13,23 @@
 // Each op below is its own concrete C++ type — not a generic ComputeNode
 // wrapping an opaque lambda — so that inputs() plus the op's identity are
 // enough for a pass (e.g. reverse-mode AAD) to attach a closed-form local
-// derivative without redesigning these primitives. Each op supplies it through
-// aad::IDifferentiable (dag.hpp), from Derivative<Op> below. This file only
-// evaluates and supplies partials: it records no tape and runs no sweep.
+// derivative. Each op supplies it through aad::IDifferentiable (dag.hpp), from
+// Derivative<Op> below. This file only evaluates and supplies partials: it
+// records no tape and runs no sweep.
 //
 // Every op below is a `using` alias over one of three arity-generic
 // templates (UnaryOpNode / BinaryOpNode / NAryOpNode<T, Op>), parameterized
 // by a small Op functor. Each alias still names its own concrete type —
-// SumNode<T> and ProductNode<T> remain as distinguishable to the compiler
-// (and to a future AAD dispatch pass) as if they were separate hand-written
-// classes, because they expand to different NAryOpNode<T, Op> instantiations.
+// SumNode<T> and ProductNode<T> are as distinguishable to the compiler, and to
+// Derivative<Op>, as separate hand-written classes, because they expand to
+// different NAryOpNode<T, Op> instantiations.
 //
 // Node catalogue
 // ──────────────
 //  SumNode<T>      — n-ary sum:      out = ins[0] + ins[1] + ... (0 ins -> T{})
 //  ProductNode<T>  — n-ary product:  out = ins[0] * ins[1] * ... (0 ins -> T{1})
 //  DiffNode<T>     — binary:         out = a - b
-//  DivideNode<T>   — binary:         out = a / b   (unguarded — see class doc)
+//  DivideNode<T>   — binary:         out = a / b   (unguarded)
 //  NegateNode<T>   — unary:          out = -a      (signed T only)
 //  ExpNode<T>      — unary:          out = exp(a)  (floating-point T only)
 //  LnNode<T>       — unary:          out = ln(a)   (floating-point T only; unguarded)
@@ -53,12 +53,12 @@
 namespace dag::ops {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OpNodeImpl<Derived> — CRTP helper providing dirty/downstream/kind
-// boilerplate for stateless arithmetic ops. Mirrors dag::ts::NodeImpl<Derived>
-// in shape; named differently (not reused) to avoid an unqualified-name
-// collision if a file ever has both `dag::ts` and `dag::ops` open. Reports
-// NodeKind::Compute — these are pure functions of their inputs, same bucket
-// as ComputeNode/ConditionNode, not a new kind.
+// OpNodeImpl<Derived> — CRTP helper for stateless arithmetic ops: it fixes the
+// mode at Lazy and holds cached_ with the publish helper below. Mirrors
+// dag::ts::NodeImpl<Derived> in shape; named differently (not reused) to avoid
+// an unqualified-name collision if a file ever has both `dag::ts` and
+// `dag::ops` open. Reports NodeKind::Compute — these are pure functions of
+// their inputs, same bucket as ComputeNode/ConditionNode, not a new kind.
 //
 // Every op is an aad::IDifferentiable. Each arity template implements
 // partials() from Derivative<Op>, and returns false for an op over a type
