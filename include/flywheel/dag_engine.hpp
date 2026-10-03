@@ -42,7 +42,8 @@
 //   pointer when the equality policy says the value actually changed.  An
 //   output stays due until a cycle reaches it, so a node or a callback that
 //   throws out of a cycle leaves the outputs the cycle did not reach to the
-//   next cycle.
+//   next cycle.  A new output starts due, so the first cycle after it is
+//   registered delivers the value its node holds then.
 //
 // Input<T> (with wake hook)
 //   Use makeInput<T>() for config / parameter values you set from application
@@ -144,7 +145,8 @@ public:
 
     /// Install a compute module: calls module->wire(*this) exactly once and
     /// keeps the module alive for the lifetime of the engine.
-    /// Must be called before run().
+    /// Call it between cycles, as addOutput(): an output that wire() registers
+    /// fires on the next cycle, with the value its node holds then.
     void install(std::shared_ptr<IComputeModule> module);
 
     // ── Source registration ───────────────────────────────────────────────────
@@ -167,7 +169,12 @@ public:
     // ── Output registration ───────────────────────────────────────────────────
 
     /// Register an output with a typed callback.
-    /// The callback fires only when the output's value actually changes.
+    /// The callback fires on the first cycle after the output is registered, with the value its
+    /// node holds then, even when an earlier cycle or a caller has already evaluated the node
+    /// (flywheel-dag#23). After that it fires only when the output's value actually changes.
+    /// Register an output between cycles: before the first, between step()s, or once run() has
+    /// returned. Never register one from inside a cycle, from an output callback or a node's
+    /// eval() (flywheel-dag#24), or from another thread while run() is going.
     /// A cycle that a node or a callback throws out of leaves the outputs it did not reach to
     /// the next cycle, which delivers the value each holds then (flywheel-dag#20). A callback
     /// that throws has had its value: it is not offered that value again, only the next one.

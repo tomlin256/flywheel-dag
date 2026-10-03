@@ -57,10 +57,11 @@
 //     std::invalid_argument. A tape reads what the graph holds and evaluates
 //     nothing. Evaluating a dirty root for the caller would break an engine:
 //     Engine::cycle() snapshots its outputs' dirty flags before it evaluates
-//     them, so a registered output that a pass evaluated between cycles reads
-//     as clean, and its callback misses the change. Run a pass in the root's
-//     output callback, where the engine has just evaluated it, or evaluate the
-//     root first.
+//     them, so an output that a cycle has reached reads as clean after a pass
+//     evaluates it between cycles, and its callback misses the change. A new
+//     output is due until a cycle reaches it (flywheel-dag#23). Run a pass in
+//     the root's output callback, where the engine has just evaluated it, or
+//     evaluate the root first.
 //   • Any node can be a wrt or seed node, not only a leaf. Its adjoint is the
 //     derivative with respect to a change in its own value. A seed on an
 //     intermediate node adds to the tangent that reaches it. That keeps the two

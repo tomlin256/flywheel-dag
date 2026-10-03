@@ -280,8 +280,11 @@ moved again.
   it.
 
 `EngineAbortedCycle` in `test_dag_async.cpp` pins both. A new output starts
-unmarked, so one registered on a node that is already clean waits for the node
-to move (flywheel-dag#23).
+marked, so its first cycle delivers the value its node holds then, even when an
+earlier cycle or a caller has already evaluated the node (flywheel-dag#23);
+`EngineNewOutput` pins it. Register outputs, and install the modules that register
+them, between cycles, never from inside one: a callback that registers an output
+can read freed memory (flywheel-dag#24).
 
 **Tweakable nodes** — `TweakableComputeNode::tweak(v)` freezes output
 mid-graph. A changed tweak reaches the node's own engine output once, on the
@@ -627,9 +630,11 @@ node that does not implement the mixin. A tape does not follow a barrier's input
   cached value. An always-dirty node is the exception, and so is the root a
   sensitivity node records right after its pull (below). Never
   make a tape evaluate a dirty root for its caller: `Engine::cycle()` snapshots its
-  outputs' dirty flags before evaluating them, so a registered output evaluated
-  between cycles reads as clean, and its callback misses the change. A pass runs in
-  the root's output callback, or after the caller has evaluated the root.
+  outputs' dirty flags before evaluating them, so an output that a cycle has
+  reached reads as clean after a pass evaluates it between cycles, and its callback
+  misses the change. A new output is due until a cycle reaches it
+  (flywheel-dag#23). A pass runs in the root's output callback, or after the caller
+  has evaluated the root.
 - **Partials come from the inputs alone,** never from the node's own published
   value, which a tolerance policy can hold back.
 - **A partial times an adjoint or a tangent is 0 when either is 0.** So a

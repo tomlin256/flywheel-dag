@@ -118,13 +118,13 @@ inline bool Engine::restoreState() {
 
 inline std::vector<dag::StatefulNodePtr>
 Engine::discoverStatefulNodes() const {
-    // TODO(perf): memoize. Outputs and DAG topology are invariant after wiring
-    // (install/addOutput are documented as pre-run), so the BFS + dynamic_casts
-    // here yield the same vector on every call. A host that calls saveState()
-    // periodically pays for the full walk each time. If
-    // this shows up in a profile, cache the result in a `mutable
-    // std::optional<std::vector<StatefulNodePtr>>` and invalidate it from
-    // install() and addOutput(). Not done yet — no measured impact.
+    // TODO(perf): memoize. Outputs change only when install() or addOutput()
+    // registers one, between cycles, and DAG topology is fixed once wired, so
+    // the BFS + dynamic_casts here yield the same vector on every call in
+    // between. A host that calls saveState() periodically pays for the full
+    // walk each time. If this shows up in a profile, cache the result in a
+    // `mutable std::optional<std::vector<StatefulNodePtr>>` and invalidate it
+    // from install() and addOutput(). Not done yet — no measured impact.
     std::vector<NodePtr> roots;
     roots.reserve(outputs_.size());
     for (const auto& e : outputs_)
