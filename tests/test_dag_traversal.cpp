@@ -67,17 +67,11 @@ static_assert(std::is_same_v<
                   std::input_iterator_tag>,
               "BfsRange::iterator must model std::input_iterator_tag");
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EmptyRootsIsEmpty
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, EmptyRootsIsEmpty) {
     auto bfs = traversal::bfs_upstream({});
     EXPECT_TRUE(bfs.begin() == bfs.end());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SingleLeafYieldsSelf
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, SingleLeafYieldsSelf) {
     auto a = TestNode::make("a");
     std::vector<std::string> seen;
@@ -167,9 +161,6 @@ TEST(DagTraversal, RangeForLoop) {
     EXPECT_EQ(count, 2);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// StdForEach
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, StdForEach) {
     auto a = TestNode::make("a");
     auto b = TestNode::make("b", {a});
@@ -197,9 +188,6 @@ TEST(DagTraversal, StdFindIf) {
     EXPECT_EQ((*it)->name(), "b");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// StdCountIf
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, StdCountIf) {
     auto a = TestNode::make("a");
     auto b = TestNode::make("b", {a});
@@ -283,9 +271,6 @@ TEST(DagTraversal, CustomNeighborsFn) {
     EXPECT_EQ(seen, (std::vector<std::string>{"keep_d", "c"}));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// StdAnyOf
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, StdAnyOf) {
     auto a = TestNode::make("a");
     auto b = TestNode::make("b", {a});
