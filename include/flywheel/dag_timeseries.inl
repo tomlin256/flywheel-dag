@@ -875,8 +875,11 @@ makeTimeDelayNode(std::string name, NodePtr value, NodePtr timeUs,
 // node. The declared input is that node's VALUE; the output is a function of its
 // internal STATE. filled() advances while the value sits still, so these nodes
 // change on cycles where their declared input does not, and a Lazy version
-// would skip exactly then. Pinned by
-// TimeSeries.WindowStatusChangesWhileItsDeclaredInputDoesNot.
+// would skip exactly then. WindowNode's value counts as changed on every
+// evaluation, so a Lazy companion there would not skip; it is Eager because the
+// functor reads state it did not declare. Pinned by
+// WindowStatusCompanion.* in tests/test_timeseries.cpp: the mode of all five, and
+// the behaviour of all but WindowNode.
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline NodePtr RollingStats::windowStatusNode() const {

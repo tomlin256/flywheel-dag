@@ -697,36 +697,116 @@ TEST(EWMATickRateNodeAlpha, RejectsOutOfRangeAlpha) {
 // node's value, the declared input, sits still. The note above the
 // implementations in dag_timeseries.inl has the reason in full.
 //
-// Only the mode assertion pins this, and only for RollingStats's companion: the
-// sequence below passes for a Lazy companion too (flywheel-dag#33).
+// The mode is read off each companion. The behaviour is a run of zeros through an
+// AlwaysChangedPolicy input: every push dirties the node and the value it
+// publishes stays put, so a Lazy companion reads "nothing moved" and stops
+// following the window. Zeros, because the running sum of any other constant
+// moves while the window fills. A Lazy companion built by hand with the shipped
+// functor gets the same run as a control: it must fall behind, or the run pins
+// nothing.
+//
+// WindowNode has no behavioural run. Its policy is AlwaysChangedPolicy, so its
+// value counts as changed on every evaluation and a Lazy companion recomputes
+// whenever filled() advances: no run tells the two apart. The mode check alone
+// pins it.
 // ─────────────────────────────────────────────────────────────────────────────
-TEST(TimeSeries, WindowStatusChangesWhileItsDeclaredInputDoesNot) {
-    auto in     = Input<double>::make("in", 0.0);
-    auto stats  = ts::RollingStats::make("stats", in, 4);
-    auto status = stats->windowStatusNode();
+namespace {
 
+constexpr std::size_t kStatusWindow = 4;
+
+template <typename T>
+std::shared_ptr<Input<T>> alwaysChangedInput(T initial) {
+    return Input<T>::make("in", std::move(initial), std::make_shared<AlwaysChangedPolicy>());
+}
+
+void expectEager(const NodePtr& companion) {
     // invalidationMode() is on NodeBase, not INode: INode gets no virtual for a
     // read-only accessor.
-    const auto asBase = std::dynamic_pointer_cast<NodeBase>(status);
+    const auto asBase = std::dynamic_pointer_cast<NodeBase>(companion);
     ASSERT_TRUE(asBase);
     EXPECT_EQ(asBase->invalidationMode(), InvalidationMode::Eager)
         << "windowStatusNode() must build its companion Eager";
+}
 
+struct StatusAt {
+    WindowStatus first;   // after the first push
+    WindowStatus last;    // after the kStatusWindow-th
+};
+
+StatusAt feedZeros(const std::shared_ptr<Input<double>>& in, const NodePtr& status) {
     EvalContext ctx;
-    in->set(7.0);
-    status->eval(ctx);
-    const auto first = get_value<ts::WindowStatus>(status->eval(ctx));
-
-    // The nudge lets the source propagate. It also moves the mean by about 1e-12.
-    for (int i = 0; i < 3; ++i) {
-        in->set(7.0 + 1e-12 * (i + 1));
-        status->eval(ctx);
+    StatusAt at;
+    for (std::size_t push = 1; push <= kStatusWindow; ++push) {
+        in->set(0.0);
+        at.last = get_value<WindowStatus>(status->eval(ctx));
+        if (push == 1) { at.first = at.last; }
     }
-    const auto later = get_value<ts::WindowStatus>(status->eval(ctx));
+    return at;
+}
 
-    EXPECT_GT(later.filled, first.filled)
-        << "the status must follow the window as it fills";
-    EXPECT_EQ(later.capacity, first.capacity);
+/// A companion built as the shipped ones are, except Lazy.
+template <typename In, typename Node>
+NodePtr lazyCompanion(const std::shared_ptr<Node>& node) {
+    return ComputeNode<WindowStatus, In>::make(
+        node->name() + ".lazyStatus",
+        std::make_tuple(std::static_pointer_cast<INode>(node)),
+        [node](const In&) -> WindowStatus { return { node->capacity(), node->filled() }; },
+        InvalidationMode::Lazy);
+}
+
+/// `make` builds the node under test on its input; `In` is that node's value type.
+template <typename In, typename Make>
+void expectCompanionFollowsTheWindow(const Make& make) {
+    {
+        auto in   = alwaysChangedInput(0.0);
+        auto node = make(in);
+        const NodePtr status = node->windowStatusNode();
+        expectEager(status);
+        const StatusAt at = feedZeros(in, status);
+        EXPECT_EQ(at.first.filled, 1u);
+        EXPECT_EQ(at.last.filled, kStatusWindow)
+            << "the status must follow the window as it fills";
+        EXPECT_EQ(at.last.capacity, kStatusWindow);
+    }
+    {   // The control.
+        auto in   = alwaysChangedInput(0.0);
+        auto node = make(in);
+        const StatusAt at = feedZeros(in, lazyCompanion<In>(node));
+        EXPECT_EQ(at.last.filled, at.first.filled)
+            << "a Lazy companion must fall behind on this run, or the run pins nothing";
+    }
+}
+
+}  // namespace
+
+TEST(WindowStatusCompanion, RollingStats) {
+    expectCompanionFollowsTheWindow<double>([](const NodePtr& in) {
+        return RollingStats::make("stats", in, kStatusWindow);
+    });
+}
+
+TEST(WindowStatusCompanion, RollingSumNode) {
+    expectCompanionFollowsTheWindow<double>([](const NodePtr& in) {
+        return RollingSumNode::make("sum", in, kStatusWindow);
+    });
+}
+
+TEST(WindowStatusCompanion, RollingMinMaxNode) {
+    expectCompanionFollowsTheWindow<std::pair<double, double>>([](const NodePtr& in) {
+        return RollingMinMaxNode::make("minmax", in, kStatusWindow);
+    });
+}
+
+TEST(WindowStatusCompanion, DelayNode) {
+    expectCompanionFollowsTheWindow<double>([](const NodePtr& in) {
+        return DelayNode<double>::make("delay", in, kStatusWindow);
+    });
+}
+
+TEST(WindowStatusCompanion, WindowNode) {
+    auto in  = alwaysChangedInput(0.0);
+    auto win = WindowNode<double>::make("window", in, kStatusWindow);
+    expectEager(win->windowStatusNode());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -752,11 +832,6 @@ struct OutputCallbacks {
     int warm   = 0;   // over the rest of the warm-up
     int steady = 0;   // over kSteadyCycles once settled
 };
-
-template <typename T>
-std::shared_ptr<Input<T>> alwaysChangedInput(T initial) {
-    return Input<T>::make("in", std::move(initial), std::make_shared<AlwaysChangedPolicy>());
-}
 
 /// Registers `node` as an engine output, then runs a first cycle, the warm-up
 /// and the steady phase, calling `feed` before every cycle to dirty the node.
