@@ -1,6 +1,5 @@
 # check_warning_flags.cmake — test_warning_flags: every translation unit of
-# this project compiles with the warning flags, and no dependency's does
-# (flywheel-dag#4).
+# this project compiles with the warning flags, and no dependency's does.
 #
 # Run by ctest as
 #
@@ -16,8 +15,9 @@
 # Anything else, such as a FetchContent dependency under <build>/_deps, is a
 # dependency's. With WARNINGS_AS_ERRORS, every translation unit of this project
 # must also have -Werror, and no dependency's may: there, a warning of the
-# dependency's own would fail this project's build. No dependency sets
-# -Wpedantic for itself, so finding it on one means the flags leaked.
+# dependency's own would fail this project's build. None of the dependencies
+# this build fetches sets -Wpedantic for itself, so finding it on one means the
+# flags leaked.
 
 cmake_minimum_required(VERSION 3.19)   # string(JSON)
 

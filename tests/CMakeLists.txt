@@ -51,9 +51,9 @@ add_test(NAME test_consumer_subproject
     --test-command consumer)
 set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)
 
-# The installed package (flywheel-dag#2). These tests are registered wherever
-# the root promises install rules, never from anything the install block itself
-# sets. Everything they install goes into its own prefix under package/.
+# The installed package. These tests are registered wherever the root promises
+# install rules, never from anything the install block itself sets. Everything
+# they install goes into its own prefix under package/.
 if(FLYWHEEL_DAG_INSTALL)
   set(package_dir ${CMAKE_CURRENT_BINARY_DIR}/package)
 
@@ -122,12 +122,11 @@ if(FLYWHEEL_DAG_INSTALL)
 endif()
 
 # The warning flags reach every translation unit of this project and none of
-# its dependencies' (flywheel-dag#4). Registered wherever the root
-# CMakeLists.txt promises the flags (the top level, GCC or Clang), never from
-# anything the code that sets them decides: a slip there must fail this test,
-# not unregister it. The check reads compile_commands.json, which only the
-# Makefile and Ninja generators write, using string(JSON), which needs
-# CMake 3.19.
+# its dependencies'. Registered wherever the root CMakeLists.txt promises the
+# flags (the top level, GCC or Clang), never from anything the code that sets
+# them decides: a slip there must fail this test, not unregister it. The check
+# reads compile_commands.json, which only the Makefile and Ninja generators
+# write, using string(JSON), which needs CMake 3.19.
 if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
    AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja")
    AND NOT CMAKE_VERSION VERSION_LESS 3.19)

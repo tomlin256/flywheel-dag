@@ -7,8 +7,7 @@
 #   -DFLYWHEEL_DAG_PACKAGE_VERSION=<version>    finds the installed package
 #                                               with find_package, in
 #                                               CMAKE_PREFIX_PATH alone
-#                                               (test_consumer_package,
-#                                               flywheel-dag#2)
+#                                               (test_consumer_package)
 #
 # With -DCONSUMER_FETCHES_DEPENDENCIES=ON, a package consumer first fetches
 # spdlog and nlohmann/json itself (test_consumer_package_own_dependencies).
@@ -30,7 +29,7 @@ if(FLYWHEEL_DAG_SOURCE_DIR)
   endforeach()
 
   # Nor does the engine install itself into its consumer's prefix unless the
-  # consumer asks (flywheel-dag#2).
+  # consumer asks.
   if(FLYWHEEL_DAG_INSTALL)
     message(FATAL_ERROR "flywheel-dag turned on its install rules in its consumer")
   endif()
@@ -66,8 +65,8 @@ else()
                       "-DFLYWHEEL_DAG_PACKAGE_VERSION to the version of an installed one")
 endif()
 
-# A consumer's compile flags are its own (flywheel-dag#4): the engine's warning
-# flags must reach it neither through flywheel::dag nor through the cache.
+# A consumer's compile flags are its own: the engine's warning flags must reach
+# it neither through flywheel::dag nor through the cache.
 get_target_property(engine_options flywheel::dag INTERFACE_COMPILE_OPTIONS)
 if(engine_options)
   message(FATAL_ERROR "flywheel::dag passes compile options to its consumer: "

@@ -1,5 +1,5 @@
 # check_install.cmake — test_install: installs this build into an empty prefix,
-# the way a user would, and checks what lands there (flywheel-dag#2).
+# the way a user would, and checks what lands there.
 #
 # Run by ctest as
 #

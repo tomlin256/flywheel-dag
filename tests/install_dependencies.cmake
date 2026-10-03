@@ -1,8 +1,7 @@
 # install_dependencies.cmake — the install_dependencies fixture: builds spdlog
 # and nlohmann/json from the sources the engine's build fetched, and installs
-# them into an empty prefix, the way a package manager provides them
-# (flywheel-dag#2). test_consumer_package finds them there through the
-# engine's package config.
+# them into an empty prefix, the way a package manager provides them.
+# test_consumer_package finds them there through the engine's package config.
 #
 # Run by ctest as
 #

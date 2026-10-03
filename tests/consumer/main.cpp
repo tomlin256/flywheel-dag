@@ -14,7 +14,7 @@
 // It also saves a node's state through JsonFileStateStore and restores it into
 // a fresh node. That is the engine code that uses both of its dependencies:
 // nlohmann/json writes the snapshot and spdlog logs the save. So the program
-// cannot build, link or run unless the consumer found both (flywheel-dag#2).
+// cannot build, link or run unless the consumer found both.
 
 #include <flywheel/dag.hpp>
 #include <flywheel/dag_state_store.hpp>

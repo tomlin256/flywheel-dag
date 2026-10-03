@@ -17,7 +17,7 @@ namespace bench {
 
 namespace {
 
-/// %.17g, the shortest precision that round-trips every double.
+/// %.17g: 17 significant digits, the fewest that round-trip every double.
 std::string exact(double v) {
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.17g", v);

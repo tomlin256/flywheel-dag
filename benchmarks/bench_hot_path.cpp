@@ -183,9 +183,9 @@ bench::Row chain(long cycles) {
 // idle-queues — 32 AsyncQueues, stepped with nothing posted.
 //
 // The engine flushes every source on every cycle, so a quiet queue still costs
-// a flush and a dirty check each cycle. Both exact columns are 0 by
-// construction: nothing is posted, so a callback here would be an idle queue
-// delivering something.
+// a flush and a dirty check each cycle. The callbacks and checksum columns are
+// 0 by construction: nothing is posted, so a callback here would be an idle
+// queue delivering something.
 // ─────────────────────────────────────────────────────────────────────────────
 bench::Row idleQueues(long cycles) {
     constexpr int kQueues = 32;

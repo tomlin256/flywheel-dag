@@ -119,12 +119,11 @@ target_compile_features(flywheel_dag INTERFACE cxx_std_17)
 set_target_properties(flywheel_dag PROPERTIES EXPORT_NAME dag)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Install (flywheel-dag#2): the engine alone, meaning its headers, a
-# find_package(flywheel_dag) config and the LICENSE file. Every installed file
-# exists once configure finishes, so nothing needs building first. spdlog and
-# nlohmann/json are not installed: a consumer provides them, as installed
-# packages or through its own FetchContent before find_package. test_install
-# checks the installed set.
+# Install: the engine alone, meaning its headers, a find_package(flywheel_dag)
+# config and the LICENSE file. Every installed file exists once configure
+# finishes, so nothing needs building first. spdlog and nlohmann/json are not
+# installed: a consumer provides them, as installed packages or through its own
+# FetchContent before find_package. test_install checks the installed set.
 # ─────────────────────────────────────────────────────────────────────────────
 if(FLYWHEEL_DAG_INSTALL)
     include(GNUInstallDirs)
@@ -163,14 +162,13 @@ endif()
 # ─────────────────────────────────────────────────────────────────────────────
 if(_flywheel_dag_top_level)
     # This project's own targets build with -Wall -Wextra -Wpedantic, and any
-    # use of a [[deprecated]] API is an error (flywheel-dag#4). Those targets
-    # are the tests, the example and the benchmark: they are what compile the
-    # engine's headers. add_compile_options reaches only the targets created
-    # after it, here and below, so placing it after every FetchContent
-    # dependency leaves third-party sources unaffected. Nothing goes on
-    # flywheel_dag's INTERFACE, and a subproject sets none of this, so a
-    # consumer's flags stay its own. test_warning_flags and
-    # test_consumer_subproject hold both halves.
+    # use of a [[deprecated]] API is an error. Those targets are the tests, the
+    # example and the benchmark: they are what compile the engine's headers.
+    # add_compile_options reaches only the targets created after it, here and
+    # below, so placing it after every FetchContent dependency leaves
+    # third-party sources unaffected. Nothing goes on flywheel_dag's INTERFACE,
+    # and a subproject sets none of this, so a consumer's flags stay its own.
+    # test_warning_flags and test_consumer_subproject hold both halves.
     #
     # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes every warning an error, and CI
     # turns it on. It is off by default, so a newer compiler's new warning

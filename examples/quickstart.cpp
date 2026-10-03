@@ -12,8 +12,8 @@
 // A signal arrives on an AsyncInput: uniform noise in [-1, 1) with a five-cycle
 // spike of +10 every 250 cycles. The graph scores each sample against the 50
 // before it (a rolling z-score), flags |z| > 3 with hysteresis, ignores the flag
-// until the window has filled, and latches it — so the output callback fires
-// exactly once when a spike starts and once when it ends.
+// until the window has filled, and latches it — so the output reports one
+// transition when a spike starts and one when it ends.
 //
 // Engine::step() runs one cycle synchronously, so a given cycle count always
 // prints the same transitions. A live application calls engine.run() instead,
