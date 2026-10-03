@@ -38,8 +38,7 @@ void AsyncInput<T>::post(const T& val) {
         pending_    = val;
         hasPending_ = true;
     }
-    // Call hook outside the lock — the hook just signals a cv, which is
-    // safe to call from any thread without holding any application lock.
+    // The hook runs outside the lock: it only signals a condition variable.
     if (wakeHook_) wakeHook_();
 }
 
@@ -50,7 +49,7 @@ std::size_t AsyncInput<T>::flush() {
         const bool had = hasPending_;
         // Swap rather than move out: staged_ gives pending_ its buffers back, so
         // the next post() copy-assigns into storage that is already the right
-        // size. Three pointer-steal moves, no allocation, no real deallocation.
+        // size.
         if (had) std::swap(pending_, staged_);
         hasPending_ = false;
         skipped_    = 0;
@@ -139,12 +138,11 @@ std::size_t AsyncQueue<T>::flush() {
         if (n != 0) std::swap(drain_, queue_);
     }
     if (n == 0) {
-        // The refresh is required — a downstream node dirtied by a DIFFERENT
+        // Refresh to the empty batch: a downstream node dirtied by a DIFFERENT
         // input still calls eval() on this queue, and must read [] rather than
-        // the previous cycle's batch, which it has already consumed. What it
-        // does not need is a NEW [] every cycle: the empty batch is a constant,
-        // built once in the constructor. Do not move this return above the
-        // refresh.
+        // the previous cycle's batch, which it has already consumed. The empty
+        // batch is a constant built once in the constructor, so this allocates
+        // nothing. Do not move this return above the refresh.
         value_ = emptyValue_;
         return 0;
     }

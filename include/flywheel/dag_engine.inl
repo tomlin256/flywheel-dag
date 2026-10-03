@@ -118,13 +118,6 @@ inline bool Engine::restoreState() {
 
 inline std::vector<dag::StatefulNodePtr>
 Engine::discoverStatefulNodes() const {
-    // TODO(perf): memoize. Outputs change only when install() or addOutput()
-    // registers one, between cycles, and DAG topology is fixed once wired, so
-    // the BFS + dynamic_casts here yield the same vector on every call in
-    // between. A host that calls saveState() periodically pays for the full
-    // walk each time. If this shows up in a profile, cache the result in a
-    // `mutable std::optional<std::vector<StatefulNodePtr>>` and invalidate it
-    // from install() and addOutput(). Not done yet — no measured impact.
     std::vector<NodePtr> roots;
     roots.reserve(outputs_.size());
     for (const auto& e : outputs_)
@@ -187,10 +180,9 @@ inline void Engine::addOutput(
     NodePtr node, std::function<void(const ValuePtr&)> cb)
 {
     outputs_.push_back({ std::move(node), nullptr, std::move(cb) });
-    // Due from the start, so the next cycle reaches the output although its node may already be
+    // Due from the start, so the next cycle reaches the output even when its node is already
     // clean, because an earlier cycle pulled it as another output's input or a caller evaluated
-    // it. Started not due, the output waited for the node to move, and its callback never saw the
-    // value the node held when the output was registered (flywheel-dag#23).
+    // it.
     due_.push_back(true);
 }
 
@@ -210,8 +202,8 @@ inline void Engine::run() {
         throw std::runtime_error("Engine::run() called while already running");
 
     // A node or callback that throws ends the run, and its exception leaves through here. Clear
-    // running_ on every exit, or no later run() could start (flywheel-dag#16). This comes after
-    // the check: a run() refused there must leave the flag of the run already going alone.
+    // running_ on every exit, or no later run() could start. This comes after the check: a run()
+    // refused there must leave the flag of the run already going alone.
     struct ClearOnExit {
         std::atomic<bool>& flag;
         ~ClearOnExit() { flag = false; }
@@ -316,9 +308,9 @@ inline void Engine::cycle() {
     //    A node or a callback that throws out of step 3 leaves the outputs
     //    after it due.  One that an earlier output pulled clean reads clean
     //    here, and overwritten, its callback would miss the value its node
-    //    holds until that value moved again (flywheel-dag#20).  A cycle that
-    //    does not throw clears every entry, so the next starts with none due
-    //    but the outputs registered since (flywheel-dag#23).
+    //    holds until that value moved again.  A cycle that does not throw
+    //    clears every entry, so the next starts with none due but the outputs
+    //    registered since.
     for (std::size_t i = 0; i < outputs_.size(); ++i)
         if (outputs_[i].node->dirty()) due_[i] = true;
 
@@ -338,8 +330,7 @@ inline void Engine::cycle() {
         // Pointer identity: if cached_ didn't change (equality policy
         // said equal), the node returns the same pointer it held before.
         // A new output is due and its lastSeen is null, so every output
-        // fires once, on the first cycle after it is registered
-        // (flywheel-dag#23).
+        // fires once, on the first cycle after it is registered.
         if (val != outputs_[i].lastSeen) {
             outputs_[i].lastSeen = val;
             callbacks_.fetch_add(1, std::memory_order_relaxed);
@@ -362,8 +353,8 @@ inline void Engine::cycle() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Wake hook factory
 //
-// Returns a cheap callable that sets the work flag and signals the cv.
-// Calling it from a feed thread is safe and non-blocking.
+// Returns a cheap callable that sets the work flag and signals the cv. A feed
+// thread may call it: it holds mu_ only to set the flag.
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::function<void()> Engine::makeWakeHook() {

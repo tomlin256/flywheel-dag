@@ -20,7 +20,7 @@
 //   Engine e;
 //
 //   auto threshold = e.makeInput<double>("z_threshold", 2.0);  // Input<T>
-//   e.addSource(feed->registry());                             // async feeds
+//   e.addSource(registry);                      // a FeedRegistry of async feeds
 //
 //   e.addOutput<double>(ratioNode,  [](double v){ ... });
 //   e.addOutput<bool>  (alertNode,  [](bool   v){ ... });
@@ -32,7 +32,7 @@
 // Wake mechanism
 //   Every registered source installs the engine's wake hook.  The hook does one
 //   thing: sets a boolean flag and signals a condition variable.  This is the
-//   *only* shared state between feed threads and the engine thread.
+//   only Engine state a feed thread touches.
 //
 // Cycle
 //   On each wake: flush all sources (thread boundary), then for each output node
@@ -78,11 +78,10 @@ namespace dag::async {
 inline constexpr std::size_t kDefaultRollingCycleWindow = 1000;
 
 // RollingCycleWindow — incremental mean over the last `window` cycle durations
-// (ns). Mirrors dag::ts::RollingSumNode's evict-before-push RingBuffer idiom
-// (dag_timeseries.hpp) — Engine-internal bookkeeping, not a DAG node, so it
-// lives here in dag::async rather than dag::ts. ns is integral, so unlike
-// RollingSumNode's double sum, the running total needs no periodic re-sum to
-// bound drift.
+// (ns), with the evict-before-push RingBuffer idiom of dag::ts::RollingSumNode
+// (dag_timeseries.hpp). Engine bookkeeping, not a DAG node, so it lives in
+// dag::async. ns is integral, so unlike RollingSumNode's double sum the running
+// total needs no periodic re-sum to bound drift.
 class RollingCycleWindow {
 public:
     explicit RollingCycleWindow(std::size_t window);
@@ -92,9 +91,9 @@ public:
 
 private:
     // buf_/sum_ are a RingBuffer<uint64_t>-backed structure, not a scalar, so they
-    // can't be made atomic piecewise — record() (engine thread) and meanUs() (report
-    // / watchdog threads) both take this lock around the whole operation. See
-    // dag_ring_buffer.hpp: "Not thread-safe: eval-thread only."
+    // can't be made atomic piecewise: record() (engine thread) and meanUs() (any
+    // other thread) both take this lock around the whole operation. RingBuffer
+    // itself is eval-thread only (dag_ring_buffer.hpp).
     mutable std::mutex        mu_;
     dag::RingBuffer<uint64_t> buf_;
     std::size_t               window_;
@@ -156,7 +155,9 @@ public:
     void addSource(std::shared_ptr<IFlushable> src);
 
     /// Register every source inside a FeedRegistry.
-    /// The registry propagates the hook to all current and future members.
+    /// The registry propagates the hook to all current and future members, but
+    /// the engine flushes only the members present now: a source added to the
+    /// registry later is never flushed (flywheel-dag#27).
     void addSource(FeedRegistry& reg);
 
     /// Create a synchronous Input<T> that wakes the engine on set().
@@ -170,14 +171,14 @@ public:
 
     /// Register an output with a typed callback.
     /// The callback fires on the first cycle after the output is registered, with the value its
-    /// node holds then, even when an earlier cycle or a caller has already evaluated the node
-    /// (flywheel-dag#23). After that it fires only when the output's value actually changes.
+    /// node holds then, even when an earlier cycle or a caller has already evaluated the node.
+    /// After that it fires only when the output's value actually changes.
     /// Register an output between cycles: before the first, between step()s, or once run() has
     /// returned. Never register one from inside a cycle, from an output callback or a node's
     /// eval() (flywheel-dag#24), or from another thread while run() is going.
     /// A cycle that a node or a callback throws out of leaves the outputs it did not reach to
-    /// the next cycle, which delivers the value each holds then (flywheel-dag#20). A callback
-    /// that throws has had its value: it is not offered that value again, only the next one.
+    /// the next cycle, which delivers the value each holds then. A callback that throws has had
+    /// its value: it is not offered that value again, only the next one.
     template<typename T>
     void addOutput(NodePtr node, std::function<void(const T&)> cb);
 
@@ -196,32 +197,20 @@ public:
     /// If not called (or store is nullptr), saveState() and restoreState() are no-ops.
     void setStateStore(std::shared_ptr<IStateStore> store);
 
-    /// Collect stateful nodes from all installed modules and call store_->save().
+    /// Save the stateful nodes that discoverStatefulNodes() finds.
     /// No-op if no store has been set.
     void saveState() const;
 
-    /// Collect stateful nodes from all installed modules and call store_->restore().
-    /// No-op if no store has been set.
-    /// Returns the bool result of IStateStore::restore() (false = cold start / no saved state).
+    /// Restore the stateful nodes that discoverStatefulNodes() finds.
+    /// Returns the result of IStateStore::restore() (false = cold start / no
+    /// saved state), and false without a store.
     bool restoreState();
 
     /// Walk the live DAG from every registered output (via INode::inputs(),
     /// deduped, BFS order) and return every reachable IStatefulNode whose
     /// persistState() is true. Source of truth for save/restore — no manual
-    /// per-module list is consulted.
-    ///
-    /// TODO: orphan detector (deferred). The contract is "stateful nodes are
-    /// persisted iff reachable from a registered output." A stateful node
-    /// constructed but never wired through is silently dropped — the inverted
-    /// version of the forget-to-register-stateful bug this discovery model
-    /// eliminated. Defence-in-depth fix: have StatefulNodeBase push
-    /// weak_from_this() into a process-global registry at construction, then
-    /// add Engine::checkOrphans() that diffs the registry against
-    /// discoverStatefulNodes() and spdlog::warn's on any live node missing
-    /// from discovery. A host application would invoke it after all modules
-    /// install. No orphan has been seen in practice, so this is not blocking.
-    /// Implement if an orphan ever ships, or if we want it as a regression
-    /// guard.
+    /// per-module list is consulted. A stateful node that no registered output
+    /// reaches is not persisted.
     std::vector<dag::StatefulNodePtr> discoverStatefulNodes() const;
 
     // ── Run control ───────────────────────────────────────────────────────────
@@ -229,8 +218,8 @@ public:
     /// Block and run until stop() is called.
     /// Must be called from exactly one thread.
     /// An exception from a node's eval() or an output callback ends the run and leaves through
-    /// run(), which can then be called again (flywheel-dag#16). The next cycle delivers the
-    /// outputs the aborted one did not reach (flywheel-dag#20).
+    /// run(), which can then be called again. The next cycle delivers the outputs the aborted
+    /// one did not reach.
     void run();
 
     /// Signal the engine to stop after the current cycle finishes.
@@ -247,11 +236,15 @@ public:
 
     // ── Graph inspection ─────────────────────────────────────────────────────
 
-    /// Returns the set of registered output nodes. Used to seed graph traversal.
-    /// Returns const pointers so callers can inspect but not mutate the nodes.
+    /// Returns the registered output nodes, one per output, in registration order.
+    /// Used to seed graph traversal. Returns const pointers so callers can inspect
+    /// but not mutate the nodes.
     std::vector<std::shared_ptr<const INode>> outputNodes() const;
 
     // ── Stats ─────────────────────────────────────────────────────────────────
+
+    // A cycle that throws is counted by cycleCount() but not timed: meanCycleUs()
+    // counts it at zero, and the other durations leave it out (flywheel-dag#21).
 
     uint64_t cycleCount()     const;
     uint64_t callbacksFired() const;
@@ -284,8 +277,8 @@ private:
     std::vector<std::shared_ptr<IComputeModule>> modules_;
     std::vector<std::shared_ptr<IFlushable>>     sources_;
     std::vector<OutputEntry>                     outputs_;
-    // One per output, added set by addOutput(), so a new output is due (flywheel-dag#23). cycle()
-    // marks and clears it (flywheel-dag#20).
+    // One per output: owed a visit by cycle(). addOutput() sets it, so a new output is due; cycle()
+    // marks an output whose node is dirty, and clears it once it reaches the output.
     std::vector<bool>                        due_;
     EvalContext                              ctx_;
 

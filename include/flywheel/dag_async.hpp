@@ -12,20 +12,21 @@
 //
 // Thread model
 // ────────────
-// Feed threads call post() — lock-protected, O(1), returns immediately.
+// Feed threads call post() — it holds the staging lock only to stage the value.
 // Eval thread  calls flush() — applies staged value, does DAG invalidation.
 // Engine       sleeps on a condition variable, woken by a hook fired in post().
 //
-// The wake hook is the only coupling between this layer and the Engine:
+// The wake hook is how a post reaches the Engine's loop. Engine::addSource()
+// installs it; by hand it is:
 //   input->setWakeHook([&engine]{ engine.poke(); });
 //
 // Contents
 // ────────
 //  IFlushable       — interface for sources the eval thread must drain
 //  AsyncInput<T>    — "latest wins" thread-safe input node
-//  AsyncQueue<T>    — FIFO; eval() yields std::vector<T> (full per-cycle batch)
+//  AsyncQueue<T>    — FIFO; eval() yields std::vector<T> (each flush's batch)
 //  FeedRegistry     — groups sources; propagates wake hook to all members
-//  TickLoop         — simple fixed-rate loop (retained for standalone use)
+//  TickLoop         — fixed-rate loop for use without the Engine
 
 #include "dag.hpp"
 #include <mutex>
@@ -41,9 +42,6 @@ namespace dag::async {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IFlushable — anything the eval thread must drain before pulling the graph.
-//
-// setWakeHook() is called once at registration time (before any threads post).
-// The hook is invoked from post() to signal the engine that work is pending.
 // ─────────────────────────────────────────────────────────────────────────────
 class IFlushable {
 public:
@@ -57,8 +55,9 @@ public:
 
     virtual std::string name() const = 0;
 
-    /// Register the engine's wake hook. Called once before any threads start posting.
-    /// The hook must be cheap and non-blocking (it signals a condition variable).
+    /// Register the wake hook that post() invokes to signal pending work. Called
+    /// once, before any thread posts. It runs on the feed thread, outside the
+    /// staging lock, so it must be cheap.
     virtual void setWakeHook(std::function<void()> hook) = 0;
 };
 
@@ -73,9 +72,9 @@ public:
 //
 // Staging storage is recycled, not reallocated
 // ─────────────────────────────────────────────
-// A feed's highest-rate stream can post on nearly every engine cycle, and a feed
-// that merges deltas posts an lvalue it has to keep for the next merge. So
-// neither side of the handover may throw storage away:
+// A high-rate stream can post on nearly every engine cycle, and a feed that
+// merges deltas posts an lvalue it keeps for the next merge. So neither side of
+// the handover may throw storage away:
 //
 //   post() takes const T& and copy-ASSIGNS into pending_, which is a live T
 //   rather than a disengaged optional. A vector's copy-assign reuses the
@@ -89,9 +88,9 @@ public:
 //   recycled TypedValue for the same reason.
 //
 // Capacity therefore cycles between pending_, staged_ and the two slot buffers,
-// and after two updates the whole path allocates nothing. The copy now happens
-// under the staging lock, where a move-out did not: for a two-vector value that
-// is a small memcpy against the 2 malloc + 2 free it replaces.
+// and once warm the whole path allocates nothing. post() copies under the
+// staging lock, a small memcpy for a value whose vectors keep their size, where
+// a move-out would cost an allocation and a free per vector.
 //
 // T must be default-constructible and copy-assignable — pending_ and staged_ are
 // plain members, not optionals.
@@ -145,12 +144,13 @@ template<typename T>
 using InputPtr = std::shared_ptr<AsyncInput<T>>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AsyncQueue<T>  —  FIFO; flush delivers every value in arrival order.
+// AsyncQueue<T>  —  FIFO; flush delivers the queued values in arrival order.
 //
-// eval() returns std::vector<T> — the full batch of values posted since the
-// last flush. Downstream ComputeNodes declare their input type as
-// std::vector<T> and receive the entire batch each cycle, enabling per-cycle
-// sums, counts and averages without any handler side-channel.
+// eval() returns std::vector<T> — the batch of values posted since the last
+// flush, or [] when there were none. Downstream ComputeNodes declare their input
+// type as std::vector<T> and receive the whole batch each cycle. A queue holds at
+// most maxQueueSize values: a post to a full queue drops the oldest, which
+// droppedCount() counts.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class AsyncQueue
@@ -203,7 +203,6 @@ public:
     void add(std::shared_ptr<IFlushable> input);
     std::size_t flush();
     bool hasPending() const;
-    /// Propagate hook to all existing and future members.
     void setWakeHook(std::function<void()> hook);
     const std::vector<std::shared_ptr<IFlushable>>& all() const;
 
@@ -213,8 +212,8 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TickLoop — fixed-rate eval loop. Retained for simple standalone use cases
-// where event-driven wake-up is not required. For production use, prefer Engine.
+// TickLoop — runs a callback at a fixed rate on its own thread, for use without
+// the Engine, where event-driven wake-up is not needed.
 // ─────────────────────────────────────────────────────────────────────────────
 class TickLoop {
 public:
