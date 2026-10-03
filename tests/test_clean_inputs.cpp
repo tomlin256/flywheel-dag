@@ -8,7 +8,7 @@
 // =============================================================================
 
 // test_clean_inputs.cpp — a node is clean only when every input it read still
-// is (flywheel-dag#18).
+// is.
 //
 // NodeBase::propagate() stops a cascade at a node that is already dirty. That
 // is safe only while a clean node's inputs are clean. An evaluation that ends
@@ -18,13 +18,13 @@
 // Coverage
 // ────────
 //  UntakenBranch — a ConditionNode hears only the branch it took, so the
-//                  branch it did not take can no longer make an input dirty
-//                  again under a consumer's evaluation.
+//                  branch it did not take cannot make an input dirty again
+//                  under a consumer's evaluation.
 //  CleanInputs   — every node that pulls stays dirty, and tells its
 //                  consumers, when an input it read goes dirty again before
 //                  its evaluation ends. An always-dirty node reached by two
-//                  paths still does that, as an application's clock-driven
-//                  node can. Each node kind is a test parameter.
+//                  paths does that, as an application's clock-driven node
+//                  can. Each node kind is a test parameter.
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -57,9 +57,9 @@ double valueOf(const NodePtr& node, EvalContext& ctx) {
     return get_value<double>(v);
 }
 
-// The graph of flywheel-dag#18, over inputs of type In. sel takes a = e^x, so
-// b = √y, on the branch it did not take, is pulled only by root2. c pulls root1
-// before root2.
+// A graph with an untaken branch that another root pulls, over inputs of type
+// In. sel takes a = e^x, so b = √y, on the branch it did not take, is pulled
+// only by root2. c pulls root1 before root2.
 template<template<typename> class In>
 struct IssueGraph {
     std::shared_ptr<In<double>> x = In<double>::make("x", 1.0);
@@ -79,9 +79,9 @@ struct IssueGraph {
 // UntakenBranch
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The issue's sequence. Before the fix, root2's pull evaluated b after c had
-// read root1, b told sel, and c ended clean over a dirty root1. x's move then
-// stopped at sel, and c kept 2e + 4.
+// root2's pull evaluates b after c has read root1. If b told sel, c would end
+// clean over a dirty root1, x's move would then stop at sel, and c would keep
+// 2e + 4.
 TEST(UntakenBranch, TheIssuesSequenceSeesTheLaterChange) {
     IssueGraph<Input> g;
     EvalContext ctx;
@@ -95,7 +95,7 @@ TEST(UntakenBranch, TheIssuesSequenceSeesTheLaterChange) {
     EXPECT_DOUBLE_EQ(get_value<double>(g.c->eval(ctx)), 2.0 * e2 + 4.0);
 }
 
-// The same through an engine, which delivered nothing for x = 2.
+// The same through an engine, which must deliver the change for x = 2.
 TEST(UntakenBranch, AnEngineDeliversTheLaterChange) {
     async::Engine engine;
     IssueGraph<async::AsyncInput> g;
@@ -116,9 +116,9 @@ TEST(UntakenBranch, AnEngineDeliversTheLaterChange) {
     EXPECT_DOUBLE_EQ(values[2], 2.0 * e2 + 4.0);
 }
 
-// b has been evaluated, so it is clean, and its move cascades. sel no longer
-// hears it while it takes a, so neither sel nor the Eager node below it has
-// anything to do. A switch to b still reads b's new value.
+// b has been evaluated, so it is clean, and its move cascades. sel does not hear
+// it while it takes a, so neither sel nor the Eager node below it has anything
+// to do. A switch to b reads b's new value.
 TEST(UntakenBranch, ItsMoveReachesNoConsumer) {
     auto cond = Input<bool>::make("cond", true);
     auto x    = Input<double>::make("x", 1.0);
@@ -484,8 +484,7 @@ TEST(CleanInputs, AnEngineDeliversTheLaterChange) {
 // The graph of AadGradientNode.StaysDirtyWhileItsRootIs, with a node over a
 // gradient node and one over a tangent node. Each sensitivity node stays dirty
 // with its root, and the node over it stays dirty too, so x's move reaches
-// both. flywheel-dag#19 kept the sensitivity nodes dirty, not the nodes over
-// them.
+// both.
 TEST(CleanInputs, ASensitivityNodesConsumerStaysDirtyWithIt) {
     auto k    = test_nodes::AlwaysFiring::make(2.0);
     auto x    = Input<double>::make("x", 3.0);

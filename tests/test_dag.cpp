@@ -122,9 +122,6 @@ TEST(DAGTests, CustomEqualityPolicy) {
 }
 
 // Test: library SumNode (dag::ops) composed into the DAG like any other node.
-// See dag_ops.hpp for the from-scratch INode implementation this replaced —
-// core/CLAUDE.md's "Custom node design" notes and ConditionNode (above) still
-// cover the hand-rolled pattern for anyone implementing a new one.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(DAGTests, LibrarySumNode) {
     auto a = Input<double>::make("a", 1.0);
@@ -256,7 +253,7 @@ TEST(TweakExampleTest, EqualityPolicy) {
     // clearTweak — node is now dirty, downstream notified
     base = downstreamEvals;
     node->clearTweak();
-    sink->eval(ctx); // get_values through: node recomputes a=3 → 6
+    sink->eval(ctx); // pulls through: node recomputes a=3 → 6
     EXPECT_GT(downstreamEvals, base);
     EXPECT_EQ(get_value<double>(sink->eval(ctx)), 6.0);
 }
@@ -381,15 +378,13 @@ TEST(TweakExampleTest, Retweaking) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A tweak and the engine (flywheel-dag#5)
+// A tweak and the engine
 //
-// Both halves concern what a registered output sees. An equal tweak used to
-// rebind cached_, giving the same value a new identity, so after clearTweak()
-// the engine delivered the unchanged value again. That is the pattern
-// flywheel-dag#1 fixed for stateful nodes. And tweak() left the node clean while
-// propagate() absorbed every invalidation, so the engine never evaluated it
-// again while it was frozen: downstream nodes saw the tweak, but the node's own
-// callback never did.
+// Both halves concern what a registered output sees. An equal tweak keeps the
+// published value's identity, so after clearTweak() the engine does not deliver
+// the unchanged value again. And a changed tweak reaches the node's own output:
+// tweak() leaves the node dirty, so the engine evaluates it once while frozen,
+// though propagate() absorbs every invalidation.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
@@ -488,12 +483,11 @@ TEST(TweakExampleTest, TweakedOutputAndItsConsumerDeliverInOneCycle) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Clearing a tweak (flywheel-dag#8)
+// Clearing a tweak
 //
-// clearTweak() used to mark every consumer Dirty before the node knew whether
-// its value had changed, so a Lazy consumer reran even when the node recomputed
-// the very value it had been frozen at. Clearing now marks the node Dirty and
-// its consumers Maybe. The node's own eval() says "changed" only if it did.
+// clearTweak() marks the node Dirty and its consumers Maybe. The node's own
+// eval() says "changed" only if its value did, so a Lazy consumer skips when the
+// node recomputes the very value it was frozen at.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
@@ -677,17 +671,9 @@ TEST(Input, NameReturned) {
     EXPECT_EQ(inp->name(), "myinput");
 }
 
-// An equality policy on an INTERMEDIATE node cannot suppress any downstream
-// work, and this is the test that says so.
-//
-// invalidate() is eager and transitive: when a source propagates, it marks its
-// downstream dirty, which marks ITS downstream dirty, all the way to the leaves
-// — before any value is computed, let alone compared. By the time
-// ComputeNode::eval reaches eq_->equal(), every node below it is already
-// committed to re-evaluating. So a policy only ever gates work in two places:
-// at a SOURCE (Input::set / AsyncInput::flush, where it gates the cascade
-// itself) and at a REGISTERED OUTPUT (where Engine::cycle compares ValuePtr
-// identity to decide whether to fire the callback).
+// An equality policy on an intermediate node whose consumers are all Eager
+// suppresses nothing: an Eager consumer recomputes whenever anything upstream
+// fired, so the comparison buys nothing. See IEqualityPolicy in dag.hpp.
 //
 // `mid` here returns a constant, so TypedEqualityPolicy answers "unchanged" on
 // every single evaluation — the most favourable case a suppressing policy could
@@ -724,12 +710,9 @@ TEST(DAGTests, EqualityPolicyOnIntermediateNodeDoesNotSuppressDownstreamEval) {
     EXPECT_EQ(typed, always);      // and the policy makes no difference at all
 }
 
-// The same graph with the intermediate node opted in to InvalidationMode::Lazy.
-// Everything above still holds — an Eager node cannot be gated by
-// its own equality policy, and that is still the DEFAULT — but the policy is now
-// able to gate downstream work when a node asks it to. This is the assertion the
-// test above says is impossible, and both are true at once, which is exactly
-// what the per-node flag is for.
+// The same graph with both nodes Lazy: now the policy gates the consumer, which
+// skips when its input's value did not change. Both tests are true at once,
+// which is what the per-node mode is for.
 TEST(DAGTests, EqualityPolicyOnALazyIntermediateNodeDoesSuppressDownstreamEval) {
     auto src = Input<double>::make("src", 0.0,
                                    std::make_shared<AlwaysChangedPolicy>());
@@ -778,12 +761,10 @@ TEST(InPlaceComputeNode, ComputesTheSameValuesAsComputeNode) {
 }
 
 TEST(InPlaceComputeNode, ScratchArrivesHoldingThePreviousValue) {
-    // THE contract, and the one that will bite someone. `out` is a
-    // retained buffer, not a fresh Out — that is what lets its capacity survive
-    // and is exactly why a functor that appends without clearing is wrong. This
-    // pins the semantic rather than the bug: a functor that only ever appends
-    // must be observed to accumulate, so nobody can "fix" the class by resetting
-    // the scratch and quietly take the recycling away.
+    // The contract: `out` is a retained buffer holding the previous value, not a
+    // fresh Out — that is what lets its capacity survive. A functor that only
+    // appends must be seen to accumulate, so the class cannot be "fixed" by
+    // resetting the scratch, which would take the recycling away.
     auto n = Input<double>::make("n", 1.0, std::make_shared<AlwaysChangedPolicy>());
     auto node = InPlaceComputeNode<std::vector<double>, double>::make(
         "appender", std::make_tuple(std::static_pointer_cast<INode>(n)),
@@ -883,13 +864,11 @@ TEST(Input, CustomEqualityPolicy) {
 // ─────────────────────────────────────────────────────────────────────────────
 // get_value<T> — type dispatch
 //
-// get_value() used a dynamic_cast, which walks the RTTI hierarchy on a path
-// taken once per input per node per cycle. It now compares IValue::type()
-// (a non-virtual load of a type_index fixed at construction) and static_casts.
-// The two are equivalent ONLY because TypedValue<T> is final and is the sole
-// IValue implementation. These tests pin the behaviour that equivalence claims:
-// both throw paths, and that a hit returns a reference into the stored value
-// rather than a copy.
+// get_value() compares IValue::type() (a non-virtual load of a type_index fixed
+// at construction) and static_casts. That is equivalent to a dynamic_cast ONLY
+// because TypedValue<T> is final and is the sole IValue implementation. These
+// tests pin the behaviour that equivalence claims: both throw paths, and that a
+// hit returns a reference into the stored value rather than a copy.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(GetValue, NullValueThrowsRuntimeError) {
@@ -950,7 +929,7 @@ TEST(GetValue, RoundTripsEveryTypeTheGraphUses) {
 }
 
 // TypedEqualityPolicy swallows the bad_cast from a type mismatch and reports
-// "not equal" — the change must not turn that into an escaping exception.
+// "not equal": it must not escape as an exception.
 TEST(GetValue, EqualityPolicySurvivesTypeMismatch) {
     const TypedEqualityPolicy<double> policy;
     const ValuePtr asDouble = make_value<double>(1.0);
@@ -965,22 +944,16 @@ TEST(GetValue, EqualityPolicySurvivesTypeMismatch) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ComputeNode::applyInputs — how inputs reach the functor
 //
-// Inputs used to be copied into a std::tuple<Ins...> before the functor ran,
-// which deep-copied every container-valued input on every cycle — and the same
-// batch once per consuming node. Non-trivially-copyable inputs are now
-// bound by reference, with each input's ValuePtr held for the duration of the
-// call so the referenced value stays alive AND stays out of ValueSlot's
-// recycling pool while the functor runs.
+// Non-trivially-copyable inputs are bound by reference, with each input's
+// ValuePtr held for the duration of the call so the referenced value stays alive
+// AND stays out of ValueSlot's recycling pool while the functor runs. Copying
+// them into a std::tuple<Ins...> would deep-copy every container-valued input on
+// every cycle, once per consuming node.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The regression guard for this change, verified red-then-green: reverting
-// applyInputs to the old std::tuple<Ins...> path makes this fail.
-//
-// An allocation-counting version of this test was written first and DELETED —
-// at -O2 clang elides the tuple's container copy in a shape this simple (tried
-// with both std::vector and std::deque), so it passed either way and guarded
-// nothing. Address equality is what actually distinguishes a reference from a
-// copy, elided or not.
+// Address equality distinguishes a reference from a copy. An allocation count
+// does not: a compiler may elide a tuple's container copy in a graph this
+// simple, so the count passes either way.
 TEST(ApplyInputs, ContainerInputIsPassedByReferenceNotCopied) {
     auto src = Input<std::vector<int>>::make("src", std::vector<int>{1, 2, 3});
 
@@ -1043,10 +1016,10 @@ TEST(ApplyInputs, MixedTrivialAndContainerInputsBindCorrectly) {
 // the second input re-runs the first input's producer mid-call. Values must stay
 // correct and stable rather than drifting as ValueSlot buffers alternate.
 //
-// Note this does NOT discriminate the `held` array in applyInputs — verified by
-// removing the array and watching this still pass, because C++17 temporary
-// lifetime already covers the single-expression form. It is a correctness test
-// for the shared-upstream + forceRecompute combination, nothing more.
+// This is a correctness test for the shared-upstream + forceRecompute
+// combination. It does not by itself discriminate the `held` array in
+// applyInputs: a single-expression call keeps the pulled values alive too, since
+// C++ temporaries live to the end of the full-expression.
 TEST(ApplyInputs, SharedUpstreamUnderForceRecomputeStaysCorrect) {
     auto seed = Input<int>::make("seed", 2);
 

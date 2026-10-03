@@ -120,13 +120,11 @@ TEST(ValueSlot, SteadyStateEvalAllocatesNothing) {
     EXPECT_NE(sink, 0.0);   // and it actually did the work
 }
 
-// RollingStats used to allocate here — std::deque turning over a 4096-byte
-// block (plus a 16-byte map slot) every ~512 pushes as the sliding window
-// walked off the end of the current one. Its backing store is a contiguous
-// RingBuffer now, allocated once at construction, so this is exactly 0.
+// The windowed nodes keep their windows in a contiguous RingBuffer, allocated at
+// construction, so steady state is exactly 0. A std::deque would turn over a
+// block every ~512 pushes as the window walked off the end of the current one.
 //
-// WindowNode is deliberately absent: its output type IS std::deque<T>, so its
-// deque cannot go until the output type changes.
+// WindowNode is deliberately absent: its output type IS std::deque<T>.
 TEST(ValueSlot, WindowedNodesAllocateNothingInSteadyState) {
     auto src   = async::AsyncInput<double>::make("src", 1.0);
     auto stats = ts::RollingStats::make("stats", src, 16);
@@ -147,7 +145,7 @@ TEST(ValueSlot, WindowedNodesAllocateNothingInSteadyState) {
     }
 
     const long allocs = allocationsDuring([&] {
-        for (int i = 0; i < 2000; ++i) {   // long enough to cross old deque blocks
+        for (int i = 0; i < 2000; ++i) {   // long enough to cross deque blocks
             src->post(1.0 + (i % 17) * 0.5);
             engine.step();
         }
@@ -155,14 +153,14 @@ TEST(ValueSlot, WindowedNodesAllocateNothingInSteadyState) {
 
     EXPECT_EQ(allocs, 0)
         << "windowed nodes allocated " << allocs << " times over 2000 cycles; "
-           "RingBuffer allocates once at construction and never again";
+           "RingBuffer allocates only at construction";
     EXPECT_NE(sink, 0.0);
 }
 
-// dag::Input<T>::set() is deliberately NOT slotted — it is the one entry point
-// documented as callable off the eval thread, where use_count() is not a sound
-// ownership test. This pins that exclusion so it cannot be "optimised" away
-// without someone deciding to.
+// dag::Input<T>::set() is deliberately NOT slotted: Engine::makeInput documents
+// it as callable from application code, which may be off the eval thread, where
+// use_count() is not a sound ownership test (flywheel-dag#31). This pins that
+// exclusion so it cannot be "optimised" away without someone deciding to.
 TEST(ValueSlot, InputSetStillAllocatesByDesign) {
     auto in     = Input<double>::make("in", 0.0);
     auto square = ComputeNode<double, double>::make(
@@ -294,11 +292,9 @@ TEST(ValueSlot, UnchangedValueKeepsCachedPointerAndFiresNoCallback) {
     EXPECT_EQ(fired, firedAfterFirst + 1);
 }
 
-// The same contract for a stateful node. This was flywheel-dag#1:
-// StatefulNodeBase::eval rebound cached_ after notifyDownstream() had already
-// decided not to, so cached_ changed identity on every eval and this output
-// fired on every dirty cycle — 20 extra callbacks here. It was identical before
-// and after ValueSlot, so slot recycling neither caused nor hid it.
+// The same contract for a stateful node: StatefulNodeBase::eval leaves cached_
+// to notifyDownstream(), so an unchanged value keeps its identity and the output
+// does not fire on every dirty cycle.
 TEST(ValueSlot, StatefulNodeWithAnUnchangedValueFiresNoCallback) {
     auto in  = Input<double>::make("in", 0.0);
     auto thr = ts::ThresholdNode<double>::make("thr", in, 100.0);   // not crossed yet
@@ -335,11 +331,9 @@ TEST(ValueSlot, StatefulNodeWithAnUnchangedValueFiresNoCallback) {
 
 // The DAG-level contract, with the consumer Lazy.
 //
-// "Suppresses" is about WORK, not about a flag. This used to assert
-// !consumer->dirty(), which the tri-state protocol makes the wrong question —
-// the limiter now forwards Maybe, so a consumer legitimately IS dirty and still
-// has nothing to do. The functor either ran or it did not, and that is not
-// satisfiable by an accident of flag bookkeeping.
+// "Suppresses" is about WORK, not about a flag: the limiter forwards Maybe, so a
+// consumer legitimately IS dirty and still has nothing to do. The functor either
+// ran or it did not.
 TEST(ValueSlot, RateLimiterStillSuppressesSubThresholdChangesDownstream) {
     auto in      = Input<double>::make("in", 0.0);
     auto limited = ts::RateLimiterNode<double>::make("limited", in, 10.0);
@@ -368,13 +362,9 @@ TEST(ValueSlot, RateLimiterStillSuppressesSubThresholdChangesDownstream) {
         << "a change of at least minDelta must reach downstream, exactly once";
 }
 
-// An Eager consumer keeps recomputing — and that is the correct reading of the
-// mode, not a regression. What it GAINS is the release, which it never used to
-// get at all: the limiter absorbed invalidation without forwarding,
-// so in a pull-based graph a consumer that was never dirtied never pulled the
-// limiter, and the limiter never reached the eval() that would have told it.
-// Suppression for such a consumer is now opt-in, by saying Lazy — which is what
-// the flag is for.
+// An Eager consumer keeps recomputing: that is what Eager means. It receives the
+// release, which reaches a consumer only if the limiter tells it something moved.
+// Suppression for such a consumer is opt-in, by saying Lazy.
 TEST(ValueSlot, RateLimiterReleaseReachesAnEagerConsumerToo) {
     auto in      = Input<double>::make("in", 0.0);
     auto limited = ts::RateLimiterNode<double>::make("limited", in, 10.0);
@@ -398,18 +388,11 @@ TEST(ValueSlot, RateLimiterReleaseReachesAnEagerConsumerToo) {
 // ─────────────────────────────────────────────────────────────────────────────
 // A limiter wired MID-GRAPH, driven through the Engine.
 //
-// The original reproduction: a limiter with a registered output below it
-// rather than on it:
-//
-//     engine-driven, limiter NOT a registered output:
-//       base=1  after 9 sub-threshold=1  after 50.0=1  sink=0.0
-//       -> release NEVER PROPAGATES
-//
-// The cause was the absorbing invalidate() override: the consumer was never
-// dirtied, so the engine never pulled it, so it never pulled the limiter, so the
-// limiter never reached the eval() that would have released. The remedy was
-// "forward invalidation with a suppression flag" — the Maybe state IS that
-// flag, so deleting the override is the whole fix.
+// The limiter is not a registered output: a consumer below it is. The engine
+// pulls the consumer only if the consumer was dirtied, and the consumer pulls the
+// limiter, which reaches the eval() that releases, only if it is pulled. So the
+// limiter must forward invalidation — the Maybe state is its suppression flag —
+// or its release never propagates.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ValueSlot, RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine) {
     async::Engine engine;
@@ -437,7 +420,7 @@ TEST(ValueSlot, RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine) {
     engine.step();
     EXPECT_EQ(computes, baseComputes + 1) << "the release must reach it";
     EXPECT_DOUBLE_EQ(sink, 100.0)
-        << "this was 0.0 — the release never propagated at all";
+        << "the release must propagate through the engine";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -473,7 +456,7 @@ TEST(ValueSlot, AsyncInputFlushRecyclesAndStillSuppressesEqualPosts) {
 // Recycling the TypedValue is only half the job when T owns heap of its own: a
 // move-assign into the buffer frees the very vectors being recycled. These pin
 // the emit(const T&) overload that copy-assigns instead — and that the rvalue
-// overload still moves, since every compute/op/time-series node relies on it.
+// overload moves, since a ComputeNode emits its result through it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -529,8 +512,8 @@ TEST(ValueSlot, EmitFromRvalueStillMoves) {
     held = slot.emit(std::move(src));
 
     EXPECT_EQ(get_value<HeapVal>(held).payload.data(), buffer)
-        << "the rvalue overload must still steal the source's buffer, not copy it — "
-           "every compute/op/time-series node emits through it";
+        << "the rvalue overload must steal the source's buffer, not copy it — "
+           "a ComputeNode emits through it";
     EXPECT_EQ(get_value<HeapVal>(held).payload.size(), 10u);
     EXPECT_DOUBLE_EQ(get_value<HeapVal>(held).payload.front(), 7.0);
 }
@@ -607,14 +590,13 @@ TEST(ValueSlot, AsyncInputPostAndFlushAllocateNothingInSteadyState) {
 // 8. An idle AsyncQueue allocates nothing.
 //
 // flush() refreshes its cached batch on every cycle so a downstream node dirtied
-// by another input reads [] rather than a batch it already consumed. That used to
-// mean a fresh make_value per queue per cycle, paid whether or not anything
-// arrived — and a quiet queue receives nothing on almost every cycle.
+// by another input reads [] rather than a batch it already consumed. The empty
+// batch is a constant, so an idle queue allocates nothing, and a quiet queue
+// receives nothing on almost every cycle.
 //
-// This one discriminates only where a default-constructed std::deque allocates
-// (libstdc++ does; libc++ does not), which is how flush()'s local drain deque
-// stayed hidden on macOS while this test was red in CI. Test 9 below covers the
-// same fix on both standard libraries.
+// IdleAsyncQueuesAllocateNothing, below, discriminates only where a
+// default-constructed std::deque allocates (libstdc++ does; libc++ does not).
+// Test 9 covers a queue that receives, on both standard libraries.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,11 +710,10 @@ TEST(ValueSlot, IdleAsyncQueuesAllocateNothing) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 9. A queue that receives allocates its batch and nothing else.
 //
-// flush() drains through a retained member deque rather than a local one, so the
-// deque's map and block are recycled across cycles instead of being freed with
-// the local and reallocated by the next post(). What is left is the batch vector
-// and the TypedValue that carries it — two allocations, unavoidable, per cycle
-// that actually delivers something.
+// flush() drains through a retained member deque, so the deque's map and block
+// are recycled across cycles. What is left is the batch vector and the
+// TypedValue that carries it: two allocations, unavoidable, per cycle that
+// delivers something.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(ValueSlot, QueueArrivalAllocatesOnlyItsBatch) {

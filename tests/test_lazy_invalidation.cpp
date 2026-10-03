@@ -9,9 +9,9 @@
 
 // test_lazy_invalidation.cpp — the Dirtiness{Clean, Maybe, Dirty} protocol.
 //
-// These tests are about the CASCADE SHAPE, not about what any node computes.
-// The engine's other suites already pin the values; what is new here is which
-// nodes a source's invalidation reaches, in which state, and how often.
+// These tests are about the CASCADE SHAPE, not about what any node computes:
+// which nodes a source's invalidation reaches, in which state, and how often.
+// The engine's other suites pin the values.
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -97,7 +97,7 @@ struct Chain {
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The three states, and what dirty() means now.
+// The three states, and what dirty() means.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(LazyInvalidation, ANodeStartsDirtySoItsFirstEvalAlwaysRuns) {
@@ -210,15 +210,10 @@ TEST(LazyInvalidation, DiamondLowerHalfIsWalkedOnceNotOncePerPath) {
 // ─────────────────────────────────────────────────────────────────────────────
 // The absorbing override must hold on BOTH entry points.
 //
-// RateLimiterNode no longer absorbs, so TweakableComputeNode is the only
-// absorber left and carries this on its own.
-//
-// This is the failure the single propagate() override point makes
-// unrepresentable:
-// a node that overrode invalidate() alone would keep its behaviour on the direct
-// hop and lose it on the transitive cascade — which is the path that carries
-// almost every invalidation in a real graph. Overriding propagate() cannot fail
-// that way, and these two tests are what says so.
+// TweakableComputeNode is the only absorber. A node that overrode invalidate()
+// alone would keep its behaviour on the direct hop and lose it on the transitive
+// cascade, which carries almost every invalidation in a real graph. Overriding
+// propagate() cannot fail that way, and this test says so.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(LazyInvalidation, TweakedNodeAbsorbsTheTransitiveCascadeNotJustTheDirectHop) {
@@ -236,13 +231,13 @@ TEST(LazyInvalidation, TweakedNodeAbsorbsTheTransitiveCascadeNotJustTheDirectHop
     consumer->settle();
     frozen->tweak(99.0);
     // Deliver the tweak, as the engine would. A new tweak leaves the node dirty
-    // until it is evaluated (flywheel-dag#5), and the assertion below is about
-    // the cascade, not that pending delivery.
+    // until it is evaluated, and the assertion below is about the cascade, not
+    // that pending delivery.
     frozen->eval(ctx);
     consumer->settle();
 
     // src → mid is the DIRECT hop; mid → frozen is the transitive cascade, which
-    // is where an invalidate()-only override would have leaked.
+    // is where an invalidate()-only override would leak.
     src->set(2.0);
 
     EXPECT_FALSE(frozen->dirty())
@@ -254,16 +249,14 @@ TEST(LazyInvalidation, TweakedNodeAbsorbsTheTransitiveCascadeNotJustTheDirectHop
 // ─────────────────────────────────────────────────────────────────────────────
 // Case 8 — RateLimiterNode, which has NO invalidation override at all.
 //
-// It used to absorb: mark self dirty, tell downstream nothing. That is what the
-// tri-state now does properly — mark self Dirty, tell downstream MAYBE — and
-// "maybe" is exactly the suppression flag a limiter needs. The
-// consumer is told something moved and finds out whether it matters by pulling;
-// if the limiter does not emit, a Lazy consumer skips.
+// NodeBase's default marks the node Dirty and tells downstream MAYBE, and
+// "maybe" is exactly the suppression flag a limiter needs. The consumer is told
+// something moved and finds out whether it matters by pulling; if the limiter
+// does not emit, a Lazy consumer skips.
 //
-// Absorbing was not merely redundant, it was a bug: a consumer that was
-// never dirtied never pulled the limiter, so the limiter never reached the
-// eval() that would have released, and a limiter wired mid-graph never
-// propagated its release at all.
+// The limiter must tell its consumer something moved: a consumer that is never
+// dirtied never pulls the limiter, so the limiter would never reach the eval()
+// that releases, and a limiter wired mid-graph would never propagate its release.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(LazyInvalidation, Case8_RateLimiterForwardsMaybeAndItsLazyConsumerSkips) {
     auto src = Input<double>::make("src", 0.0);
@@ -287,9 +280,8 @@ TEST(LazyInvalidation, Case8_RateLimiterForwardsMaybeAndItsLazyConsumerSkips) {
     EXPECT_TRUE(limiter->dirty())
         << "the limiter itself still has to look at the new value";
     EXPECT_TRUE(consumer->dirty())
-        << "and it tells its consumer something moved — where the old absorbing "
-           "override told it nothing, which is precisely why a mid-graph limiter "
-           "was never pulled and never released";
+        << "and it tells its consumer something moved: a consumer that is never "
+           "dirtied never pulls the limiter, so the limiter would never release";
 
     consumer->eval(ctx);
     EXPECT_EQ(consumerRuns, primed)
@@ -318,8 +310,8 @@ TEST(LazyInvalidation, PublishingAChangeMarksTheDirectConsumerDirtyAndTheRestMay
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Everything still defaults to Eager: the skip path exists only for a node
-// that opts in to Lazy.
+// Eager is the default: the skip path exists only for a node that opts in to
+// Lazy.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(LazyInvalidation, EveryNodeConstructsEagerByDefault) {
@@ -383,8 +375,7 @@ TEST(LazyInvalidation, Case1_ConstantIntermediateStopsDownstreamRecomputing) {
 
     EXPECT_EQ(midRuns, 4) << "mid is downstream of src and must reconsider every time";
     EXPECT_EQ(downRuns, 1)
-        << "mid's value never changed, so down had nothing to recompute from. "
-           "This is the assertion the old protocol made impossible.";
+        << "mid's value never changed, so down had nothing to recompute from";
     EXPECT_DOUBLE_EQ(get_value<double>(down->eval(ctx)), 42.0);
 }
 
@@ -544,17 +535,14 @@ TEST(LazyInvalidation, Case6_ConditionNodeMaySpuriouslyRecomputeAndThatIsAccepta
     pick->eval(ctx);
     const int afterFirst = takenRuns;
 
-    // Toggle away and back without src moving. whenTrue was left Dirty by the
-    // cascade while it was untaken, so it recomputes on the way back even though
-    // nothing it depends on changed.
+    // Toggle away and back without src moving. A recompute of the taken branch
+    // is allowed here. A stale value is not, which the sibling test pins.
     flag->set(false); pick->eval(ctx);
     flag->set(true);  pick->eval(ctx);
 
     EXPECT_GE(takenRuns, afterFirst)
         << "a spurious recompute is allowed here — what is NOT allowed is a "
-           "stale value, which the sibling test pins. ConditionNode is the one "
-           "node that does not pull every declared input, and this asymmetry "
-           "predates lazy invalidation.";
+           "stale value, which the sibling test pins";
 }
 
 // ── Case 7 — forceRecompute still forces ────────────────────────────────────
@@ -636,7 +624,7 @@ TEST(LazyInvalidation, Step5aStatefulNodeBelowALazyOpStillTicks) {
            "below them still advanced on every source change";
 }
 
-// ── The op nodes' skip path, now on by default ───────────────────────────────
+// ── The op nodes' skip path ──────────────────────────────────────────────────
 TEST(LazyInvalidation, OpNodesSkipWhenTheirInputsDidNotMove) {
     auto src = Input<double>::make("src", 0.0);
     int tailRuns = 0;

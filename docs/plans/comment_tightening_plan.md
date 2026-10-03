@@ -64,7 +64,7 @@ Measured at `c05963f`:
 - a downstream application's name, module or example (`CLAUDE.md`).
 
 **Write** each kept sentence so that it is true now, in the present tense, and spells a code name as
-the code does (`Eager`, not EAGER).
+the code does (`Eager`, not EAGER). In a test, an assertion message gets the same treatment.
 
 **When a comment and the code disagree,** decide which is right. A wrong comment is fixed. If the
 code is wrong, this plan does not touch it: open a `bug` issue, leave that comment as the contract,
@@ -74,10 +74,13 @@ and say so in the report.
 
 1. **The code is identical.** A scratch script strips the comments from every file of the step,
    normalises whitespace, and compares the result with a snapshot taken at `c05963f`. It reads
-   string, character and raw-string literals, so a `//` inside one is not a comment. It stays in
-   the scratchpad: it is a verification aid, not project code.
-2. **Build and tests.** `cmake -B build -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, a full build with no
-   warnings, and `ctest --test-dir build` green (36 of 36 at `c05963f`).
+   string, character and raw-string literals, so a `//` inside one is not a comment. In a test, an
+   assertion message (the string after `<<`) may change too, as Rob approved on 2026-10-03: the
+   script lists each changed message for review, and any other token still fails. It stays in the
+   scratchpad: it is a verification aid, not project code.
+2. **Build and tests.** A configure with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, a full build with
+   no warnings, and ctest green (36 of 36 at `c05963f`). The build directory is a scratch one with
+   `build/`'s options.
 3. **Names resolve.** A scratch script lists every file name, test name (`Suite.Test`) and
    code-like word in the step's comments that no code defines. Each hit is fixed, or shown to be
    plain English or a CMake or standard word.
@@ -91,7 +94,8 @@ and say so in the report.
 6. **The diff is read once more**, for a constraint that was cut and a claim added without checking.
    `CLAUDE.md`'s pointers into comment blocks still resolve.
 
-No unit test is written or modified: nothing here has behaviour. Checks 1 to 3 stand in for them.
+No unit test is written, and a test changes only in its comments and assertion messages: nothing
+here has behaviour. Checks 1 to 3 stand in for new tests.
 Each step is one checkpoint commit to `main`, subject `docs(#26): …`.
 
 ## Steps
@@ -226,8 +230,9 @@ Each has a default. Approving the plan as written takes the default.
   runs the `pre-push` audit.
 - **GCC is unverified locally.** Builds here use Apple Clang, which also has `-Wcomment`. CI's GCC
   leg sees the commits only when pushed.
-- **Assumptions:** `build/` is configured and its `_deps` are present, so no network is needed. The
-  scratch scripts handle every comment form in the tree, which check 1's self-test shows.
+- **Assumptions:** the scratch build reads the dependency sources from `build/_deps`, so no network
+  is needed. The scratch scripts handle every comment form in the tree, which check 1's self-test
+  shows.
 
 ## Progress
 

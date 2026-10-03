@@ -124,8 +124,9 @@ const T& get_value(const ValuePtr& v);
 // pointer is made on one thread. That holds for compute, time-series and op
 // nodes and for AsyncInput::flush(), which the engine drives on the eval
 // thread. It does not hold for Input<T>::set(), which Engine::makeInput
-// documents as callable from application code, so Input<T>::set() allocates.
-// Do not add a slot to anything reachable off the eval thread.
+// documents as callable from application code, so Input<T>::set() allocates
+// (flywheel-dag#31 asks which thread may call it). Do not add a slot to
+// anything reachable off the eval thread.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class ValueSlot {
