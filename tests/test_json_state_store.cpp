@@ -167,8 +167,8 @@ TEST(JsonStoreTests, NoFileReturnsFalse) {
 }
 
 TEST(JsonStoreTests, AtomicWrite) {
-    // Existing snapshot is not corrupted if a write is in progress.
-    // We verify: after a successful save, the file exists and parses cleanly.
+    // save() writes <file>.tmp and renames it into place, so a snapshot is never
+    // half-written.
     TempDir tmp;
     auto snapFile = tmp.file("snap.json");
 
@@ -176,13 +176,12 @@ TEST(JsonStoreTests, AtomicWrite) {
     JsonFileStateStore store(snapFile);
     store.save({ewma});
 
-    // File should exist and be valid JSON
     std::ifstream f(snapFile);
     ASSERT_TRUE(f.is_open());
     std::string content((std::istreambuf_iterator<char>(f)),
                          std::istreambuf_iterator<char>());
     EXPECT_FALSE(content.empty());
-    // .tmp file should NOT exist (was renamed away)
+    // The .tmp was renamed away.
     auto tmpFile = snapFile; tmpFile += ".tmp";
     EXPECT_FALSE(std::filesystem::exists(tmpFile));
 }
@@ -264,8 +263,7 @@ TEST(JsonStoreTests, CreatesParentDirectory) {
 
 TEST(JsonStoreTests, BareFilenameSaveRestoreRoundTrip) {
     // A bare filename has no parent directory to create, and
-    // create_directories("") throws (flywheel-dag#9). The snapshot goes to the
-    // working directory.
+    // create_directories("") throws. The snapshot goes to the working directory.
     TempDir tmp;
     WorkingDirectory cwd(tmp.path());
 

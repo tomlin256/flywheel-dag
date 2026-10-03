@@ -10,11 +10,11 @@
 // test_engine_state.cpp — unit tests for Engine::setStateStore/saveState/restoreState
 //
 // Tests:
-//   engine_save_restore_roundtrip        — save mid-run, restore into fresh engine; outputs match
-//   engine_no_store_save_is_noop         — saveState() with no store set completes silently
-//   engine_no_store_restore_returns_false — restoreState() with no store returns false
-//   engine_restore_returns_false_on_cold  — store has no saved state → restoreState() false
-//   engine_restore_returns_true_after_save — store has saved state → restoreState() true
+//   SaveRestoreRoundtrip        — save mid-run, restore into fresh engine; outputs match
+//   NoStoreSaveIsNoop           — saveState() with no store set completes silently
+//   NoStoreRestoreReturnsFalse  — restoreState() with no store returns false
+//   RestoreReturnsFalseOnCold   — store has no saved state → restoreState() false
+//   RestoreReturnsTrueAfterSave — store has saved state → restoreState() true
 
 #include <gtest/gtest.h>
 
@@ -50,10 +50,8 @@ struct EwmaModule : public IComputeModule {
 
     void wire(Engine& engine) override {
         ewma_ = EWMANode::make(name_ + ".ewma", inp_, alpha_);
-        // Register the EWMA as an engine output so it's reachable from
-        // Engine::discoverStatefulNodes(). The callback is a no-op — this
-        // test drives eval() manually; the addOutput is just to make the
-        // node visible to discovery, mirroring real-module wiring.
+        // Registered as an output so Engine::discoverStatefulNodes() reaches it.
+        // The callback is a no-op: this test drives eval() itself.
         engine.addOutput<double>(ewma_, [](const double&) {});
     }
 };
@@ -68,11 +66,9 @@ static void warmEwma(std::shared_ptr<Input<double>> inp,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// engine_save_restore_roundtrip
-//
-// Strategy: warm two independent EWMAs (original + reference) through N values.
-// Save original's state.  Build a fresh EWMA (cold), restore into it.  Feed
-// the same M values to both original and restored; outputs must match.
+// Strategy: warm an EWMA through N values and save its state.  Build a fresh
+// EWMA (cold), restore into it.  Feed the same M values to both original and
+// restored; outputs must match.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(EngineStateTests, SaveRestoreRoundtrip) {
     const double alpha = 0.3;
@@ -112,9 +108,6 @@ TEST(EngineStateTests, SaveRestoreRoundtrip) {
                 get_value<double>(mod2->ewma_->eval(ctx)), 1e-9);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// engine_no_store_save_is_noop
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(EngineStateTests, NoStoreSaveIsNoop) {
     auto inp = Input<double>::make("x", 0.0);
     auto mod = std::make_shared<EwmaModule>("ewma", inp, 0.5);
@@ -125,9 +118,6 @@ TEST(EngineStateTests, NoStoreSaveIsNoop) {
     EXPECT_NO_THROW(engine.saveState());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// engine_no_store_restore_returns_false
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(EngineStateTests, NoStoreRestoreReturnsFalse) {
     auto inp = Input<double>::make("x", 0.0);
     auto mod = std::make_shared<EwmaModule>("ewma", inp, 0.5);
@@ -137,10 +127,7 @@ TEST(EngineStateTests, NoStoreRestoreReturnsFalse) {
     EXPECT_FALSE(engine.restoreState());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// engine_restore_returns_false_on_cold
-// Store set but no prior save — store.restore() returns false
-// ─────────────────────────────────────────────────────────────────────────────
+// Store set but no prior save: the store's restore() returns false.
 TEST(EngineStateTests, RestoreReturnsFalseOnCold) {
     auto inp = Input<double>::make("x", 0.0);
     auto mod = std::make_shared<EwmaModule>("ewma", inp, 0.5);
@@ -151,9 +138,6 @@ TEST(EngineStateTests, RestoreReturnsFalseOnCold) {
     EXPECT_FALSE(engine.restoreState());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// engine_restore_returns_true_after_save
-// ─────────────────────────────────────────────────────────────────────────────
 TEST(EngineStateTests, RestoreReturnsTrueAfterSave) {
     auto inp = Input<double>::make("x", 0.0);
     auto mod = std::make_shared<EwmaModule>("ewma", inp, 0.5);

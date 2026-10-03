@@ -210,7 +210,7 @@ TEST(WindowStatusIntegration, WindowNodeCapacityFilled)
         EvalContext c; win->eval(c);
     }
     EXPECT_EQ(win->filled(), 4u);
-    EXPECT_TRUE(win->full());  // WindowNode::full() delegate still works
+    EXPECT_TRUE(win->full());  // WindowNode::full() agrees
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

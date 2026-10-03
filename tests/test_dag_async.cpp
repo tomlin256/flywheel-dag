@@ -285,7 +285,7 @@ TEST(AsyncInput, SkippedCountSurvivesStagingRecycle) {
     EXPECT_EQ(inp->flush(), 1u);
     EXPECT_EQ(inp->skippedCount(), 0u);
     EXPECT_EQ(inp->pendingCount(), 0u);
-    EXPECT_EQ(inp->current(), third) << "latest wins, as before";
+    EXPECT_EQ(inp->current(), third) << "latest wins";
 }
 
 TEST(AsyncInput, EmptyFlushAfterRecycleLeavesLastValue) {
@@ -413,7 +413,7 @@ TEST(AsyncQueue, NameReturned) {
 }
 
 TEST(AsyncQueue, BatchSumViaDag) {
-    // A ComputeNode summing tick volumes is the canonical use case.
+    // A ComputeNode that folds the batch is the canonical use case.
     auto q = AsyncQueue<int>::make("q");
     auto sumNode = ComputeNode<int, std::vector<int>>::make(
         "sum",
@@ -437,7 +437,7 @@ TEST(AsyncQueue, BatchSumViaDag) {
 //
 // flush() refreshes value_ on every cycle, empty or not, so a downstream node
 // dirtied by a DIFFERENT input reads [] rather than a batch it has already
-// consumed. That refresh must stay; what went is the allocation behind it.
+// consumed. The refresh rebinds a shared constant: it allocates nothing.
 
 TEST(AsyncQueue, EmptyFlushReturnsTheSameValuePointer) {
     auto q = AsyncQueue<int>::make("q");
@@ -640,19 +640,14 @@ TEST(TickLoop, DestructorStopsLoop) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine dirty-snapshot ordering fix
+// Engine dirty-snapshot ordering
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Regression test for the dirty-flag ordering hazard.
-//
-// A ComputeNode that depends on an AsyncInput is registered as an output
-// BEFORE the AsyncInput itself.  Without the dirty-flag snapshot in cycle(),
-// the compute node's eval() would recursively call eval() on the AsyncInput,
-// clearing its dirty_ flag before the engine loop reaches the AsyncInput
-// entry — so the AsyncInput's own callback would silently never fire.
-//
-// With the snapshot fix the dirty state is captured before any eval(), so
-// both callbacks must fire regardless of registration order.
+// A ComputeNode that depends on an AsyncInput is registered as an output BEFORE
+// the AsyncInput itself.  The compute node's eval() evaluates the AsyncInput,
+// clearing its dirty state before the engine loop reaches the AsyncInput's
+// entry.  cycle() marks every dirty output due before any eval() runs, so both
+// callbacks must fire regardless of registration order.
 TEST(EngineDirtySnapshot, LeafCallbackFiresWhenComputeNodeRegisteredFirst) {
     Engine engine;
 
@@ -675,7 +670,7 @@ TEST(EngineDirtySnapshot, LeafCallbackFiresWhenComputeNodeRegisteredFirst) {
     engine.step();
 
     EXPECT_DOUBLE_EQ(lastDoubled, 10.0);  // compute fired
-    EXPECT_DOUBLE_EQ(lastSrc,      5.0);  // leaf also fired — was 0.0 before fix
+    EXPECT_DOUBLE_EQ(lastSrc,      5.0);  // leaf also fired
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1075,8 +1070,7 @@ std::string runAndCatch(Engine& engine) {
 
 }  // namespace
 
-// A throw out of a cycle ends the run. The next run() must start, not throw "already running"
-// (flywheel-dag#16).
+// A throw out of a cycle ends the run. The next run() must start, not throw "already running".
 TEST(EngineRun, RunsAgainAfterANodeThrows) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -1145,9 +1139,8 @@ TEST(EngineRun, ARunCalledWhileRunningThrowsAndLeavesTheRunGoing) {
 // A cycle that throws
 // ─────────────────────────────────────────────────────────────────────────────
 
-// A cycle that throws must leave the outputs it did not reach due (flywheel-dag#20). a's output is
-// registered before b's, and a pulls b clean before its callback throws, so b reads clean when the
-// next cycle starts.
+// A cycle that throws must leave the outputs it did not reach due. a's output is registered before
+// b's, and a pulls b clean before its callback throws, so b reads clean when the next cycle starts.
 TEST(EngineAbortedCycle, ALaterOutputGetsItsValueAfterACallbackThrows) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -1210,10 +1203,10 @@ TEST(EngineAbortedCycle, ALaterOutputGetsItsValueAfterANodeThrows) {
     EXPECT_EQ(seenB, (std::vector<double>{10.0, 20.0}));
 }
 
-// Through run(), which an application can start again after a throw (flywheel-dag#16). The output
-// registered last is on halt, which the test sets before the second run(). Its callback stops the
-// engine, so that run ends after its first cycle, which reaches the other outputs first, and
-// neither run waits on a feed.
+// Through run(), which an application can start again after a throw. The output registered last is
+// on halt, which the test sets before the second run(). Its callback stops the engine, so that run
+// ends after its first cycle, which reaches the other outputs first, and neither run waits on a
+// feed.
 TEST(EngineAbortedCycle, ARestartedRunDeliversWhatTheAbortedCycleDidNot) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -1283,7 +1276,7 @@ TEST(EngineAbortedCycle, ACallbackThatThrowsHasHadItsValue) {
 
 namespace {
 
-// The graph of flywheel-dag#23: b = 10·x and a = b + 1.
+// b = 10·x and a = b + 1.
 struct NewOutputGraph {
     Engine                engine;
     dag::InputPtr<double> x = engine.makeInput<double>("x", 1.0);
@@ -1315,8 +1308,8 @@ struct OutputOnNodeModule : IComputeModule {
 }  // namespace
 
 // A new output must get the value its node holds, though another output's cycle has pulled the
-// node clean (flywheel-dag#23). Registered before the first step(), b's output gets 10 on that
-// step, so what a callback sees must not depend on when it was registered.
+// node clean. Registered before the first step(), b's output gets 10 on that step, so what a
+// callback sees must not depend on when it was registered.
 TEST(EngineNewOutput, GetsTheValueItsNodeHoldsAfterAnotherOutputPulledIt) {
     NewOutputGraph g;
     g.engine.addOutput<double>(g.a, [](const double&) {});
@@ -1347,10 +1340,10 @@ TEST(EngineNewOutput, GetsTheValueItsNodeHoldsAfterACallerEvaluatedIt) {
     EXPECT_EQ(seenB, std::vector<double>{10.0});
 }
 
-// Through run(), which an application can call again once it has returned (flywheel-dag#16).
-// halt's callback stops the engine. halt starts dirty, and the test sets it again before the
-// second run(), so each run ends after its initial cycle, which reaches every output, b's
-// included, and neither waits on a feed.
+// Through run(), which an application can call again once it has returned. halt's callback stops
+// the engine. halt starts dirty, and the test sets it again before the second run(), so each run
+// ends after its initial cycle, which reaches every output, b's included, and neither waits on a
+// feed.
 TEST(EngineNewOutput, ARunStartedAgainDeliversAnOutputRegisteredBetweenRuns) {
     NewOutputGraph g;
     g.engine.addOutput<double>(g.a, [](const double&) {});

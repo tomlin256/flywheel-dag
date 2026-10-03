@@ -12,21 +12,18 @@
 
 using namespace dag;
 
-// Helper: cast any typed node to NodePtr for wiring.
 template<typename T>
 NodePtr asNode(const std::shared_ptr<T>& n) {
     return std::static_pointer_cast<INode>(n);
 }
 
-// Helper: eval a node and extract a double result.
 template<typename Node>
 double evalDouble(const std::shared_ptr<Node>& n) {
     EvalContext ctx;
     return get_value<double>(n->eval(ctx));
 }
 
-// Each test clears the static cache for the instantiation(s) it uses so that
-// the static maps do not bleed state between tests.
+// The cache is static per instantiation, so each test clears it first.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Basic
@@ -104,16 +101,16 @@ TEST(Basic, LazyPathSkipsHashLookup) {
         std::make_tuple(asNode(inp)),
         [&](const double& x) { ++calls; return x; });
 
-    evalDouble(node);   // miss, dirty_ = false after
+    evalDouble(node);   // miss; the node is now clean
 
-    // Second eval with no set() — dirty_ is false, returns cached_ immediately.
+    // A clean node returns cached_ before it hashes: no hit, no miss.
     std::size_t hitsBefore   = node->cacheHits();
     std::size_t missesBefore = node->cacheMisses();
     evalDouble(node);
 
-    EXPECT_EQ(node->cacheHits(),   hitsBefore);    // counters unchanged
+    EXPECT_EQ(node->cacheHits(),   hitsBefore);
     EXPECT_EQ(node->cacheMisses(), missesBefore);
-    EXPECT_EQ(calls, 1);                           // functor still called once
+    EXPECT_EQ(calls, 1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,17 +127,17 @@ TEST(Cache, ClearCacheForcesMiss) {
         std::make_tuple(asNode(inp)),
         [&](const double& x) { ++calls; return x; });
 
-    evalDouble(node);                                       // miss
+    evalDouble(node);   // miss
     EXPECT_EQ(calls, 1);
 
     MemoizedComputeNode<double, double>::clearCache();
 
-    // Force a re-eval even though dirty_ is false.
+    // Force a re-eval of the clean node.
     EvalContext ctx;
     ctx.forceRecompute = true;
     get_value<double>(node->eval(ctx));
 
-    EXPECT_EQ(calls, 2);                                    // functor called again
+    EXPECT_EQ(calls, 2);
     EXPECT_EQ(node->cacheMisses(), 2u);
 }
 
@@ -182,8 +179,7 @@ TEST(Cache, NodeNameIsolatesEntries) {
 }
 
 TEST(Cache, SameNameSameInputsSharesEntry) {
-    // Documents intentional behaviour: two nodes with identical names and the
-    // same input values share a cache entry. The second node gets a hit.
+    // By design, nodes with the same name and input values share an entry.
     MemoizedComputeNode<double, double>::clearCache();
 
     auto inp = Input<double>::make("x", 5.0);
@@ -209,9 +205,8 @@ TEST(Cache, SameNameSameInputsSharesEntry) {
 TEST(EqualityPolicy, CorrectValuePropagatedWhenOutputUnchanged) {
     MemoizedComputeNode<double, double>::clearCache();
 
-    // Constant functor: always returns 42.0 regardless of input.
-    // Every new input value is a cache miss (different key), but the functor
-    // always produces the same result. The downstream must always receive 42.0.
+    // The functor ignores its input, so every new input value is a miss (a new
+    // key) that yields the same 42.0.
     auto inp = Input<double>::make("x", 1.0);
     auto memo = MemoizedComputeNode<double, double>::make(
         "const42", std::make_tuple(asNode(inp)),
@@ -227,18 +222,16 @@ TEST(EqualityPolicy, CorrectValuePropagatedWhenOutputUnchanged) {
     inp->set(3.0);
     EXPECT_EQ(evalDouble(downstream), 42.0);
 
-    // Memo had three misses (three distinct input values) but always returned
-    // the same result. cached_ was set to 42.0 on the first eval and then the
-    // equality check prevented updating it on subsequent cache misses.
+    // Three distinct inputs, three misses, one result: after the first eval the
+    // equality check leaves cached_ alone.
     EXPECT_EQ(memo->cacheMisses(), 3u);
 }
 
 TEST(EqualityPolicy, AlwaysChangedPolicyDoesNotAffectCacheSemantics) {
     MemoizedComputeNode<double, double>::clearCache();
 
-    // AlwaysChangedPolicy: memo always treats its output as changed and updates
-    // cached_. The memoization cache still functions normally — hits/misses are
-    // counted correctly and the functor is still skipped on hits.
+    // AlwaysChangedPolicy makes every result count as changed; the hit and miss
+    // counts, and the skipped functor on a hit, are unaffected.
     auto inp = Input<double>::make("x", 1.0);
     int calls = 0;
     auto memo = MemoizedComputeNode<double, double>::make(
@@ -246,11 +239,11 @@ TEST(EqualityPolicy, AlwaysChangedPolicyDoesNotAffectCacheSemantics) {
         [&](const double& x) { ++calls; return x * 2.0; },
         std::make_shared<AlwaysChangedPolicy>());
 
-    evalDouble(memo);       // miss, calls=1
+    evalDouble(memo);       // miss
     EXPECT_EQ(calls, 1);
 
-    inp->set(1.0);          // Input eq policy: same value → no propagation
-    evalDouble(memo);       // not dirty → fast path, no hit/miss counted
+    inp->set(1.0);          // same value: the Input does not propagate
+    evalDouble(memo);       // clean: returns cached_, no hit or miss
     EXPECT_EQ(calls, 1);
 
     inp->set(2.0);          // new value → miss
@@ -276,10 +269,10 @@ TEST(Dirty, UpstreamSetMarksDirty) {
         "dirty_test", std::make_tuple(asNode(inp)),
         [](const double& x) { return x; });
 
-    evalDouble(node);           // dirty_ = false after eval
+    evalDouble(node);
     EXPECT_FALSE(node->dirty());
 
-    inp->set(2.0);              // should propagate invalidate() to node
+    inp->set(2.0);              // calls invalidate() on the node
     EXPECT_TRUE(node->dirty());
 }
 
@@ -313,15 +306,15 @@ TEST(Dirty, ForceRecomputeBypassesDirtyCheck) {
         "force_test", std::make_tuple(asNode(inp)),
         [&](const double& x) { ++calls; return x; });
 
-    evalDouble(node);           // miss, dirty_ = false
+    evalDouble(node);           // miss; the node is now clean
     EXPECT_EQ(calls, 1);
 
-    // forceRecompute bypasses the dirty_ fast path and re-enters the hash path.
+    // forceRecompute skips the clean-node shortcut and looks the key up.
     EvalContext ctx;
     ctx.forceRecompute = true;
     get_value<double>(node->eval(ctx));
 
-    // Cache still has the entry → hit (calls stays at 1), but hash lookup ran.
+    // The entry is cached: a hit, not a second call.
     EXPECT_EQ(calls, 1);
     EXPECT_EQ(node->cacheHits(), 1u);
 }
@@ -353,7 +346,7 @@ TEST(MultiInput, InputOrderDistinguishesKey) {
     // Back to (1, 2) → cache hit, result -1
     a->set(1.0); b->set(2.0);
     EXPECT_EQ(evalDouble(node), -1.0);
-    EXPECT_EQ(calls, 2);              // functor not called again
+    EXPECT_EQ(calls, 2);
     EXPECT_EQ(node->cacheHits(), 1u);
 }
 

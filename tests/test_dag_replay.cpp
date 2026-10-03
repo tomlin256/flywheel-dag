@@ -16,8 +16,8 @@
 //   - empty schedule terminates cleanly
 //   - clock delta mapping + monotonicity
 //   - reset() rewinds
-//   - regression: Engine::run() completes unattended with stop() from the
-//     exhausted callback (an earlier design stalled waiting for a wake hook)
+//   - Engine::run() completes unattended, with stop() called from the
+//     exhausted callback
 //
 // ReplayInput<T> + ReplayQueue<T>: delivery gated on the coordinator's cursor.
 
@@ -141,7 +141,7 @@ TEST(ReplayClock, DeltaMappingAndMonotonic) {
     EXPECT_GE(clk->now(), base);                  // never runs backward
 }
 
-// ── R3 regression: unattended Engine::run() ────────────────────────────────────
+// ── Unattended Engine::run() ───────────────────────────────────────────────────
 
 TEST(ReplayCoordinator, EngineRunCompletesUnattended) {
     Engine engine;
@@ -154,8 +154,9 @@ TEST(ReplayCoordinator, EngineRunCompletesUnattended) {
     });
     engine.addSource(coord);
 
-    // Must return unattended. On the R3 stall bug the run loop would block on its
-    // condition variable forever (surfaced as a ctest timeout, not a wrong value).
+    // Must return unattended: without the coordinator's self-chaining wake, the
+    // run loop would block on its condition variable forever, which ctest reports
+    // as a timeout, not a wrong value.
     engine.run();
 
     EXPECT_EQ(exhausted, 1);
@@ -198,8 +199,8 @@ TEST(ReplayInput, InOrderDelivery) {
 }
 
 TEST(ReplayInput, RepeatedValueEqualitySuppressed) {
-    // A recording never emits a repeat (equality-suppressed posts aren't taped),
-    // but the replay input must still apply the policy: the middle 5.0 is dropped.
+    // The replay input applies its equality policy, as AsyncInput does: the
+    // middle 5.0 is dropped.
     auto coord = ReplayCoordinator::make(scheduleFromSeqs({1, 2, 3}));
     auto price = ReplayInput<double>::make(
         "price", {{1, 5.0}, {2, 5.0}, {3, 7.0}}, coord);
@@ -266,9 +267,8 @@ TEST(ReplayAlignment, TwoInputsOneQueueInterleavedSeqs) {
     EXPECT_EQ(priceSeq,  (std::vector<PV>{{1, 100.0}, {3, 101.0}}));
     EXPECT_EQ(tradeCycles, (std::vector<std::uint64_t>{1, 2}));
     // spread's first sample is at seq 2, so on cycle 1 it fires its INITIAL value
-    // (0.0) — every node starts dirty and fires once on its first eval. A real
-    // recording captures that cycle-1 value too, so replay reproducing it is the
-    // record/replay symmetry replay depends on.
+    // (0.0): every node starts dirty and fires once on its first eval, as the
+    // AsyncInput it replays does live.
     EXPECT_EQ(spreadSeq, (std::vector<PV>{{1, 0.0}, {2, 0.5}, {3, 0.6}}));
 }
 

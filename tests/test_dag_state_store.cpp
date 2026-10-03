@@ -38,10 +38,8 @@ static void feed(const std::shared_ptr<Input<double>>& inp,
 
 TEST(NodeStateTests, WriteReadDouble) {
     InMemoryStateStore store;
-    // use save/restore round-trip on a trivial node to get a MapNodeState
-    // Actually, test MapNodeState directly via InMemoryStateStore internals
-    // by saving a real node and verifying the round-trip.
-    // Here we verify through EWMANode as a proxy for INodeState value semantics.
+    // MapNodeState is private to InMemoryStateStore, so an EWMANode's save/restore
+    // round-trip stands in for INodeState's double semantics.
     auto inp  = Input<double>::make("x", 0.0);
     auto ewma = EWMANode::make("ewma", inp, 0.5);
     EvalContext ctx;
@@ -299,14 +297,11 @@ TEST(NodeStateTests, RollingMinMaxSaveRestore) {
 }
 
 TEST(NodeStateTests, RollingMinMaxEntryTickPreserved) {
-    // Verify window expiry is correct after restore — entries expire at right tick
+    // Entries expire at the right tick after a restore.
     auto inp    = Input<double>::make("x", 0.0);
     auto minmax = RollingMinMaxNode::make("mm", inp, 3);
     EvalContext ctx;
-    // Push 4 values so the first is outside window after restore
     feed(inp, minmax, {1.0, 100.0, 2.0});
-    // tick_ is now 3; window is 3. Entry at idx=0 (val=1.0) still inside window.
-    // But after pushing a 4th value (tick_ becomes 4), idx=0 expires.
 
     InMemoryStateStore store;
     store.save({minmax});
@@ -315,7 +310,7 @@ TEST(NodeStateTests, RollingMinMaxEntryTickPreserved) {
     auto minmax2 = RollingMinMaxNode::make("mm", inp2, 3);
     store.restore({minmax2});
 
-    // Push one more — the entry from tick 0 (val=1.0) should expire
+    // The fourth push, at tick 3 with a window of 3, evicts idx 0 (val=1.0).
     inp->set(3.0);  minmax->eval(ctx);
     inp2->set(3.0); minmax2->eval(ctx);
 

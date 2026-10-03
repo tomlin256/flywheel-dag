@@ -13,7 +13,7 @@
 //   1. install() calls wire() exactly once
 //   2. install() keeps the module alive (shared_ptr stored in engine)
 //   3. wire() receives the correct engine reference
-//   4. Multiple modules — all wire() methods called in order
+//   4. Multiple modules — all wire() methods called
 //   5. wire() can register engine outputs (integration smoke test)
 
 #include <gtest/gtest.h>

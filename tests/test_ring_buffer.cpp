@@ -9,7 +9,7 @@
 
 // test_ring_buffer.cpp — RingBuffer<T> semantics, especially around the wrap.
 //
-// This replaces std::deque behind every windowed time-series node, so the
+// RingBuffer backs the windowed time-series nodes other than WindowNode, so the
 // ordering guarantees have to be exact: index 0 is always the oldest element,
 // and for_each_contiguous must present the contents in that same order across
 // at most two runs. A wrap-point off-by-one here would silently corrupt every

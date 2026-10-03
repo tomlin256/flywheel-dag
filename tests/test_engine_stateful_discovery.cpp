@@ -182,10 +182,11 @@ TEST(StatefulDiscovery, MixedStatefulStatelessUpstream) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CastWorksOnEveryStatefulNodeType
 //
-// Constructs one of every concrete stateful node type and confirms
-// dynamic_pointer_cast<IStatefulNode> against the INode-typed shared_ptr
-// (the form discovery uses) succeeds. Guards against a future stateful node
-// that bypasses StatefulNodeBase and quietly skips the discovery path.
+// Constructs one of each concrete stateful node type but RollingSumNode
+// (flywheel-dag#32) and confirms dynamic_pointer_cast<IStatefulNode> against the
+// INode-typed shared_ptr (the form discovery uses) succeeds. Guards against a
+// stateful node that bypasses StatefulNodeBase and quietly skips the discovery
+// path.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(StatefulDiscovery, CastWorksOnEveryStatefulNodeType) {
     auto inp_d = Input<double>::make("xd", 0.0);
@@ -273,16 +274,15 @@ TEST(StatefulDiscovery, SaveRestoreRoundTripsViaDiscovery) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SaveRestoreSurvivesEmptyStatefulNodesOverride — the regression that
-// triggered this work. A module that legitimately owns stateful nodes but
-// fails to list them in its statefulNodes() override would previously have
-// silently lost persistence. Discovery now picks them up.
+// SaveRestoreSurvivesEmptyStatefulNodesOverride — a module need not list its
+// stateful nodes anywhere: save and restore find them by discovery, from the
+// registered outputs.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
 
-// Fixture: wires a single RollingStats through an engine output but DOES NOT
-// list it in statefulNodes() — the exact bug class discovery eliminates.
+// Fixture: wires a single RollingStats through an engine output and lists it
+// nowhere.
 struct ForgotToListNodesModule : public IComputeModule {
     dag::InputPtr<double>      inp;
     std::shared_ptr<RollingStats> stats;
@@ -294,7 +294,6 @@ struct ForgotToListNodesModule : public IComputeModule {
         stats = RollingStats::make("forgot_list.stats", inp, 32);
         engine.addOutput<double>(stats, [](const double&) {});
     }
-    // statefulNodes() inherited default: returns {}.
 };
 
 } // namespace
@@ -302,8 +301,8 @@ struct ForgotToListNodesModule : public IComputeModule {
 TEST(StatefulDiscovery, SaveRestoreSurvivesEmptyStatefulNodesOverride) {
     auto store = std::make_shared<InMemoryStateStore>();
 
-    // ── Engine 1: warm and save (using Engine::saveState, which now goes
-    //              through discoverStatefulNodes()).
+    // ── Engine 1: warm and save (Engine::saveState goes through
+    //              discoverStatefulNodes()).
     {
         Engine e1;
         auto mod = std::make_shared<ForgotToListNodesModule>();

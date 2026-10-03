@@ -217,11 +217,9 @@ TEST(DagGraph, SlashInNameReplacedWithUnderscore) {
 }
 
 // ── Test 15: hyphen in cluster prefix is quoted, not left as a bare DOT id ───
-// Regression: an unquoted "subgraph cluster_my-module" is invalid DOT (dot
-// rejects unquoted ids containing '-'). A node-name prefix of the form
-// "<hyphenated-module>/" followed by a dotted child name (e.g. ".fast") is
-// common, so clusterOf() strips a hyphenated, slash-bearing prefix — exactly
-// this shape.
+// A node's cluster is its name up to the first '.', so "my-module/signal.fast"
+// lands in "my-module/signal". An unquoted "subgraph cluster_my-module_signal" is
+// invalid DOT (dot rejects unquoted ids containing '-'), so the id is quoted.
 
 TEST(DagGraph, HyphenInClusterPrefixIsQuoted) {
     auto fast = makeInput("my-module/signal.fast");
@@ -233,7 +231,7 @@ TEST(DagGraph, HyphenInClusterPrefixIsQuoted) {
     EXPECT_NE(dot.find("subgraph \"cluster_my-module_signal\""),
               std::string::npos);
 
-    // Must never regress to the pre-fix bare/unquoted form.
+    // The bare, unquoted form must not appear.
     EXPECT_EQ(dot.find("subgraph cluster_my-module"), std::string::npos);
 }
 
