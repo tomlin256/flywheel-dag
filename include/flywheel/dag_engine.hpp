@@ -243,8 +243,10 @@ public:
 
     // ── Stats ─────────────────────────────────────────────────────────────────
 
-    // A cycle that throws is counted by cycleCount() but not timed: meanCycleUs()
-    // counts it at zero, and the other durations leave it out (flywheel-dag#21).
+    // A cycle is timed when it ends, whether it returns or throws, so every statistic covers every
+    // cycle that has ended. One that throws is timed up to the throw: shorter than a full cycle by
+    // the work it skipped, longer by the cost of the throw. A meanCycleUs() read during a cycle
+    // counts it before it is timed, and reads low (flywheel-dag#34).
 
     uint64_t cycleCount()     const;
     uint64_t callbacksFired() const;

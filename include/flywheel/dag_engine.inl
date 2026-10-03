@@ -291,7 +291,29 @@ inline CycleSeqLockPtr Engine::cycleSeqLock() const { return cycleSeqLock_; }
 inline void Engine::cycle() {
     const CycleSeqLock::WriteScope writeScope(*cycleSeqLock_);
     cycles_.fetch_add(1, std::memory_order_relaxed);
-    const auto t0 = std::chrono::steady_clock::now();
+
+    // Times the cycle on every exit, a throw included, so every cycle that ends is counted and
+    // timed alike. Declared after writeScope, so it is destroyed first and records while a
+    // CycleSeqLock reader still sees the cycle open. It records in its own destructor: Apple Clang
+    // does not inline a member function called from there, which slows bench_hot_path's
+    // idle-queues row by 3%.
+    struct TimeOnExit {
+        Engine&                                     engine;
+        const std::chrono::steady_clock::time_point started;
+        ~TimeOnExit() {
+            const auto ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - started).count());
+            engine.lastCycleNs_.store(ns, std::memory_order_relaxed);
+            engine.totalCycleNs_.fetch_add(ns, std::memory_order_relaxed);
+            if (ns < engine.minCycleNs_.load(std::memory_order_relaxed))
+                engine.minCycleNs_.store(ns, std::memory_order_relaxed);
+            if (ns > engine.maxCycleNs_.load(std::memory_order_relaxed))
+                engine.maxCycleNs_.store(ns, std::memory_order_relaxed);
+            engine.rollingCycles_.record(ns);
+        }
+    };
+    const TimeOnExit timeCycle{*this, std::chrono::steady_clock::now()};
 
     // 1. Flush all sources — the only point where feed-thread data enters
     //    the DAG.  Invalidations propagate forward synchronously from here.
@@ -337,17 +359,6 @@ inline void Engine::cycle() {
             outputs_[i].callback(val);
         }
     }
-
-    const auto ns = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - t0).count());
-    lastCycleNs_.store(ns, std::memory_order_relaxed);
-    totalCycleNs_.fetch_add(ns, std::memory_order_relaxed);
-    if (ns < minCycleNs_.load(std::memory_order_relaxed))
-        minCycleNs_.store(ns, std::memory_order_relaxed);
-    if (ns > maxCycleNs_.load(std::memory_order_relaxed))
-        maxCycleNs_.store(ns, std::memory_order_relaxed);
-    rollingCycles_.record(ns);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

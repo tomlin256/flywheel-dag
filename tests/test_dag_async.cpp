@@ -25,6 +25,7 @@
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_async.hpp"
 #include "flywheel/dag_engine.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -848,6 +849,90 @@ TEST(EngineCycleStats, ExplicitWindowConstructorIsWired) {
 
     EXPECT_GE(engine.rollingMeanCycleUs(), engine.minCycleUs());
     EXPECT_LE(engine.rollingMeanCycleUs(), engine.maxCycleUs());
+}
+
+// A cycle that throws is counted by cycleCount(), so it is timed too: every statistic covers the
+// cycles cycleCount() counts. A throw takes microseconds, far above the clock's tick, so such a
+// cycle always measures more than zero.
+
+namespace {
+
+class ThrowingSource final : public IFlushable {
+public:
+    std::size_t flush() override { throw std::runtime_error("from a source"); }
+    std::size_t pendingCount() const override { return 0; }
+    std::string name() const override { return "throwing"; }
+    void setWakeHook(std::function<void()>) override {}
+};
+
+// The engine has run one cycle, and every statistic reads its duration.
+void expectOnlyCycleTimed(const Engine& engine) {
+    EXPECT_EQ(engine.cycleCount(), 1u);
+    EXPECT_GT(engine.lastCycleUs(), 0.0);
+    EXPECT_DOUBLE_EQ(engine.minCycleUs(),         engine.lastCycleUs());
+    EXPECT_DOUBLE_EQ(engine.maxCycleUs(),         engine.lastCycleUs());
+    EXPECT_DOUBLE_EQ(engine.meanCycleUs(),        engine.lastCycleUs());
+    EXPECT_DOUBLE_EQ(engine.rollingMeanCycleUs(), engine.lastCycleUs());
+}
+
+}  // namespace
+
+TEST(EngineCycleStats, ACycleThatThrowsFromACallbackIsTimed) {
+    Engine engine;
+    auto x = engine.makeInput<int>("x", 0);
+    engine.addOutput<int>(x, [](const int&) { throw std::runtime_error("from a callback"); });
+
+    EXPECT_THROW(engine.step(), std::runtime_error);
+
+    expectOnlyCycleTimed(engine);
+}
+
+TEST(EngineCycleStats, ACycleThatThrowsFromANodeIsTimed) {
+    Engine engine;
+    auto x = engine.makeInput<int>("x", 0);
+    auto node = ComputeNode<int, int>::make(
+        "boom",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [](const int&) -> int { throw std::runtime_error("from a node"); });
+    engine.addOutput<int>(node, [](const int&) {});
+
+    EXPECT_THROW(engine.step(), std::runtime_error);
+
+    expectOnlyCycleTimed(engine);
+}
+
+TEST(EngineCycleStats, ACycleThatThrowsFromASourceIsTimed) {
+    Engine engine;
+    engine.addSource(std::make_shared<ThrowingSource>());
+
+    EXPECT_THROW(engine.step(), std::runtime_error);
+
+    expectOnlyCycleTimed(engine);
+}
+
+// A cycle that throws, then one that does not: each statistic covers both.
+TEST(EngineCycleStats, StatsCoverACycleThatThrewAndOneThatDidNot) {
+    Engine engine;
+    auto x = engine.makeInput<int>("x", 0);
+    bool fail = true;
+    engine.addOutput<int>(x, [&fail](const int&) {
+        if (fail) {
+            fail = false;
+            throw std::runtime_error("from a callback");
+        }
+    });
+
+    EXPECT_THROW(engine.step(), std::runtime_error);
+    const double thrown = engine.lastCycleUs();
+    x->set(1);
+    engine.step();
+    const double completed = engine.lastCycleUs();
+
+    EXPECT_EQ(engine.cycleCount(), 2u);
+    EXPECT_DOUBLE_EQ(engine.minCycleUs(), std::min(thrown, completed));
+    EXPECT_DOUBLE_EQ(engine.maxCycleUs(), std::max(thrown, completed));
+    EXPECT_NEAR(engine.meanCycleUs(),        (thrown + completed) / 2.0, 1e-9);
+    EXPECT_NEAR(engine.rollingMeanCycleUs(), (thrown + completed) / 2.0, 1e-9);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
