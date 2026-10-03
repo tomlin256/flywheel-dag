@@ -27,16 +27,10 @@ inline Tape::Tape(std::vector<NodePtr> roots) {
 
 inline std::size_t Tape::size() const noexcept { return entries_.size(); }
 
-// A depth-first walk up from the root, without recursion. It finishes a node
-// only after every input its partials name, so each node lands on the tape
-// after all of them. A node the tape already holds is not walked again: an
-// earlier add() recorded it, with everything it names.
-//
-// The walk reads each node twice when it first reaches it: eval() to learn what
-// the node holds, and partials(). Both read a clean node, so both return cached
-// values. add() checks the root clean, and a clean node's named inputs are clean
-// too: an input that moves invalidates its consumers, and a node does not end
-// an evaluation clean over an input that went dirty again (flywheel-dag#18).
+// add() checks the root clean, and a clean node's named inputs are clean too: an
+// input that moves invalidates its consumers, and a node does not end an
+// evaluation clean over an input that went dirty again. So record()'s walk reads
+// clean nodes alone.
 inline void Tape::add(const NodePtr& root) {
     if (!root) throw std::invalid_argument("aad::Tape: a root is null");
     if (root->dirty())
@@ -45,6 +39,15 @@ inline void Tape::add(const NodePtr& root) {
     record(root);
 }
 
+// A depth-first walk up from the root, without recursion. It finishes a node
+// only after every input its partials name, so each node lands on the tape
+// after all of them. A node the tape already holds is not walked again: an
+// earlier add() recorded it, with everything it names.
+//
+// The walk reads each node twice when it first reaches it: eval() to learn what
+// the node holds, and partials(). Both read a clean node, so both return cached
+// values.
+//
 // No clean check: a sensitivity node records the root it has just pulled. A
 // root that an always-dirty node reaches by two paths stays dirty after its own
 // pull, and the walk's eval() and partials() then evaluate what went dirty
@@ -356,9 +359,6 @@ template<std::size_t N> bool operator>=(const Dual<N>& a, double b) { return a.v
 template<std::size_t N> bool operator>=(double a, const Dual<N>& b) { return a >= b.value; }
 
 // ── Functions ───────────────────────────────────────────────────────────────
-//
-// exp, log, sqrt and the trigonometric functions take their partials from the
-// ops' Derivative<Op>, so a Dual and an op node agree to the bit.
 
 template<std::size_t N> Dual<N> exp(const Dual<N>& x) {
     return chain(x, std::exp(x.value), ops::Derivative<ops::ExpOp<double>>::d(x.value));
@@ -554,10 +554,10 @@ inline GradientNode::GradientNode(std::string name, NodePtr root, std::vector<No
 //
 // A node that is always dirty is the exception. Reaching the root by two paths,
 // it leaves the root dirty after its own pull, which record() allows. And the
-// tape's pull evaluates it again, which can mark the root dirty again
-// (flywheel-dag#19). This node then hears a "maybe", and endEval() keeps it
-// dirty and tells its consumers: marked clean, it would never see the next
-// change, which stops at the root because the root is already dirty.
+// tape's pull evaluates it again, which can mark the root dirty again. This node
+// then hears a "maybe", and endEval() keeps it dirty and tells its consumers:
+// marked clean, it would never see the next change, which stops at the root
+// because the root is already dirty.
 inline ValuePtr GradientNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
     beginEval();

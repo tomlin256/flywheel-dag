@@ -59,9 +59,9 @@
 //     Engine::cycle() snapshots its outputs' dirty flags before it evaluates
 //     them, so an output that a cycle has reached reads as clean after a pass
 //     evaluates it between cycles, and its callback misses the change. A new
-//     output is due until a cycle reaches it (flywheel-dag#23). Run a pass in
-//     the root's output callback, where the engine has just evaluated it, or
-//     evaluate the root first.
+//     output is due until a cycle reaches it. Run a pass in the root's output
+//     callback, where the engine has just evaluated it, or evaluate the root
+//     first.
 //   • Any node can be a wrt or seed node, not only a leaf. Its adjoint is the
 //     derivative with respect to a change in its own value. A seed on an
 //     intermediate node adds to the tangent that reaches it. That keeps the two
@@ -165,8 +165,8 @@ public:
     std::size_t size() const noexcept;
 
 private:
-    // The sensitivity nodes record each root right after they pull it, through
-    // record(), and TangentNode records its roots one at a time.
+    // GradientNode and TangentNode record each root right after they pull it,
+    // through record().
     friend class GradientNode;
     friend class TangentNode;
 
@@ -446,7 +446,7 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // derivative 0. Pulling the wrt nodes as well would evaluate nodes the root does
 // not read, such as one on the branch a ConditionNode did not take.
 //
-// It is EAGER, fixed here, and that is the point of it. Its value depends on the
+// It is Eager, fixed here, and that is the point of it. Its value depends on the
 // partials of every node the tape records, and it declares none of them as
 // inputs. A change upstream of the root marks it at least Maybe, and an Eager
 // node recomputes then. A Lazy node would skip whenever the root's value stood
@@ -467,9 +467,8 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // node does when an input it read does (NodeBase::endEval()). The tape's pulls
 // can evaluate a node that is always dirty, such as an application's
 // clock-driven node, which then marks the root dirty again. Marked clean, this
-// node would never see the next change, which stops at the root
-// (flywheel-dag#19). It tells its consumers too, so a node over it sees that
-// change as well (flywheel-dag#18).
+// node would never see the next change, which stops at the root. It tells its
+// consumers too, so a node over it sees that change as well.
 //
 // It records the root it has just pulled, clean or not (Tape::record()). An
 // always-dirty node that reaches the root by two paths leaves the root dirty
@@ -477,10 +476,11 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // every evaluation. Recorded anyway, the tape's walk evaluates what went dirty
 // again, which the caveat on always-dirty nodes already allows.
 //
-// COST. Every recompute records a new tape, which costs about 20 evaluations of
-// the root, and an Eager node recomputes on every change upstream of its root,
-// including a change the gradient does not depend on. A graph that wants its
-// sensitivities only now and then should run a pass on demand instead.
+// COST. Every recompute records a new tape, which costs a multiple of evaluating
+// the root (about 20 on the Black–Scholes call in test_aad_node.cpp), and an
+// Eager node recomputes on every change upstream of its root, including a change
+// the gradient does not depend on. A graph that wants its sensitivities only now
+// and then should run a pass on demand instead.
 //
 // Under the default policy, a gradient holding a NaN is unequal to itself, so
 // it is published on every recompute, as a double NaN is. It is not an
@@ -525,7 +525,7 @@ using GradientNodePtr = std::shared_ptr<GradientNode>;
 // the roots' order, as a std::vector<double>.
 //
 // GradientNode's forward-mode counterpart, and what GradientNode says about
-// itself holds here too. It is EAGER, fixed here. Its inputs are its roots, and
+// itself holds here too. It is Eager, fixed here. Its inputs are its roots, and
 // a seed's node is not one. It evaluates what its roots' eval() evaluates, it
 // throws what the tape throws, and it is not an IDifferentiable. The seeds are
 // constants, given at make().
@@ -536,17 +536,16 @@ using GradientNodePtr = std::shared_ptr<GradientNode>;
 // right after its pull, each root is recorded at the values its pull left, and
 // a later pull evaluates only nodes the tape does not hold yet, an always-dirty
 // node apart, so it moves no other value the tape recorded. One forward sweep of
-// the one tape serves every root. (Before flywheel-dag#18's fix, a stale node on
-// the branch a ConditionNode did not take did the same, and a tape recorded
-// after every pull threw.)
+// the one tape serves every root.
 //
 // It stays dirty when a root goes dirty again during its evaluation, for
 // GradientNode's reason, whether a later root's pull or an always-dirty node
 // the tape pulled left it so, and it tells its consumers. It records a root
 // that stayed dirty after its own pull, as GradientNode does.
 //
-// COST. A recompute records one tape over every root's nodes, which costs about
-// 20 evaluations of them, and it happens on every change upstream of any root.
+// COST. A recompute records one tape over every root's nodes, which costs a
+// multiple of evaluating them, as for a GradientNode, and it happens on every
+// change upstream of any root.
 // ─────────────────────────────────────────────────────────────────────────────
 class TangentNode
     : public NodeBase
