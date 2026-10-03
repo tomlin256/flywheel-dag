@@ -137,7 +137,8 @@ the mode without the mode check, which is what the issue found missing.
 
 ## Steps
 
-Commit subjects are scoped to flywheel-dag#33 in the repo's `type(#N): …` form.
+Every commit subject is scoped to flywheel-dag#33 in the repo's `type(#N): …` form. The subjects
+below omit the scope.
 
 ### Step 1 — The tests and the note
 
@@ -156,7 +157,7 @@ which they replace. Moved, unchanged: `alwaysChangedInput`. Reworded: the note i
   for Make 3.81's whole-second mtimes to keep;
 - `DelayNodeStatusNodeFiresOncePerTick` still fails under the `DelayNode` mutation, as today.
 
-Commit: `test(#33): pin every windowStatusNode() companion Eager`.
+Commit: `test: pin every windowStatusNode() companion Eager`.
 
 ### Step 2 — Close out
 
@@ -168,7 +169,7 @@ Commit: `test(#33): pin every windowStatusNode() companion Eager`.
 
 **Done when:** CI is green on the pushed commit on both legs and flywheel-dag#33 is closed.
 
-Commit: `docs(#33): mark the plan done`.
+Commit: `docs: mark the plan done`.
 
 ## Not in this plan
 
