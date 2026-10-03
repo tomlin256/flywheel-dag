@@ -61,8 +61,8 @@ std::size_t hash_tuple(const std::string& name, const Tuple& t,
 //     observable side effects. This is a documentation constraint only.
 //   - NOT thread-safe. eval() and cache management must only be called from
 //     the eval thread.
-//   - Hash collisions produce silently wrong results (astronomically unlikely
-//     with 64-bit hashes over the input domain).
+//   - A hash collision silently returns another input's result: entries are
+//     keyed by the std::size_t hash alone, and the inputs are not compared.
 //   - The cache grows without bound. Call clearCache() if memory is a concern.
 //   - The node name must uniquely identify the functor being memoized. Two
 //     nodes with the same name but different functors will share cache entries
@@ -93,7 +93,6 @@ public:
     NodeKind             kind()   const override { return NodeKind::Compute; }
 
     // Cache management — shared per <Out, Ins...> instantiation.
-    // NOT thread-safe: call only from the eval thread.
     static void        clearCache();
     static std::size_t cacheSize();
 

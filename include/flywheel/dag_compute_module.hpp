@@ -12,26 +12,17 @@
 //
 // A compute module encapsulates a self-contained subset of the reactive DAG:
 // the nodes it builds, the upstream inputs it consumes (injected at
-// construction), and any snapshot state it maintains for the reporting thread.
+// construction), and any state it keeps for other threads to read.
 //
 // Usage:
 //   auto mod = MyModule::make(inputs..., cfg);
 //   engine.install(mod);    // calls mod->wire(engine) exactly once
 //   engine.run();
 //
-// After install(), output node handles (accessors on the concrete module type)
-// are valid and may be passed to downstream module constructors.
-//
-// Design notes
-// ────────────
-// • IComputeModule only forward-declares Engine to avoid a circular include:
-//   dag_engine.hpp includes this file, and this file must not include
-//   dag_engine.hpp.  Concrete implementations #include dag_engine.hpp
-//   themselves so they can call engine.addOutput() and friends inside wire().
-//
-// • wire() is the only method that touches the Engine.  All internal node
-//   construction happens inside wire() so that output handles remain null
-//   (and thus unusable) until the module has been properly installed.
+// IComputeModule only forward-declares Engine to avoid a circular include:
+// dag_engine.hpp includes this file, so this file must not include
+// dag_engine.hpp.  Concrete implementations #include dag_engine.hpp themselves
+// so they can call engine.addOutput() and friends inside wire().
 
 #include "dag_state_store.hpp"
 #include <memory>
@@ -46,12 +37,12 @@ class Engine;  // forward declaration — include dag_engine.hpp for the full AP
 // IComputeModule
 //
 // Contract:
-//   • wire() is called exactly once, by Engine::install().
-//   • Modules must not call wire() themselves.
-//   • Modules build their internal nodes and register engine outputs inside
-//     wire().  After wire() returns, all node accessors are valid.
-//   • Module output node handles may be passed into downstream module
-//     constructors after install() returns on the upstream module.
+//   • wire() is called exactly once, by Engine::install(). Modules must not
+//     call it themselves.
+//   • A module builds its internal nodes and registers engine outputs inside
+//     wire(), so its output handles stay null until it is installed.  After
+//     wire() returns, all node accessors are valid, and the handles may be
+//     passed into downstream module constructors.
 // ─────────────────────────────────────────────────────────────────────────────
 class IComputeModule {
 public:

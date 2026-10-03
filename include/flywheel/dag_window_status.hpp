@@ -11,13 +11,13 @@
 // dag_window_status.hpp — WindowStatus value type and IWindowed interface
 //
 // WindowStatus carries the capacity and filled count of any windowed node as a
-// plain struct so downstream nodes can make warmup-aware decisions without
-// inspecting the parent via friend access or heuristic outputs.
+// plain struct so a downstream node can make warmup-aware decisions without
+// inspecting its parent.
 //
-// IWindowed is implemented by the four windowed time-series nodes:
-//   RollingStats, DelayNode<T>, WindowNode<T>, RollingMinMaxNode
+// IWindowed is implemented by the five windowed time-series nodes:
+//   RollingStats, RollingSumNode, DelayNode<T>, WindowNode<T>, RollingMinMaxNode
 //
-// Each exposes a lazy companion DAG node via windowStatusNode().
+// Each creates a companion DAG node on the first call to windowStatusNode().
 
 #include "flywheel/dag.hpp"
 #include <cstddef>
@@ -44,11 +44,11 @@ public:
     virtual ~IWindowed() = default;
     virtual std::size_t capacity() const noexcept = 0;
     virtual std::size_t filled()   const noexcept = 0;
-    /// DAG node emitting WindowStatus each cycle. Lazily created; while at
-    /// least one strong consumer holds it, repeat calls return the same node
-    /// (one DAG edge per consumer). When no consumer is holding it, repeat
-    /// calls return a fresh node — this is fine in practice because the
-    /// expected usage is "call once, wire into the consumer."
+    /// DAG node whose value is the WindowStatus, recomputed whenever the
+    /// windowed node fires. Created on the first call; while at least one strong
+    /// consumer holds it, repeat calls return the same node (one DAG edge per
+    /// consumer). When no consumer is holding it, repeat calls return a fresh
+    /// node — the expected usage is "call once, wire into the consumer."
     /// **Precondition:** the implementing node must already be owned by a
     /// shared_ptr (i.e., make() has returned). Never call from a constructor.
     virtual dag::NodePtr windowStatusNode() const = 0;

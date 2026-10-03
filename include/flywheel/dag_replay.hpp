@@ -44,11 +44,11 @@ namespace dag::async {
 // ─────────────────────────────────────────────────────────────────────────────
 // ReplayClock — recorded time on a synthetic steady_clock timeline.
 //
-//   now() = base + (currentGroupTs − firstGroupTs)
+//   now() = base_ + (currentTs_ − firstTs_)
 //
-// base is captured at construction; the coordinator advances currentGroupTs as
-// it delivers each group. Timestamps are carried, never slept on — replay runs
-// at full engine speed. Monotonic given non-decreasing recorded timestamps.
+// base_ is captured at construction; the coordinator advances currentTs_ as it
+// delivers each group. Timestamps are carried, never slept on — replay runs at
+// full engine speed. Monotonic given non-decreasing recorded timestamps.
 // ─────────────────────────────────────────────────────────────────────────────
 class ReplayClock {
 public:
@@ -78,20 +78,19 @@ using ReplayClockPtr = std::shared_ptr<ReplayClock>;
 // ReplayCoordinator — the master cursor over a recorded session.
 //
 // Holds a schedule: the ascending, distinct-seq list of (seq, ts) groups merged
-// across every replayed stream (a group's ts is the latest event ts in it).
-// Registered FIRST in the replay FeedRegistry so the cursor advances before any
-// replay source flushes in the same cycle; sources then gate on currentSeq().
+// across every replayed stream. Registered FIRST in the replay FeedRegistry so
+// the cursor advances before any replay source flushes in the same cycle;
+// sources then gate on currentSeq().
 //
 // flush() delivers one group per call and fires the wake hook, so Engine::run()
 // self-chains to completion. After the last group it keeps waking for
 // drainCycles further cycles (default 1) — letting endogenous events posted
 // during the final delivery (e.g. an application's simulated responses) flush
-// and propagate — then fires the exhausted callback exactly once. The app calls
-// Engine::stop() from it.
+// and propagate — then, on the next cycle, fires the exhausted callback exactly
+// once. The app calls Engine::stop() from it.
 //
-// Schedule precondition: sorted ascending by seq with distinct seqs. An
-// application's replay reader builds it that way; standalone tests construct it
-// directly.
+// Schedule precondition: sorted ascending by seq with distinct seqs, each at
+// least 1 (0 means no group).
 // ─────────────────────────────────────────────────────────────────────────────
 class ReplayCoordinator : public IFlushable {
 public:
@@ -112,24 +111,24 @@ public:
     // ── Cursor / lifecycle ────────────────────────────────────────────────────
 
     /// The seq of the group being delivered this cycle. 0 when no group is being
-    /// delivered (before the first flush, and during drain / after exhaustion) —
-    /// 0 never occurs as a real seq because Engine::cycleCount() ≥ 1 at capture.
+    /// delivered (before the first flush, and during drain / after exhaustion);
+    /// a real seq is at least 1.
     std::uint64_t currentSeq() const { return currentSeq_; }
 
-    /// True once every group has been delivered (the recorded session is
-    /// spent). Flips on the first drain cycle, not on the last delivery cycle, so
-    /// the last group's outputs still count as "running". An application's
-    /// is-running check is the negation of this.
+    /// True once every group has been delivered. Flips on the first drain cycle,
+    /// not on the last delivery cycle, so the last group's outputs still count as
+    /// running.
     bool exhausted() const { return pastLast_; }
 
-    /// Fired exactly once, drainCycles cycles after the last group. Safe to call
-    /// Engine::stop() from it — the in-flight cycle completes first.
+    /// Fired exactly once, on the cycle after the drainCycles drain cycles that
+    /// follow the last group. Safe to call Engine::stop() from it — the
+    /// in-flight cycle completes first.
     void setExhaustedCallback(std::function<void()> cb) { onExhausted_ = std::move(cb); }
 
     ReplayClockPtr clock() const { return clock_; }
 
-    /// Rewind to the start of the schedule (for re-running a replay). Sources
-    /// hold their own cursors and must be reset alongside this.
+    /// Rewind to the start of the schedule. ReplayInput and ReplayQueue keep
+    /// their own cursors and have no reset, so a re-run needs new ones.
     void reset();
 
     std::size_t scheduleSize() const { return schedule_.size(); }
@@ -156,10 +155,9 @@ using ReplayCoordinatorPtr = std::shared_ptr<ReplayCoordinator>;
 // ─────────────────────────────────────────────────────────────────────────────
 // ReplaySample<T> — one recorded (seq, value) pair for a replay source.
 //
-// The replay nodes are domain-agnostic, so they carry their own minimal sample
-// type rather than depending on an application's event type. The application's
-// replay reader maps each recorded stream onto a vector of these. Precondition:
-// ascending, distinct seqs.
+// The replay nodes carry their own minimal sample type, so they depend on no
+// application's event type. A source takes a vector of these. Precondition:
+// ascending, distinct seqs, each at least 1.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 struct ReplaySample {
@@ -171,10 +169,10 @@ struct ReplaySample {
 // ReplayInput<T> — replay counterpart of AsyncInput<T>.
 //
 // Delivers its next recorded value on the cycle whose currentSeq() matches, then
-// applies the identical equality-policy + dirty-propagation logic as
-// AsyncInput::flush(). Construction state mirrors AsyncInput exactly (value T{},
-// dirty), so — since every node starts dirty — the first replay cycle reproduces
-// the first recorded cycle with no initial-value special-casing. setWakeHook()
+// applies the same equality-policy and dirty-propagation logic as
+// AsyncInput::flush(). Construction state mirrors AsyncInput (value T{}, dirty),
+// so — since every node starts dirty — the first replay cycle reproduces the
+// first recorded cycle with no initial-value special-casing. setWakeHook()
 // stores but never fires the hook; the coordinator is what wakes the engine.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
@@ -223,10 +221,10 @@ using ReplayInputPtr = std::shared_ptr<ReplayInput<T>>;
 // ReplayQueue<T> — replay counterpart of AsyncQueue<T>.
 //
 // Applies its whole recorded batch on the matching-seq cycle and mirrors
-// AsyncQueue::flush() exactly: always refresh value_ (to [] on a non-matching
-// cycle, so downstream never reads a stale batch), but dirty + invalidate only
-// for a non-empty batch. Recorded batches are always non-empty (a recorder has
-// no reason to write an empty cycle), so a matching cycle always dirties.
+// AsyncQueue::flush(): always refresh value_ (to [] on a non-matching cycle, so
+// downstream never reads a stale batch), but dirty + invalidate only for a
+// non-empty batch. Recorded batches are expected non-empty; an empty one dirties
+// nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class ReplayQueue

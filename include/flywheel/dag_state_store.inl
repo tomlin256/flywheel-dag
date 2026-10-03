@@ -289,7 +289,7 @@ inline void JsonFileStateStore::save(
 
     // ── Atomic write (temp → rename) ───────────────────────────────────────────
     // A bare filename has no parent to create, and create_directories("")
-    // throws (flywheel-dag#9).
+    // throws.
     if (file_.has_parent_path())
         std::filesystem::create_directories(file_.parent_path());
     auto tmp = file_;

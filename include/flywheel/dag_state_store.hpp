@@ -10,7 +10,8 @@
 #pragma once
 // dag_state_store.hpp — Snapshot/restore interfaces for stateful DAG nodes
 //
-// Provides four abstractions that together implement cold-start elimination:
+// Three interfaces and two stores that let a restart resume from saved state
+// instead of starting cold:
 //
 //   INodeState         — per-node key/value state bag with typed access.
 //                        Nodes never see JSON; they only see this interface.
@@ -21,9 +22,7 @@
 //   InMemoryStateStore — in-process store for tests; no filesystem, no JSON.
 //   JsonFileStateStore — production store; atomic JSON file write/read.
 //
-// Include order: dag_state_store.hpp is included by dag_timeseries.hpp, which
-// is already downstream of dag.hpp. Do NOT include dag_timeseries.hpp from
-// this header.
+// dag_timeseries.hpp includes this header, so this header must not include it.
 
 #include "dag.hpp"
 
@@ -151,7 +150,7 @@ public:
     void save(const std::vector<std::shared_ptr<IStatefulNode>>& nodes) override;
     bool restore(const std::vector<std::shared_ptr<IStatefulNode>>& nodes) override;
 
-    /// True if save() has been called at least once.
+    /// True if save() has been called since construction or the last reset().
     bool hasSavedState() const;
 
     /// Reset to empty — allows a test to call restore() before any save().
@@ -200,8 +199,8 @@ private:
 // =============================================================================
 // JsonFileStateStore
 //
-// Production store backed by a JSON file. Uses nlohmann::json internally;
-// JSON types never appear outside this class.
+// Production store backed by a JSON file. Uses nlohmann::json internally; no
+// JSON type appears in a public signature.
 //
 // save()    — atomic write: creates parent dirs, writes to <file>.tmp, then
 //             renames into place.

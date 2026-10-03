@@ -10,10 +10,9 @@
 #pragma once
 // dag_graph.hpp — DOT/SVG export for the reactive DAG
 //
-// GraphExporter traverses the DAG backward from a set of root (output) nodes,
-// produces a Graphviz DOT description, and optionally shells out to `dot -Tsvg`
-// to render it. If Graphviz is not on PATH the .dot file is kept and the
-// caller is advised to run the conversion manually.
+// GraphExporter traverses the DAG backward from a set of root (output) nodes
+// and produces a Graphviz DOT description. toSvg() also shells out to
+// `dot -Tsvg` to render it; if that fails, the .dot file is kept.
 //
 // Never include this file directly from nodes — it is an opt-in utility.
 
@@ -40,8 +39,9 @@ public:
                              const std::string& graphName = "flywheel");
 
     /// Write DOT to a .dot file, call `dot -Tsvg`, write SVG to outPath.
-    /// Returns true on success. On failure (graphviz absent or non-zero exit)
-    /// the .dot file is kept alongside outPath and false is returned.
+    /// Returns true on success, and removes the .dot file. On failure (graphviz
+    /// absent or non-zero exit) the .dot file is kept alongside outPath and false
+    /// is returned.
     static bool toSvg(const std::vector<ConstNodePtr>& roots,
                       const std::string& outPath,
                       const std::string& graphName = "flywheel");
@@ -84,7 +84,7 @@ private:
 
     // ── Quote helper ─────────────────────────────────────────────────────────
 
-    /// Wrap a node name in DOT double-quotes, sanitizing and escaping as needed.
+    /// Wrap `s` in DOT double quotes, escaping '"' and replacing '/' with '_'.
     static std::string quoted(const std::string& s) {
         std::string out = "\"";
         for (char c : s) {

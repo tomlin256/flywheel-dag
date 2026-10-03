@@ -10,14 +10,12 @@
 #pragma once
 // dag_traversal.hpp — BFS range + iterator API over the DAG.
 //
-// Defines a lazy, dedup-by-pointer BFS over INode upstream edges, exposed as
-// an iterable range whose iterator models std::input_iterator_tag. The
-// neighbors function is a customisation point: pass any NeighborsFn to drive
-// upstream walks, downstream walks, or filtered subgraphs.
+// A lazy, dedup-by-pointer BFS over INode edges, exposed as an iterable range
+// (see BfsRange). The neighbors function is a customisation point: pass any
+// NeighborsFn for a walk other than upstream, or for a filtered subgraph.
 //
-// The convenience free function bfs_upstream(roots) seeds a BfsRange with
-// INode::inputs() as the neighbors function — the only constructor production
-// code currently needs.
+// bfs_upstream(roots) seeds a BfsRange with INode::inputs() as the neighbors
+// function — the only walk production code uses.
 //
 // Usage:
 //
@@ -43,9 +41,9 @@ namespace dag::traversal {
 // ─────────────────────────────────────────────────────────────────────────────
 // NeighborsFn — customisation point.
 //
-// Given a node, return the nodes that should be visited next. The default
-// upstream walk uses INode::inputs(); downstream walks or filtered subgraphs
-// supply their own function.
+// Given a node, return the nodes to visit next. bfs_upstream() uses
+// INode::inputs(); any other walk, or a filtered subgraph, supplies its own
+// function.
 // ─────────────────────────────────────────────────────────────────────────────
 using NeighborsFn = std::function<std::vector<NodePtr>(const INode&)>;
 
