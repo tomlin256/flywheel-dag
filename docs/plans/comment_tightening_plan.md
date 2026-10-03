@@ -1,6 +1,6 @@
 # Tighten the Source Comments
 
-**Status: In progress.** Approved 2026-10-03, with the defaults under "Decisions to confirm".
+**Status: Done 2026-10-03.** Approved 2026-10-03, with the defaults under "Decisions to confirm".
 Comments only: no code, test or build change, so no release.
 
 The engine's contract is written in its source comments (`README.md` and `CLAUDE.md` both say so).
@@ -96,7 +96,8 @@ and say so in the report.
 
 No unit test is written, and a test changes only in its comments and assertion messages: nothing
 here has behaviour. Checks 1 to 3 stand in for new tests.
-Each step is one checkpoint commit to `main`, subject `docs(#26): …`.
+Each step is one checkpoint commit to `main`. Its subject is `docs: …` with this issue's number as
+the scope, as `CLAUDE.md` asks (`type(#N): …`).
 
 ## Steps
 
@@ -116,10 +117,10 @@ comment-only edit. Touch a header and rebuild every translation unit with
 ### Step 1 — `dag.hpp`, `dag.inl` (682)
 
 The core contract: invalidation, equality policies, node classes. Drop the old-protocol narrative in
-the `Dirtiness` block, and flywheel-dag#1, #5, #8 and #18. Name in full the test that `dag.hpp`
-elides as `...DoesSuppress...`.
+the `Dirtiness` block, and flywheel-dag#1, flywheel-dag#5, flywheel-dag#8 and flywheel-dag#18. Name
+in full the test that `dag.hpp` elides as `...DoesSuppress...`.
 
-Commit: `docs(#26): tighten the dag.hpp and dag.inl comments`.
+Commit: `docs: tighten the dag.hpp and dag.inl comments`.
 
 ### Step 2 — `dag_async.*`, `dag_engine.*` (405)
 
@@ -129,28 +130,28 @@ states the limitation.
 
 **Done when,** as well: the issues are opened, and I list them in my report.
 
-Commit: `docs(#26): tighten the async and engine comments`.
+Commit: `docs: tighten the async and engine comments`.
 
 ### Step 3 — Persistence, replay and the small headers (622)
 
 `dag_state_store.*`, `dag_replay.*`, `dag_compute_module.hpp`, `dag_graph.hpp`,
 `dag_traversal.*`, `dag_window_status.hpp`, `dag_ring_buffer.*`, `dag_memoize.*`.
 
-Commit: `docs(#26): tighten the persistence, replay and utility comments`.
+Commit: `docs: tighten the persistence, replay and utility comments`.
 
 ### Step 4 — Ops and time series (619)
 
 `dag_ops.*`, `dag_timeseries.*`. The `RateLimiterNode` block says what the node does, not what it
 used to do. `tick_` becomes what the code has.
 
-Commit: `docs(#26): tighten the ops and time-series comments`.
+Commit: `docs: tighten the ops and time-series comments`.
 
 ### Step 5 — AAD (439)
 
 `dag_aad.*`. The block at the top of `dag_aad.hpp` is the one `CLAUDE.md` points at: it keeps its
 content.
 
-Commit: `docs(#26): tighten the AAD comments`.
+Commit: `docs: tighten the AAD comments`.
 
 ### Step 6 — Core tests (676)
 
@@ -158,7 +159,7 @@ Commit: `docs(#26): tighten the AAD comments`.
 `test_nodes.hpp`. Fixes flywheel-dag#25. A test comment says what the test pins, in the present
 tense: "Registered before the first `step()`, …", not "regression test for …".
 
-Commit: `docs(#26): tighten the core test comments`.
+Commit: `docs: tighten the core test comments`.
 
 ### Step 7 — Engine, state and utility tests (857)
 
@@ -168,32 +169,33 @@ Commit: `docs(#26): tighten the core test comments`.
 `test_window_status*.cpp`, `test_dag_memoize.cpp`. `dirty_` and the five test names at the head of
 `test_engine_state.cpp` are fixed here.
 
-Commit: `docs(#26): tighten the engine and state test comments`.
+Commit: `docs: tighten the engine and state test comments`.
 
 ### Step 8 — Ops, time-series and AAD tests (805)
 
 `test_dag_ops.cpp`, `test_timeseries.cpp`, `test_stateful_node_base.cpp`, `test_aad_*.cpp`,
 `aad_test_graphs.hpp`. `rate_` is fixed here.
 
-Commit: `docs(#26): tighten the ops, time-series and AAD test comments`.
+Commit: `docs: tighten the ops, time-series and AAD test comments`.
 
 ### Step 9 — Examples, benchmarks, consumer test and CMake (466)
 
 `examples/`, `benchmarks/`, `tests/consumer/main.cpp`, and the CMake files. The rationale for not
 installing spdlog and nlohmann/json stays in `CMakeLists.txt`, where `CLAUDE.md` points. A comment
-in the CMake files that cites `flywheel-dag#2` or `#4` keeps what it says and loses the number.
+in the CMake files that cites `flywheel-dag#2` or `flywheel-dag#4` keeps what it says and loses the
+number.
 
-Commit: `docs(#26): tighten the example, benchmark and CMake comments`.
+Commit: `docs: tighten the example, benchmark and CMake comments`.
 
 ### Step 10 — Close out
 
 Run checks 1 to 4 over the whole tree. Report the comment lines and characters before and after.
 Run the `pre-push` hook's audit over the tree and the new commits. Mark this plan done, and close
-flywheel-dag#25 and #26 with a summary comment. Nothing is pushed unless asked.
+flywheel-dag#25 and flywheel-dag#26 with a summary comment. Nothing is pushed unless asked.
 
 **Done when:** the whole-tree checks are clean, the audit passes, and both issues are closed.
 
-Commit: `docs(#26): mark the plan done`.
+Commit: `docs: mark the plan done`.
 
 ## Decisions to confirm
 
@@ -201,7 +203,8 @@ Each has a default. Approving the plan as written takes the default.
 
 1. **Scope.** The tests, examples, benchmarks and CMake comments are in, not only `include/`.
 2. **Closed issues.** Every reference to a closed issue is cut, closed enhancements included
-   (flywheel-dag#2, #4, #8, #10, #12, #14, #17). `CLAUDE.md` still cites some of them.
+   (flywheel-dag#2, flywheel-dag#4, flywheel-dag#8, flywheel-dag#10, flywheel-dag#12,
+   flywheel-dag#14, flywheel-dag#17). `CLAUDE.md` still cites some of them.
 3. **TODOs.** The two `TODO` blocks become `enhancement` issues.
 4. **Section rules.** The 678 `// ───` rule lines stay: they are how the long headers are scanned.
 5. **Release and push.** Neither. The comments ship with the next release.
@@ -238,14 +241,41 @@ Each has a default. Approving the plan as written takes the default.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Baseline and tools | Not started | ctest 36 of 36 on 2026-10-03 |
-| 1 — `dag.hpp`, `dag.inl` | Not started | |
-| 2 — Async and engine | Not started | |
-| 3 — Persistence, replay, small headers | Not started | |
-| 4 — Ops and time series | Not started | |
-| 5 — AAD | Not started | |
-| 6 — Core tests | Not started | |
-| 7 — Engine, state and utility tests | Not started | |
-| 8 — Ops, time-series and AAD tests | Not started | |
-| 9 — Examples, benchmarks, consumer, CMake | Not started | |
-| 10 — Close out | Not started | |
+| 0 — Baseline and tools | Done | ctest 36 of 36 on 2026-10-03. The compare script passes its own check. |
+| 1 — `dag.hpp`, `dag.inl` | Done | |
+| 2 — Async and engine | Done | The two `TODO` blocks became flywheel-dag#28 and flywheel-dag#29. Found flywheel-dag#27 (`bug`). |
+| 3 — Persistence, replay, small headers | Done | |
+| 4 — Ops and time series | Done | |
+| 5 — AAD | Done | |
+| 6 — Core tests | Done | Six assertion messages changed. Fixes flywheel-dag#25. Found flywheel-dag#30 (`bug`) and flywheel-dag#31 (`documentation`). |
+| 7 — Engine, state and utility tests | Done | One assertion message changed. Found flywheel-dag#32 (`enhancement`). The traversal tests' name-only banners went in a commit of their own. |
+| 8 — Ops, time-series and AAD tests | Done | One assertion message changed. Found flywheel-dag#33 (`bug`). |
+| 9 — Examples, benchmarks, consumer, CMake | Done | `bench_hot_path` builds without a warning, and its `--invariants` output matches the committed file. |
+| 10 — Close out | Done | Whole-tree checks 1 to 4 are clean, and the `pre-push` audit passes. Nothing is pushed. |
+
+## Outcome
+
+- **Volume.** Comment lines in the C++ and CMake files went from 5,571 to 5,245 (326 fewer, 5.9%)
+  and their characters from 316,878 to 295,377 (21,501 fewer, 6.8%). In `include/flywheel/` the
+  lines went from 2,767 to 2,614.
+- **History.** No reference to a closed issue is left. Seven references to open issues remain, each
+  where its comment states the limitation: flywheel-dag#21, flywheel-dag#24, flywheel-dag#27,
+  flywheel-dag#31 (twice), flywheel-dag#32 and flywheel-dag#33. Six lines still match a history
+  phrase, and each says something true of the code today ("previously saved snapshot", "no longer
+  applies" after `clearTweak()`).
+- **Errors in comments.** Fixed, among others: `dirty_`, `tick_` and `rate_`, none of which is a
+  member; five test names that were not the tests' names; a mean given as 4.5 that is 5; "increments
+  the EWMA by exactly alpha" over a formula that is not that; "RingBuffer replaces `std::deque`
+  behind every windowed node" while `WindowNode` still holds one; and a claim that `Input<T>::set()`
+  is documented as callable off the eval thread, which the engine's own doc does not say.
+- **Issues opened** from what the reading found: flywheel-dag#27 (`bug`), flywheel-dag#28 and
+  flywheel-dag#29 (`enhancement`, from the two `TODO` blocks), flywheel-dag#30 (`bug`),
+  flywheel-dag#31 (`documentation`, `question`), flywheel-dag#32 (`enhancement`) and
+  flywheel-dag#33 (`bug`).
+- **Assertion messages.** Eight changed, each listed by the compare script and each read.
+- **Left as written, unverified.** "The allocation counter must be defined before the flywheel
+  headers" (`test_value_slot.cpp`, `test_aad_node.cpp`): the language does not require it, and it
+  may be a toolchain convention. "The first four cycles allocate every value buffer"
+  (`bench_hot_path.cpp`): a probe on Apple Clang found allocations in the first three cycles only,
+  so four is an upper bound. No file was built with GCC here: CI's GCC leg sees the commits when
+  they are pushed.
