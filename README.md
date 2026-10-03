@@ -278,9 +278,12 @@ CI prints the timings and fails if `--invariants` differs from
 
 ## Documentation
 
-[`CLAUDE.md`](CLAUDE.md) is the engine's full contract: the invalidation protocol, what an equality
-policy can and cannot gate, the rules for flushing and allocation, and state persistence. It is
-written for contributors and coding agents alike.
+The engine's contract is written beside the code, in the comment blocks of its headers: the
+invalidation protocol and what an equality policy can and cannot gate in `dag.hpp`, the rules for
+flushing and allocation in `dag_async.hpp`, the cycle in `dag_engine.hpp`, and state persistence in
+`dag_state_store.hpp`. [`docs/plans/`](docs/plans) has the reasoning behind each fix.
+[`CLAUDE.md`](CLAUDE.md) is the short list of rules a contributor or coding agent needs before
+touching any of it.
 
 ## License
 
