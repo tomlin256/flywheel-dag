@@ -1,6 +1,8 @@
 # A New Output Gets the Value Its Node Holds
 
-**Status: Approved (2026-10-03).**
+**Status: Done (2026-10-03).** Approved 2026-10-03. Both steps landed, and v0.1.14 is released.
+A new output starts due, so its callback fires on the first cycle after it is registered, with the
+value its node holds then. Registering an output between cycles is supported.
 
 Closes [flywheel-dag#23](https://github.com/tomlin256/flywheel-dag/issues/23).
 
@@ -209,5 +211,5 @@ Commits: `docs: say when an output may be registered and what it first gets`,
 
 | Step | Status | Notes |
 |---|---|---|
-| 1 — Tests, then the fix | Done | ctest 36 / 36, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the five `EngineNewOutput` tests. On v0.1.13 all five failed: `b`'s callback at `{}` after another output pulled `b` clean, after a caller evaluated it, and between two `run()`s, `y` at 0, and the module's callback at `{}`. The first also saw `{20}` once `x` moved, where the fix gives `{10, 20}` |
-| 2 — Docs and release | Not started | |
+| 1 — Tests, then the fix | Done | ctest 36 / 36, and `--invariants` is unchanged. The build prints no warnings with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. `test_dag_async` gains the five `EngineNewOutput` tests. On v0.1.13 all five failed: `b`'s callback at `{}` after another output pulled `b` clean, after a caller evaluated it, and between two `run()`s, `y` at 0, and the module's callback at `{}`. The first also saw `{20}` once `x` moved, where the fix gives `{10, 20}`. CI run 37114001467 is green on both legs, at 36 / 36 with no compiler warnings |
+| 2 — Docs and release | Done | `dag_engine.hpp`'s `addOutput()` doc says what a new output first gets and when an output may be registered, `install()`'s says between cycles, and the overview says a new output starts due. The `discoverStatefulNodes()` TODO no longer calls them pre-run. The tape rule, in `dag_aad.hpp` and `CLAUDE.md`, narrows to an output a cycle has reached, and `CLAUDE.md`'s "A cycle that throws" entry ends with the new rule. ctest 36 / 36. The docs and release commits were pushed together, and CI run 37114246910 on the release commit is green on both legs, at 36 / 36 with no compiler warnings. The installed version file reports 0.1.14. `v0.1.14` is tagged and released, and flywheel-dag#23 is closed |
