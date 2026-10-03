@@ -1,8 +1,9 @@
 # Pin Every Window-Status Companion Eager
 
-**Status: Approved (2026-10-03).** Step 1 has not started. Tests only: the engine, the companions
-and their modes do not change. One comment in `dag_timeseries.inl` is reworded, because it names a
-test this plan replaces.
+**Status: Done (2026-10-03).** Approved 2026-10-03. Both steps landed. Every
+`windowStatusNode()` companion has its mode pinned, and all but `WindowNode`'s have their behaviour
+pinned too. Tests only: the engine, the companions and their modes did not change. One comment in
+`dag_timeseries.inl` was reworded, because it named a test this plan replaced.
 
 Closes [flywheel-dag#33](https://github.com/tomlin256/flywheel-dag/issues/33).
 
@@ -170,6 +171,26 @@ Commit: `test: pin every windowStatusNode() companion Eager`.
 **Done when:** CI is green on the pushed commit on both legs and flywheel-dag#33 is closed.
 
 Commit: `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit. CI is green on both legs, `ubuntu-latest` with GCC and `macos-latest`
+with Apple Clang, with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the GCC-only warnings named in the
+self-review did not appear. Locally the build printed no warnings and ctest was 36 of 36.
+
+The survey ran on scratch copies of `include/`, with the repo's own two suites as committed. It
+gave the Prototype table:
+
+| Companion flipped to `Lazy` | `test_timeseries` | `test_window_status_integration` |
+|---|---|---|
+| none | 50 pass | 10 pass |
+| `RollingStats` | `WindowStatusCompanion.RollingStats` fails: mode check and behavioural run | 10 pass |
+| `RollingSumNode` | `WindowStatusCompanion.RollingSumNode` fails: mode check and behavioural run | 10 pass |
+| `RollingMinMaxNode` | `WindowStatusCompanion.RollingMinMaxNode` fails: mode check and behavioural run | 10 pass |
+| `WindowNode<T>` | `WindowStatusCompanion.WindowNode` fails: mode check | 10 pass |
+| `DelayNode<T>` | `WindowStatusCompanion.DelayNode` fails: mode check and behavioural run | `DelayNodeStatusNodeFiresOncePerTick` fails, as before |
+
+The four controls passed in every copy.
 
 ## Not in this plan
 
