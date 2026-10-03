@@ -31,9 +31,9 @@ class IValue {
 public:
     virtual ~IValue() = default;
 
-    /// The stored type. Non-virtual by design: the type is fixed at
-    /// construction, so this is a plain load rather than a vtable dispatch on a
-    /// path taken once per input per node per cycle.
+    /// The stored type. Non-virtual: it is fixed at construction, so reading it
+    /// is a plain load, not a vtable dispatch, on a path taken once per input per
+    /// node per cycle.
     std::type_index type() const noexcept { return type_; }
 
 protected:
@@ -47,21 +47,21 @@ template<typename T>
 class ValueSlot;
 
 // final: TypedValue<T> is the only IValue implementation and nothing derives
-// from it. Saying so lets get_value() replace a dynamic_cast with an exact
-// type_index compare — the two are equivalent only while this holds.
+// from it, so get_value() can use an exact type_index compare in place of a
+// dynamic_cast. The two are equivalent only while this holds.
 template<typename T>
 class TypedValue final : public IValue {
 public:
     explicit TypedValue(T v);
     const T& get() const;
 private:
-    // Only ValueSlot may rewrite a value in place, and only after proving it is
-    // the sole owner of the buffer. A TypedValue is immutable to everyone else.
+    // Only ValueSlot may rewrite a value in place, and only once it is the sole
+    // owner of the buffer. A TypedValue is immutable to everyone else.
     friend class ValueSlot<T>;
-    // Copy-assign from an lvalue rather than move-assign through a by-value
-    // parameter: for a T with heap members, assigning into value_ reuses the
-    // storage it already owns, where a move would free exactly the buffer this
-    // class exists to recycle. See ValueSlot's "Copy or move" note below.
+    // Two overloads, not one by-value parameter, which would end in a
+    // move-assign: that frees the storage value_ owns, the very buffer this
+    // class exists to recycle, where copy-assigning from a const T& reuses it.
+    // See ValueSlot's "Copy or move" note.
     void set(const T& v) { value_ = v; }
     void set(T&& v)      { value_ = std::move(v); }
 
@@ -73,16 +73,14 @@ using ValuePtr = std::shared_ptr<const IValue>;
 template<typename T>
 ValuePtr make_value(T v);
 
+/// The value as a T. Throws std::runtime_error for a null ValuePtr and
+/// std::bad_cast for a value of any other type.
 template<typename T>
 const T& get_value(const ValuePtr& v);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ValueSlot<T> — recycles two TypedValue<T> buffers so a node's steady-state
 // eval allocates nothing.
-//
-// Before this, every recomputing node called make_value() on every cycle: a
-// heap allocation to carry, typically, one double. Measured at 16 allocations
-// per cycle on a 14-node graph, growing linearly with the graph.
 //
 // How it stays safe
 // ─────────────────
@@ -95,40 +93,39 @@ const T& get_value(const ValuePtr& v);
 //      buffer out of the running.
 //
 //   2. The returned pointer is never the one cached_ already holds. cached_
-//      itself is a reference, so its buffer always reads use_count() >= 2. The
-//      equality check (cached_ vs new) and the engine's pointer-identity change
-//      detection both depend on those being distinct objects.
+//      holds a reference to the buffer it points at, so that buffer always
+//      reads use_count() >= 2. The equality check (cached_ vs new) and the
+//      engine's pointer-identity change detection both depend on those being
+//      distinct objects.
 //
 // Two buffers is exactly enough: cached_ pins at most one, leaving the other
-// free. When neither is free — a downstream consumer is holding both — it
-// falls back to allocating, which is always correct, just not free.
+// free. When neither is free, the slot allocates a fresh buffer: always
+// correct, just not free.
 //
 // Copy or move
 // ────────────
-// Recycling the TypedValue is only half the job for a T that owns heap of its
-// own. A move-assign into the buffer frees the very vectors being recycled and
-// steals fresh ones, so a heap-holding T allocated on every emit no matter how
-// warm the slot was (two allocations per update for a value holding two vectors).
+// Recycling the TypedValue is only half the job for a T that owns heap. A
+// move-assign into the buffer frees the very storage being recycled and takes
+// the source's, so such a T allocates on every emit however warm the slot is.
 //
-// So there are two overloads, and which one a caller gets is the right answer
-// for what that caller has:
+// So there are two overloads, and a caller gets the one that fits what it has:
 //
-//   emit(const T&) — the caller keeps its value (AsyncInput::flush stages into
-//     a member it reuses next cycle). Copy-assigning reuses the buffer's
+//   emit(const T&) — the caller keeps its value (AsyncInput::flush's staged_,
+//     InPlaceComputeNode's scratch_). Copy-assigning reuses the buffer's
 //     capacity, and the source keeps its own: nothing allocates.
 //
-//   emit(T&&) — the caller built the value for this emit alone (every compute,
-//     op and time-series node). Its storage is already paid for, so there is
-//     nothing to recycle and a copy would be pure added work.
+//   emit(T&&) — the caller built the value for this emit alone (a ComputeNode's
+//     result). Its storage is already paid for, so there is nothing to recycle
+//     and a copy would be added work.
 //
 // Eval-thread only
 // ────────────────
 // use_count() is a sound sole-ownership test only when every copy of the
-// pointer is made on one thread. This is fine for compute/time-series/op nodes
-// and for AsyncInput::flush(), all of which the engine drives on the eval
-// thread. It is NOT fine for Input<T>::set(), which Engine::makeInput documents
-// as callable from application code — so Input<T>::set() deliberately keeps
-// allocating. Do not add a slot to anything reachable off the eval thread.
+// pointer is made on one thread. That holds for compute, time-series and op
+// nodes and for AsyncInput::flush(), which the engine drives on the eval
+// thread. It does not hold for Input<T>::set(), which Engine::makeInput
+// documents as callable from application code, so Input<T>::set() allocates.
+// Do not add a slot to anything reachable off the eval thread.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class ValueSlot {
@@ -137,7 +134,7 @@ public:
     /// a T with heap members keeps that buffer's capacity.
     ValuePtr emit(const T& v) { return emitImpl(v); }
 
-    /// Emit a value the caller is done with. Move-assigns, as before.
+    /// Emit a value the caller is done with. Move-assigns.
     ValuePtr emit(T&& v) { return emitImpl(std::move(v)); }
 
 private:
@@ -149,9 +146,9 @@ private:
                 return slot;
             }
         }
-        // Both buffers are still referenced elsewhere. Replacing our handle on
-        // one is safe — the other owners keep it alive through their own
-        // shared_ptr — and gives this slot something to recycle next time.
+        // Neither buffer is free. Replacing our handle on one is safe, since its
+        // other owners keep it alive, and gives the slot a buffer to recycle
+        // next time.
         buf_[next_] = std::make_shared<TypedValue<T>>(std::forward<U>(v));
         ValuePtr fresh = buf_[next_];
         next_ ^= 1u;
@@ -181,11 +178,11 @@ private:
 //     whenever anything upstream fired. Free for a double, real work for a
 //     container; such a node should take AlwaysChangedPolicy.
 //
-// The last two are the same node with different consumers, which is why this is
-// a per-node judgement and not a rule. Held by
-// DAGTests.EqualityPolicyOnIntermediateNodeDoesNotSuppressDownstreamEval and its
-// ...DoesSuppress... sibling, which assert opposite outcomes on the same graph
-// and are both correct.
+// The last two are the same node with different consumers, so this is a
+// per-node judgement, not a rule. Held by
+// DAGTests.EqualityPolicyOnIntermediateNodeDoesNotSuppressDownstreamEval and
+// DAGTests.EqualityPolicyOnALazyIntermediateNodeDoesSuppressDownstreamEval,
+// which run the same graph, Eager and Lazy, and assert opposite outcomes.
 //
 // WHAT IT COMPARES. The new value against the last one the node PUBLISHED, which
 // is cached_, not against the last one it computed. Only an "unequal" verdict
@@ -197,9 +194,8 @@ private:
 class IEqualityPolicy {
 public:
     virtual ~IEqualityPolicy() = default;
-    /// Return true if old == new (no change). Returning false rebinds the node's
-    /// cached_ and re-notifies downstream — which is NOT the same as being what
-    /// dirties them; see the note above for what that buys and where.
+    /// True when the values are equal (no change). False publishes the new value
+    /// and calls notifyDownstream(); the note above says what that gates.
     virtual bool equal(const ValuePtr& oldVal, const ValuePtr& newVal) const = 0;
 };
 
@@ -249,15 +245,7 @@ public:
 enum class NodeKind { Input, AsyncInput, AsyncQueue, Compute, TimeSeries };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dirtiness — three states, where there used to be two.
-//
-// The old protocol had one bit: dirty or not. invalidate() was transitive, so a
-// source that moved marked its ENTIRE reachable subgraph dirty in one walk, at
-// flush time, before any value existed to compare. An equality policy on an
-// intermediate node therefore could not gate anything below it — everything
-// below it was already committed to re-evaluating.
-//
-// The third state splits "dirty" into the two things it was conflating:
+// Dirtiness — what a node knows about its own freshness.
 //
 //   Dirty  an INPUT OF MINE definitely changed its value. Set by the one hop
 //          from a node whose eval() saw its own value change.
@@ -266,30 +254,30 @@ enum class NodeKind { Input, AsyncInput, AsyncQueue, Compute, TimeSeries };
 //          resolved when it is pulled (NodeBase's resolve step).
 //   Clean  up to date.
 //
-// dirty() is `state_ != Clean`, so everything that reads it — the engine's
-// pre-eval snapshot above all — keeps working unchanged.
+// The cascade marks only Maybe, so nothing past the one hop is committed to
+// re-evaluating before a value exists to compare. That is what lets an equality
+// policy on an intermediate node gate the work below it.
 // ─────────────────────────────────────────────────────────────────────────────
 enum class Dirtiness : std::uint8_t { Clean, Maybe, Dirty };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InvalidationMode — per-node, set at construction, never changed.
 //
-// Eager  recompute whenever anything upstream fired. The original behaviour, and
-//        the DEFAULT everywhere. It is also the correct and PERMANENT answer for
-//        any node whose output is not a pure function of its declared inputs'
-//        VALUES — every dag::ts stateful node is one (an EWMA fed a value equal
-//        to the last one still has to tick, because its output depends on how
-//        many times it was evaluated), as is any functor that reads state it did
-//        not declare as an input.
+// Eager  recompute whenever anything upstream fired. The default wherever a
+//        factory takes a mode. It is also the PERMANENT answer for any node whose
+//        output is not a pure function of its declared inputs' VALUES — every
+//        dag::ts stateful node is one (an EWMA fed a value equal to the last one
+//        still has to tick, because its output depends on how many times it was
+//        evaluated), as is any functor that reads state it did not declare as an
+//        input.
 //
 // Lazy   recompute only when an input's value actually changed. Requires the
 //        functor to be a pure function of its declared inputs.
 //
-// Not a legacy escape hatch: which of the two a node wants is a property of its
-// functor, and only the functor's author knows it. That is why the mode is a
-// constructor parameter set in the factory that WRITES the functor, and why
-// there is no setter: a post-construction modifier would let a graph site vouch
-// for the purity of a functor it cannot see.
+// Which of the two a node wants is a property of its functor, and only the
+// functor's author knows it. So the mode is set in the factory that WRITES the
+// functor, with no setter: a setter would let a graph site vouch for the purity
+// of a functor it cannot see.
 // ─────────────────────────────────────────────────────────────────────────────
 enum class InvalidationMode : std::uint8_t { Eager, Lazy };
 
@@ -302,8 +290,8 @@ public:
     virtual ValuePtr eval(EvalContext& ctx) = 0;
     virtual std::string name() const = 0;
     virtual std::vector<NodePtr> inputs() const = 0;
-    /// "An input of yours definitely changed." One hop; the transitive part of
-    /// it is the maybe-cascade below.
+    /// "An input of yours definitely changed." One hop; the transitive part is
+    /// invalidateMaybe().
     virtual void invalidate() = 0;
     /// "An ancestor of yours may have changed." The transitive cascade.
     virtual void invalidateMaybe() = 0;
@@ -315,47 +303,39 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 // NodeBase — the one copy of the dirty/downstream protocol.
 //
-// Every node in the engine kept its own identical `downstream_` vector, dirty
-// flag, dirty(), invalidate(), addDownstream() and notifyDownstream() — twelve
-// copies of the same eight lines, across dag.hpp, dag_async.hpp, dag_ops.hpp,
-// dag_timeseries.hpp, dag_memoize.hpp, dag_replay.hpp and two nodes defined
-// outside the engine. They now live here once.
-//
-// `downstream_` is PRIVATE on purpose. Several of those copies walked the
-// vector inline rather than calling their own notifyDownstream() — which is how
-// twelve copies of one idea drifted into four spellings of it. Everything that
-// wants to reach downstream goes through notifyDownstream().
+// `downstream_` is private: a derived class reaches it through
+// notifyDownstream().
 //
 // A node is clean only when every input it read still is. The cascade's guard
 // relies on it, and a node that pulls keeps it by bracketing each evaluation
 // with beginEval() and endEval() — see "Clean only over clean inputs" below.
 //
-// What a derived class may still override, and the only reasons known today:
+// A derived class overrides propagate() or dirty() only for these three reasons:
 //
-//   • TweakableComputeNode::propagate() — absorbs while frozen; the tweaked
-//     value does not depend on inputs.
-//   • ConditionNode's branch listeners' propagate() — passes an invalidation
-//     from a branch on to the node only while the node takes that branch.
+//   • TweakableComputeNode::propagate() ignores every invalidation while
+//     frozen: a tweaked value does not depend on its inputs.
+//   • ConditionNode's branch listeners' propagate() passes an invalidation on to
+//     the node, as the same kind, only while the node takes that branch, and
+//     drops it otherwise: the node's value does not depend on the other branch.
 //   • A clock-driven node (its output is a function of time, not only of its
-//     inputs) — dirty() is always true, so the state_ guards below would swallow
+//     inputs) has dirty() always true, so the state_ guards below would swallow
 //     every invalidation; it forwards unconditionally instead.
 //
-// Anything else overriding these is a smell: it is re-implementing the protocol
-// rather than using it.
+// Anything else overriding these is re-implementing the protocol rather than
+// using it.
 // ─────────────────────────────────────────────────────────────────────────────
 class NodeBase : public INode {
 public:
-    /// True when this node may need re-evaluating — Maybe or Dirty. Cleared by
+    /// True when this node may need re-evaluating: Maybe or Dirty. Cleared by
     /// eval(), unless an input it read went dirty again during it (endEval()).
-    /// The engine's pre-eval dirty snapshot reads this and is unaffected by the
-    /// split.
+    /// The engine's pre-eval dirty snapshot reads it.
     bool dirty() const override { return state_ != Dirtiness::Clean; }
 
     /// Which of the two invalidation behaviours this node was built with.
     InvalidationMode invalidationMode() const noexcept { return mode_; }
 
-    // invalidate() and invalidateMaybe() are FINAL. A node that needs different
-    // behaviour overrides propagate() — see the note below for why.
+    // invalidate() and invalidateMaybe() are final: a node that needs different
+    // behaviour overrides propagate().
     void invalidate()      final { propagate(Dirtiness::Dirty); }
     void invalidateMaybe() final { propagate(Dirtiness::Maybe); }
 
@@ -371,44 +351,32 @@ protected:
     //
     // THE ONE OVERRIDE POINT, and the reason it is one rather than two: a node
     // that overrode invalidate() alone would keep its behaviour on the direct
-    // hop and silently lose it on the transitive cascade, which is the path that
-    // carries almost every invalidation in a real graph. That failure compiles,
-    // breaks no test, and is invisible. Overriding propagate() cannot do it,
-    // because both entry points come through here.
-    //
-    // The three kinds of override, and what each does with `incoming`:
-    //   TweakableComputeNode  — ignores it entirely while frozen (a tweaked
-    //                           value does not depend on its inputs).
-    //   a ConditionNode's     — passes it on to the node, as the same kind,
-    //   branch listener         while the node takes its branch, and drops it
-    //                           otherwise (the node's value does not depend on
-    //                           the other branch).
-    //   a clock-driven node   — always cascades; its output is a function of a
-    //                           clock, so it has no clean state for the guards
-    //                           below to key off.
+    // hop and silently lose it on the transitive cascade, which carries almost
+    // every invalidation in a real graph. Overriding propagate() cannot do that,
+    // because both entry points come through here. The overrides that exist are
+    // listed in the class comment.
     virtual void propagate(Dirtiness incoming) {
         if (incoming == Dirtiness::Maybe) {
             // Every "maybe" counts, the one the guard below drops included: see
             // "Clean only over clean inputs".
             heardMaybe_ = true;
-            // Same visited-guard as the old two-state cascade: a diamond's lower
-            // half is walked once, not once per path.
+            // Visited guard: a diamond's lower half is walked once, not once per
+            // path.
             if (state_ != Dirtiness::Clean) return;
             state_ = Dirtiness::Maybe;
         } else {
             if (state_ == Dirtiness::Dirty) return;
             const bool wasClean = (state_ == Dirtiness::Clean);
             state_ = Dirtiness::Dirty;
-            // Already Maybe: the cascade below has been through, and walking it
-            // again would only re-set what it already set.
+            // Was Maybe, so its cascade has already run.
             if (!wasClean) return;
         }
         cascadeMaybe();
     }
 
     /// Invalidate every downstream node — "my value changed". Expired weak_ptrs
-    /// are skipped, not erased: a node's downstream set is built once at wire()
-    /// time and the engine's graphs are not rewired at runtime.
+    /// are skipped, not erased: a node's downstream set is built once, by
+    /// wire(), and graphs are not rewired at runtime.
     void notifyDownstream() {
         for (auto& w : downstream_) if (auto n = w.lock()) n->invalidate();
     }
@@ -424,12 +392,12 @@ protected:
     //
     // Nothing is stored to make this work — no per-input ValuePtr is retained.
     // Retaining one would pin a ValueSlot buffer and push the producer back into
-    // allocating, and a raw const IValue* is unsound because
-    // ValueSlot rewrites buffers in place, so a raw address can compare equal
-    // across a genuine change.
+    // allocating, and a raw const IValue* is unsound because ValueSlot rewrites
+    // buffers in place, so a raw address can compare equal across a genuine
+    // change.
     //
-    // For an Eager node this is one enum compare that always fails: the mechanism
-    // costs nothing for nodes that stay Eager.
+    // For an Eager node this is one enum compare that always fails, so the
+    // mechanism costs nothing for nodes that stay Eager.
     bool skipRecompute(const EvalContext& ctx) const noexcept {
         return mode_ == InvalidationMode::Lazy
             && state_ != Dirtiness::Dirty
@@ -444,7 +412,7 @@ protected:
     // always-dirty node, such as an application's clock-driven node, pulled
     // again through a later input, tells the earlier input's nodes. Marked
     // clean then, the node would never see a later change, which stops at the
-    // dirty input (flywheel-dag#18).
+    // dirty input.
     //
     // Such an input sends a "maybe" cascade, which reaches this node while it
     // is still evaluating. In an evaluation where nothing goes dirty again, the
@@ -495,10 +463,9 @@ private:
         for (auto& w : downstream_) if (auto n = w.lock()) n->invalidateMaybe();
     }
 
-    /// endEval()'s rare path, out of line. With it inlined into every
-    /// evaluation, the rule cost bench_hot_path's chain row 2.4%; with it out
-    /// of line, 1 to 2%. GCC and Clang, the compilers CI builds with, both take
-    /// the attributes.
+    /// endEval()'s rare path, kept out of line and cold: it runs only when a
+    /// "maybe" reached the node during its evaluation. GCC and Clang, the
+    /// compilers CI builds with, both take the attributes.
     [[gnu::cold, gnu::noinline]] void stayDirty() { cascadeMaybe(); }
 
     Dirtiness state_ = Dirtiness::Dirty;
@@ -509,21 +476,20 @@ private:
     std::vector<std::weak_ptr<INode>> downstream_;
 };
 // ─────────────────────────────────────────────────────────────────────────────
-// wire() — called inside every make() after the shared_ptr is constructed.
+// wire() — registers `self` as a downstream of each of `ins`.
 //
-// The reason this can't happen in the constructor is that shared_from_this()
-// isn't valid until the object is owned by a shared_ptr. make() constructs
-// the shared_ptr first, then immediately calls wire() before returning it,
-// so callers never need to think about this.
+// A make() with inputs calls it once the node is owned by a shared_ptr, which
+// the constructor cannot supply. ConditionNode::make wires its branches by
+// hand, through listeners.
 // ─────────────────────────────────────────────────────────────────────────────
 void wire(const NodePtr& self, const std::vector<NodePtr>& ins);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input<T> — leaf node.
 //
-// An optional wake hook can be installed via setWakeHook(). When set, it is
-// called at the end of set() whenever the value actually changes — the engine
-// uses this to wake its event loop without polling.
+// An optional wake hook, installed with setWakeHook(), is called at the end of
+// set() whenever the value changes. The engine uses it to wake its event loop
+// without polling.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class Input : public NodeBase, public std::enable_shared_from_this<Input<T>> {
@@ -569,13 +535,8 @@ public:
     // every opt-in site — make(name, ins, fn, nullptr, InvalidationMode::Lazy) —
     // which reads as noise at exactly the place the reader most wants to see the
     // choice. The overloads are unambiguous because EqualityPolicyPtr is a
-    // shared_ptr and InvalidationMode is an enum class.
-    //
-    // The mode is set HERE, at construction, and nowhere else: whether the
-    // functor is a pure function of its declared inputs is a property of the
-    // functor, so it belongs next to the code that writes it. There is no
-    // post-construction setter for the same reason: a graph site that could mark
-    // a node Lazy would be vouching for a functor it cannot see.
+    // shared_ptr and InvalidationMode is an enum class. The mode is fixed at
+    // construction: see InvalidationMode.
     static std::shared_ptr<ComputeNode> make(
         std::string name, InputTuple inNodes, Fn fn,
         EqualityPolicyPtr eq = nullptr);
@@ -596,9 +557,9 @@ private:
 
     /// Pull every input, resolve, and — unless the resolve says to skip — invoke
     /// fn_ and publish the result. Returns what eval() returns. See the
-    /// definition in dag.inl for why cheap and expensive input types take
-    /// different paths, and why the resolve check has to live in here rather
-    /// than in eval().
+    /// definition in dag.inl for why trivially copyable and other input types
+    /// take different paths, and why the resolve check lives here rather than in
+    /// eval().
     template<std::size_t... Is>
     ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
     /// Emit, compare, notify, endEval() — the tail of every evaluation.
@@ -620,50 +581,41 @@ using ComputeNodePtr = std::shared_ptr<ComputeNode<Out, Ins...>>;
 // ─────────────────────────────────────────────────────────────────────────────
 // InPlaceComputeNode<Out, Ins...> — a ComputeNode for an Out that owns heap.
 //
-// The problem it solves. ComputeNode's Fn returns Out BY VALUE, so
-// every evaluation builds a fresh one and hands it over as an rvalue:
-//
-//     Out result = applyInputs(...);          // allocates, for a heap-owning Out
-//     auto newV  = slot_.emit(std::move(result));   // move-assign FREES the
-//                                                   // buffer ValueSlot was
-//                                                   // recycling, and steals this
-//                                                   // one instead
-//
-// So a node whose output is a std::vector or a struct of them allocates on
-// every cycle no matter how warm its slot is, and the recycler's whole purpose
-// is defeated at the last step. That is the pathology AsyncInput::post/flush
-// avoids on the feed thread, reappearing on the eval thread, and it is
-// unreachable from ComputeNode because ValueSlot's
-// copy-assigning emit(const T&) overload needs an lvalue the caller keeps.
+// ComputeNode's Fn returns Out BY VALUE, and publish() emits it with
+// slot_.emit(std::move(result)). For a heap-owning Out that move-assign FREES the
+// buffer ValueSlot was recycling and takes the temporary's instead, so a node
+// whose output is a std::vector or a struct of them allocates on every cycle
+// however warm its slot is. ValueSlot's copy-assigning emit(const T&) avoids
+// that, but needs an lvalue the caller keeps, which ComputeNode, building a
+// fresh Out each time, does not have.
 //
 // This class supplies that lvalue: a retained `scratch_` the functor writes
-// into. Capacity then cycles between scratch_ and the two slot buffers exactly
-// as it cycles between pending_, staged_ and the slot buffers on the ingest
+// into. Capacity then cycles between scratch_ and the two slot buffers as it
+// does between pending_, staged_ and the slot buffers on AsyncInput's ingest
 // path, and the steady state allocates nothing.
 //
-// THE CONTRACT, AND IT IS SHARP: `out` arrives holding the PREVIOUS
-// evaluation's value, not a default-constructed one. The functor must overwrite
-// everything it owns — clear() before push_back, assign every field — on EVERY
-// path including early returns. A functor that appends without clearing
-// produces a monotonically growing container: plausible-looking output, no
-// crash, and nothing catches it but a test that evaluates twice. That is the
-// price of recycling capacity; a node that reset the scratch for you could not
-// recycle anything.
+// THE CONTRACT: `out` arrives holding the PREVIOUS evaluation's value, not a
+// default-constructed one. The functor must overwrite everything it owns —
+// clear() before push_back, assign every field — on EVERY path including early
+// returns. A functor that appends without clearing grows without bound: the
+// output looks plausible, nothing crashes, and only a test that evaluates twice
+// catches it. That is the price of recycling capacity; a node that reset the
+// scratch for you could not recycle anything.
 //
-// Everything else is ComputeNode: same lazy dirty/cached protocol, same
-// equality policy, same NodeKind::Compute, same reference-binding rule for
-// expensive input types. It is a sibling rather than a second make() on
-// ComputeNode because the alternative puts a runtime branch and an extra Out
-// member on the hottest class in the engine — every instantiation of it — to
-// serve the handful of nodes whose output owns heap.
+// Everything else is ComputeNode: the same invalidation protocol, equality
+// policy and NodeKind::Compute, and the same reference-binding rule for input
+// types that are not trivially copyable. It is a sibling rather than a second
+// make() on ComputeNode because the alternative puts a runtime branch and an
+// extra Out member on the hottest class in the engine, in every instantiation,
+// to serve the few nodes whose output owns heap.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
 class InPlaceComputeNode
     : public NodeBase,
       public std::enable_shared_from_this<InPlaceComputeNode<Out, Ins...>> {
 public:
-    /// Writes this cycle's value into `out` — see the contract above: `out`
-    /// still holds the previous cycle's value on entry.
+    /// Writes this cycle's value into `out`. See the contract above: `out` holds
+    /// the previous cycle's value on entry.
     using Fn = std::function<void(Out& out, const Ins&...)>;
     using InputTuple = std::tuple<std::conditional_t<true, NodePtr, Ins>...>;
 
@@ -685,8 +637,8 @@ private:
     InPlaceComputeNode(std::string name, InputTuple ins, Fn fn,
                        EqualityPolicyPtr eq, InvalidationMode mode);
 
-    /// Pull, resolve, invoke fn_ into scratch_, publish. Same two paths as
-    /// ComputeNode::applyInputs, chosen the same way and for the same reasons.
+    /// Pull, resolve, invoke fn_ into scratch_, publish. The same two paths as
+    /// ComputeNode::applyInputs, chosen the same way.
     template<std::size_t... Is>
     ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
     ValuePtr publish();
@@ -772,8 +724,8 @@ public:
 //
 // A tweaked node:
 //   • Returns a fixed value from eval() — its functor is never called.
-//   • Silently absorbs invalidate() from upstream — inputs are irrelevant.
-//   • Immediately notifies downstream when the tweak value changes.
+//   • Absorbs every upstream invalidation — inputs are irrelevant.
+//   • Notifies downstream immediately when the tweak value changes.
 //   • Delivers a changed tweak value to its own engine output, once, on the
 //     engine's next cycle. tweak() leaves the node dirty until it is evaluated.
 //   • Treats an equal tweak as no change. The published value keeps its
@@ -790,17 +742,13 @@ class ITweakable {
 public:
     virtual ~ITweakable() = default;
 
-    /// Freeze this node at `val`. Downstream is notified immediately (respecting
-    /// the node's equality policy). Upstream invalidations are absorbed until
-    /// clearTweak() is called. A `val` that differs from the published value
-    /// also leaves the node dirty, so that an engine evaluates it on its next
-    /// cycle and delivers `val` to this node's own output. An equal `val` only
-    /// freezes.
+    /// Freeze this node at `val`. Upstream invalidations are absorbed until
+    /// clearTweak(). A `val` that differs from the published value, by the
+    /// node's equality policy, is published as described above; an equal one
+    /// only freezes.
     virtual void tweak(T val) = 0;
 
-    /// Remove the freeze. Marks the node dirty and its consumers Maybe, so they
-    /// re-pull on the next eval pass and learn there whether the value changed.
-    /// Normal computation resumes.
+    /// Remove the freeze, as described above. Normal computation resumes.
     virtual void clearTweak() = 0;
 
     /// True while a tweak is active.
@@ -813,7 +761,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 // TweakableComputeNode<Out, Ins...>
 //
-// Identical to ComputeNode but also implements ITweakable<Out>.
+// A ComputeNode that also implements ITweakable<Out> and aad::IDifferentiable.
 //
 // State machine:
 //
@@ -871,10 +819,8 @@ private:
     TweakableComputeNode(std::string name, InputTuple ins, Fn fn,
                          EqualityPolicyPtr eq, InvalidationMode mode);
 
-    /// When tweaked, upstream invalidation is silently absorbed — the frozen
-    /// value is unaffected and downstream sees no change. Overriding propagate()
-    /// rather than invalidate() is what makes that hold on the transitive
-    /// cascade as well as the direct hop.
+    /// While tweaked, absorbs every upstream invalidation: the frozen value does
+    /// not depend on the inputs, so downstream sees no change.
     void propagate(Dirtiness incoming) override;
 
     template<std::size_t... Is>
@@ -896,8 +842,9 @@ private:
 // ConditionNode — selects between two branches at runtime.
 //
 // It pulls the condition and the branch the condition selects, never the other
-// branch, so a node on the other branch can be stale. dag_timeseries.hpp's
-// "un-observed branches never compute" relies on that.
+// branch, so a node on the other branch can be stale. A switch to it never
+// serves that staleness, because the branch is pulled before its value is used.
+// Held by LazyInvalidation.Case6_ConditionNodeNeverServesAStaleUntakenBranch.
 //
 // WHAT IT HEARS. The condition, and the branch its last eval() took. Each
 // branch is wired to a listener of its own rather than to the node, and the
@@ -905,11 +852,10 @@ private:
 // The node's value does not depend on the other branch, and a switch to it
 // arrives through the condition, which the node always hears.
 //
-// Hearing both branches gave a stale value, not just a spurious recompute
-// (flywheel-dag#18). A consumer that had read this node could go on to pull a
-// node on the branch not taken, which then moved and made this node dirty
-// again. The consumer ended its evaluation clean over a dirty input, and every
-// later change stopped at this node, which was dirty already.
+// Hearing the branch not taken would let a move there make this node and its
+// consumers dirty again after they were evaluated: they would recompute for
+// nothing, and a root left dirty cannot be recorded on a tape. Held by
+// UntakenBranch.ItsMoveReachesNoConsumer.
 // ─────────────────────────────────────────────────────────────────────────────
 class ConditionNode
     : public NodeBase

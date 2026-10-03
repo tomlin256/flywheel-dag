@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// dag.inl — implementation of all dag.hpp declarations
+// dag.inl — template and inline definitions for dag.hpp.
 // Included at the bottom of dag.hpp; never include this file directly.
 
 #pragma once
@@ -31,11 +31,8 @@ const T& TypedValue<T>::get() const { return value_; }
 template<typename T>
 ValuePtr make_value(T v) { return std::make_shared<TypedValue<T>>(std::move(v)); }
 
-// Hot path: called once per input per node per cycle. The dynamic_cast this
-// replaced walked the RTTI hierarchy on every one of those reads (~15% of the
-// eval cycle). TypedValue<T> is final and is the only IValue implementation, so
-// an exact type_index compare accepts and rejects exactly the same values the
-// cast did — including both throw paths.
+// Hot path: called once per input per node per cycle, so an exact type_index
+// compare, not a dynamic_cast. See TypedValue for why they are equivalent.
 template<typename T>
 const T& get_value(const ValuePtr& v) {
     if (!v) throw std::runtime_error("Null value");
@@ -204,38 +201,27 @@ ComputeNode<Out, Ins...>::ComputeNode(
     : NodeBase(mode), name_(std::move(name)), inputs_(std::move(ins))
     , fn_(std::move(fn)), eq_(std::move(eq)) {}
 
-// Two paths, chosen at compile time by how expensive the input types are to copy.
+// Two paths, chosen at compile time: when every input type is trivially
+// copyable the values are copied out, and otherwise all are bound by reference.
 //
-// The old code always built a std::tuple<Ins...> from the get_value() references,
-// which copies every input by value. For a double that is free; for a
-// std::vector batch or a std::deque window it is a deep copy of the whole
-// container on every cycle — and the same batch is copied once per consuming node.
+// Copying every input by value would deep-copy a std::vector batch or a
+// std::deque window on every cycle, once per consuming node. For a double the
+// copy is free, and a shared_ptr's atomic refcount bump is not worth paying to
+// avoid it.
 //
-// Binding references instead needs the referenced values to stay alive AND stay
+// Binding references needs the referenced values to stay alive AND stay
 // unmodified for the duration of the call. The `held` array does that: it keeps
 // each TypedValue alive and pushes its use_count above 1, so no ValueSlot can
-// recycle a buffer a reference points into. That last part matters when
-// ctx.forceRecompute is set and two inputs share an upstream node — evaluating
-// the second input re-runs the first input's producer, which then emits into a
-// different buffer precisely because the first one is still referenced.
-//
-// The array is DEFENSIVE, not load-bearing: written as one expression,
-// `fn_(get_value<Ins>(in->eval(ctx))...)` is already correct, because C++17
-// keeps the eval() temporaries alive to the end of the full-expression, which
-// includes the fn_ call. Verified — removing the array leaves every test green.
-// It is kept because that guarantee evaporates the moment someone splits this
-// into separate statements, and the array makes the requirement visible at the
-// point where it has to hold.
-//
-// Trivially-copyable inputs keep taking the copy: a shared_ptr costs an atomic
-// refcount bump, which is not worth paying to avoid copying a double.
+// recycle a buffer a reference points into. That matters when ctx.forceRecompute
+// is set and two inputs share an upstream node — evaluating the second input
+// re-runs the first input's producer, which then emits into a different buffer
+// precisely because the first one is still referenced.
 //
 // WHY THE RESOLVE CHECK LIVES IN HERE AND NOT IN eval(). On the reference-binding
 // path the `held` array is what keeps the pulled values alive, so the decision to
 // skip has to be made while it is still in scope. Splitting "pull" from "call"
 // into two functions would either dangle those references or force an
-// Out-shaped return slot on the skip path; keeping the whole tail here costs two
-// duplicated lines and no abstraction.
+// Out-shaped return slot on the skip path.
 template<typename Out, typename... Ins>
 template<std::size_t... Is>
 ValuePtr ComputeNode<Out, Ins...>::applyInputs(
@@ -246,9 +232,7 @@ ValuePtr ComputeNode<Out, Ins...>::applyInputs(
         // evaluation, so each value is copied out before the next input runs.
         const std::tuple<Ins...> vals{
             get_value<Ins>(std::get<Is>(inputs_)->eval(ctx))... };
-        // Every input has now been pulled, so any of them that really changed
-        // has already called our invalidate(). Still only Maybe means nothing
-        // moved.
+        // Every input has been pulled: still only Maybe means nothing moved.
         if (skipRecompute(ctx)) { endEval(); return cached_; }
         return publish(fn_(std::get<Is>(vals)...));
     } else {
@@ -299,13 +283,6 @@ std::shared_ptr<InPlaceComputeNode<Out, Ins...>> InPlaceComputeNode<Out, Ins...>
     return self;
 }
 
-// The one line that differs from ComputeNode::eval, and the reason this class
-// exists: emit takes a const lvalue, so ValueSlot copy-ASSIGNS scratch_ into
-// the recycled TypedValue buffer. std::vector::operator= reuses the
-// destination's storage whenever its capacity suffices, so neither the buffer
-// nor scratch_ gives its allocation back. ComputeNode's emit(std::move(result))
-// frees the buffer's storage and installs the temporary's instead, which is
-// exactly the allocation this avoids.
 template<typename Out, typename... Ins>
 ValuePtr InPlaceComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
@@ -313,6 +290,11 @@ ValuePtr InPlaceComputeNode<Out, Ins...>::eval(EvalContext& ctx) {
     return applyInputs(ctx, std::index_sequence_for<Ins...>{});
 }
 
+// The one line that differs from ComputeNode::publish, and the reason this class
+// exists: emit takes a const lvalue, so ValueSlot copy-ASSIGNS scratch_ into the
+// recycled TypedValue buffer. std::vector::operator= reuses the destination's
+// storage whenever its capacity suffices, so neither the buffer nor scratch_
+// gives its allocation back.
 template<typename Out, typename... Ins>
 ValuePtr InPlaceComputeNode<Out, Ins...>::publish() {
     auto newV = slot_.emit(std::as_const(scratch_));
@@ -339,9 +321,8 @@ InPlaceComputeNode<Out, Ins...>::InPlaceComputeNode(
     : NodeBase(mode), name_(std::move(name)), inputs_(std::move(ins))
     , fn_(std::move(fn)), eq_(std::move(eq)) {}
 
-// Same two paths as ComputeNode::applyInputs, chosen the same way — see the
-// long note on that definition for why the `held` array is there and why
-// trivially-copyable inputs are copied instead.
+// The same two paths as ComputeNode::applyInputs, chosen the same way: see the
+// note on that definition.
 template<typename Out, typename... Ins>
 template<std::size_t... Is>
 ValuePtr InPlaceComputeNode<Out, Ins...>::applyInputs(
@@ -350,10 +331,9 @@ ValuePtr InPlaceComputeNode<Out, Ins...>::applyInputs(
     if constexpr ((std::is_trivially_copyable_v<Ins> && ...)) {
         const std::tuple<Ins...> vals{
             get_value<Ins>(std::get<Is>(inputs_)->eval(ctx))... };
-        // Skipping leaves scratch_ holding the previous evaluation's value,
-        // which is exactly what cached_ already points at — the class contract
-        // (the functor must overwrite everything it owns) is about the functor
-        // RUNNING, and it did not run.
+        // A skip leaves scratch_ as the last run left it. The class contract
+        // (the functor must overwrite everything it owns) binds the functor when
+        // it runs, and it did not run.
         if (skipRecompute(ctx)) { endEval(); return cached_; }
         fn_(scratch_, std::get<Is>(vals)...);
     } else {
@@ -467,17 +447,17 @@ void TweakableComputeNode<Out, Ins...>::tweak(Out val) {
 
     // An equal tweak only freezes. cached_ keeps its identity, because the
     // engine detects change by pointer identity and a new pointer for the same
-    // value reads as a change (flywheel-dag#5, the contract flywheel-dag#1 set
-    // for stateful nodes). The state is left alone too. A delivery still
-    // pending from an earlier tweak must survive, and an input change pending
-    // from before the freeze is harmless: eval() now returns the frozen value.
+    // value would read as a change. The state is left alone too. A delivery
+    // still pending from an earlier tweak must survive, and an input change
+    // pending from before the freeze is harmless: eval() returns the frozen
+    // value.
     if (eq_->equal(cached_, newV)) return;
 
-    // A new value is published as an evaluation would publish it. Downstream is
-    // notified. This node stays dirty until it is evaluated, which propagate()
-    // preserves by absorbing everything while frozen, so the engine evaluates
-    // it once more and delivers the tweak to its own output. Left clean, it was
-    // never evaluated again while frozen, and its callback never saw the tweak.
+    // A new value is published as an evaluation would publish it, and downstream
+    // is notified. The node stays dirty until it is evaluated, which propagate()
+    // preserves by absorbing everything while frozen, so the engine evaluates it
+    // once more and delivers the tweak to the node's own output. A clean node
+    // would never be evaluated again while frozen.
     cached_ = std::move(newV);
     markDirty();
     notifyDownstream();
@@ -488,13 +468,12 @@ void TweakableComputeNode<Out, Ins...>::clearTweak() {
     if (!tweaked_) return;
     tweaked_ = false;
     // The frozen value no longer applies, but whether the recomputed one
-    // differs is not known until the node recomputes. invalidate() says exactly
-    // that (flywheel-dag#8). This node goes Dirty, so it recomputes, even when
-    // it is Lazy, and its consumers go Maybe. Its eval() then tells them Dirty
-    // only if the value moved, and a Lazy consumer skips when it did not.
-    // Marking them Dirty here made every Lazy consumer rerun regardless. If a
-    // changed tweak is still pending, the node is already Dirty, and the tweak
-    // has already told its consumers.
+    // differs is not known until the node recomputes. invalidate() expresses
+    // exactly that: this node goes Dirty, so it recomputes, even when it is Lazy,
+    // and its consumers go Maybe. Its eval() then tells them Dirty only if the
+    // value moved, and a Lazy consumer skips when it did not. If a changed tweak
+    // is still pending, the node is already Dirty, and the tweak has already told
+    // its consumers.
     invalidate();
 }
 
@@ -509,8 +488,7 @@ std::optional<Out> TweakableComputeNode<Out, Ins...>::tweakValue() const {
 
 // A frozen value depends on no input, so it names none, and a pass stops here
 // without reading the inputs the freeze is ignoring. Those inputs can be dirty:
-// propagate() absorbs their invalidations while frozen. Untweaked, the functor
-// is opaque, so the node cannot say and is a barrier.
+// propagate() absorbs their invalidations while frozen.
 template<typename Out, typename... Ins>
 bool TweakableComputeNode<Out, Ins...>::partials(EvalContext&, aad::Partials&) {
     return tweaked_;
@@ -573,12 +551,7 @@ inline std::shared_ptr<ConditionNode> ConditionNode::make(
 }
 
 // The one node that does NOT pull every declared input: only the taken branch is
-// evaluated, which is the property dag_timeseries.hpp opens by relying on
-// ("un-observed branches never compute"). So an untaken branch can be left
-// stale, and a later switch to it can arrive Dirty when nothing about the branch
-// itself moved. That is a spurious recompute, never a stale value — the branch
-// is pulled before its value is used — and it is asserted as such in
-// test_lazy_invalidation.cpp.
+// evaluated, so an untaken branch can be left stale. See the class comment.
 //
 // taken_ is set before the branch is pulled, so that a branch which changes as
 // it is pulled is heard, as any input's change is. taken_ is out of date only
@@ -618,13 +591,7 @@ inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
 }
 
 // Lazy, fixed in the class: this is pure selection over three inputs, with no
-// functor at all for an author to get wrong. The one asymmetry — only the taken
-// branch is pulled — predates lazy invalidation and is what
-// dag_timeseries.hpp's "un-observed branches never compute" relies on. It can
-// cost a spurious recompute after a switch, because the branch is evaluated on
-// the way past (test_lazy_invalidation.cpp Case6). Its consumers never see a
-// stale value from it, because the node does not hear the branch it did not
-// take (flywheel-dag#18).
+// functor at all for an author to get wrong.
 inline ConditionNode::ConditionNode(
     std::string name, NodePtr cond, NodePtr tb, NodePtr fb,
     EqualityPolicyPtr eq)
