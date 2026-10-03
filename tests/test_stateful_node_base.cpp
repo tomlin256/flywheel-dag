@@ -11,16 +11,6 @@
 //
 // Uses a toy SumNode (running sum) to exercise the base independently of any
 // real time-series node.
-//
-// Coverage:
-//   1. eval() accumulates correctly over N ticks
-//   2. eval() returns cached value on second call (dirty guard)
-//   3. saveState / restoreState round-trip preserves state
-//   4. restoreState marks the node dirty (invalidate() called)
-//   5. eval() after restoreState produces the correct next output
-//   6. Downstream is not notified when output value is unchanged (equality policy)
-//   7. An unchanged value keeps the cached pointer
-//   8. An equality policy compares against the last published value
 
 #include <gtest/gtest.h>
 #include <vector>
@@ -102,7 +92,7 @@ TEST(StatefulNodeBase, DirtyGuardCachesResult) {
     inp->set(5.0);
     EvalContext ctx;
     double first  = get_value<double>(node->eval(ctx));
-    double second = get_value<double>(node->eval(ctx)); // no new set(), dirty=false
+    double second = get_value<double>(node->eval(ctx)); // no new set(): the node is clean
 
     EXPECT_DOUBLE_EQ(first,  5.0);
     EXPECT_DOUBLE_EQ(second, 5.0);
@@ -179,8 +169,8 @@ TEST(StatefulNodeBase, EvalAfterRestoreIsCorrect) {
 // SumNode uses TypedEqualityPolicy<double>. When the base's eval() produces
 // the same output twice, notifyDownstream should NOT invalidate downstream.
 //
-// We use forceRecompute to re-run the computation without a dirty cascade so
-// that the downstream node starts clean and we can observe the suppression.
+// forceRecompute re-runs the computation without a dirty cascade, so the
+// downstream node starts clean and the suppression is observable.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(StatefulNodeBase, EqualityPolicySuppressesNotification) {
     // SumNode with sum = 0 as upstream (constant zero input)
@@ -188,7 +178,8 @@ TEST(StatefulNodeBase, EqualityPolicySuppressesNotification) {
     auto sum1 = SumNode::make("sum1", inp);
     auto sum2 = SumNode::make("sum2", sum1);
 
-    // Push 0.0 — sum1 stays at 0.0, downstream is dirty from cascade
+    // The Input already holds 0.0, so this set() is a no-op: sum1 and sum2 are
+    // dirty only because every node starts dirty.
     inp->set(0.0);
     EvalContext ctx;
     sum1->eval(ctx);
@@ -211,9 +202,7 @@ TEST(StatefulNodeBase, EqualityPolicySuppressesNotification) {
 // Test 7 — An unchanged value keeps the cached pointer
 //
 // The engine detects change by ValuePtr identity, so a node whose value did not
-// change must return the pointer it returned last time. eval() used to rebind
-// cached_ after notifyDownstream() had decided not to, which gave it a new
-// identity on every evaluation (flywheel-dag#1).
+// change must return the pointer it returned last time.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(StatefulNodeBase, UnchangedValueKeepsTheCachedPointer) {
     // AlwaysChangedPolicy on the input, so that setting an equal value still
@@ -245,8 +234,7 @@ TEST(StatefulNodeBase, UnchangedValueKeepsTheCachedPointer) {
 // and never seeing it. SumNode under EpsilonPolicy(0.6) is fed +0.25 per step.
 // Against the last published value, the sum publishes every third step, once it
 // has moved 0.75. Against the previous evaluation every step is only 0.25 apart,
-// so nothing after the first evaluation would ever publish — which is what
-// rebinding cached_ on every evaluation used to do (flywheel-dag#1).
+// so nothing after the first evaluation would ever publish.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(StatefulNodeBase, EqualityPolicyComparesAgainstTheLastPublishedValue) {
     auto inp  = Input<double>::make("inp", 0.0, std::make_shared<AlwaysChangedPolicy>());

@@ -17,8 +17,8 @@
 using namespace dag;
 
 // ── Helper function ──────────────────────────────────────────────────────────
-// Named distinctly from dag::get_value<T>(ValuePtr) to avoid any overload
-// ambiguity — this takes the node itself and drives eval() first.
+// Not named get_value, so it does not overload dag::get_value<T>(ValuePtr): this
+// takes the node and evaluates it first.
 template<typename T, typename Node>
 T evalAs(const std::shared_ptr<Node>& n) {
     EvalContext ctx;
@@ -81,15 +81,11 @@ TEST(DagOpsTests, SumDefaultTemplateArgIsDouble) {
     EXPECT_EQ(evalAs<double>(sum), 4.0);
 }
 
-// What this checks is unchanged: the default TypedEqualityPolicy<T> wiring
-// controls whether SumNode's notifyDownstream() *reassigns its cached ValuePtr*,
-// observed here via pointer identity.
-//
-// Its old explanation is not. It said a downstream ComputeNode's recompute count
-// "can never observe equality-policy suppression", which was true of the eager
-// two-state cascade and is no longer true of anything: op nodes are Lazy by
-// construction, and a Lazy consumer of this SumNode would indeed skip. See
-// LazyInvalidation.OpNodesSkipWhenTheirInputsDidNotMove for that case.
+// Observed by pointer identity: the default TypedEqualityPolicy<T> keeps the
+// cached ValuePtr when the total comes out equal. A downstream recompute count
+// cannot show it under an Eager consumer, which recomputes anyway; a Lazy one
+// skips, as in
+// LazyInvalidation.Case1_ConstantIntermediateStopsDownstreamRecomputing.
 TEST(DagOpsTests, SumPreservesCachedValuePtrWhenTotalUnchanged) {
     auto a = Input<double>::make("a", 1.0);
     auto b = Input<double>::make("b", 2.0);
@@ -99,9 +95,9 @@ TEST(DagOpsTests, SumPreservesCachedValuePtrWhenTotalUnchanged) {
     auto before = sum->eval(ctx); // settle: total = 3.0
     EXPECT_EQ(get_value<double>(before), 3.0);
 
-    // a+1, b-1 leaves the total (3.0) unchanged -- SumNode recomputes
-    // internally, but the default equality policy means the cached ValuePtr
-    // itself is left untouched (not reassigned to a new-but-equal object).
+    // a+1, b-1 leaves the total at 3.0: SumNode recomputes, but the default
+    // equality policy keeps the cached ValuePtr rather than replacing it with an
+    // equal one.
     a->set(2.0);
     b->set(1.0);
     auto after = sum->eval(ctx);
@@ -433,7 +429,7 @@ TEST(DagOpsTests, SqrtOfNegativeIsNan) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Trigonometric ops: SinNode, CosNode, TanNode, AsinNode, AcosNode, AtanNode,
-// Atan2Node (flywheel-dag#14)
+// Atan2Node
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {

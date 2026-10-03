@@ -9,7 +9,7 @@
 
 // aad::TangentNode: a node whose value is a forward sweep's tangents, so an
 // engine delivers several roots' derivatives in one direction through
-// addOutput (flywheel-dag#17).
+// addOutput.
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
@@ -56,9 +56,9 @@ void expectTheTapesTangents(const Graph& g) {
 template<typename T>
 constexpr bool isDual() { return !std::is_same_v<std::decay_t<T>, double>; }
 
-// The graph of flywheel-dag#18. sel takes e^x, so b, on the branch it did not
-// take, is pulled only by root2. When b moves, root2's pull evaluates it. sel
-// does not hear it, because it did not take b, so root1 stays clean.
+// sel takes e^x, so b, on the branch it did not take, is pulled only by root2.
+// When b moves, root2's pull evaluates it. sel does not hear it, because it did
+// not take b, so root1 stays clean.
 struct StaleBranch {
     InputPtr<bool>   cond  = Input<bool>::make("cond", true);
     InputPtr<double> x     = Input<double>::make("x", 1.0);
@@ -202,9 +202,7 @@ TEST(AadTangentNode, AnUnchangedTangentIsNotDelivered) {
 
 // After y moves, the pull of root2 evaluates b, and sel does not hear it, so
 // root1 stays clean and the node ends clean. x's move then reaches the node,
-// and a tape recorded after both pulls holds both roots. Before
-// flywheel-dag#18's fix, root1 was dirty again after the pull of root2, so the
-// node stayed dirty and that tape threw.
+// and a tape recorded after both pulls holds both roots.
 TEST(AadTangentNode, ABranchNotTakenLeavesNoRootDirty) {
     StaleBranch g;
     auto tangents = aad::TangentNode::make("tangents", {g.root1, g.root2}, {{g.x, 1.0}, {g.y, 1.0}});
@@ -259,7 +257,7 @@ TEST(AadTangentNode, AnAlwaysDirtyNodeKeepsItDirty) {
 
 // k·x·x − (k + 1), where k is always dirty and reaches the root by two paths,
 // so the root stays dirty after its own pull. The node records it anyway, as
-// AadGradientNode.RecordsARootThatStaysDirty does (flywheel-dag#18).
+// AadGradientNode.RecordsARootThatStaysDirty does.
 TEST(AadTangentNode, RecordsARootThatStaysDirty) {
     auto k        = test_nodes::AlwaysFiring::make(2.0);
     auto x        = Input<double>::make("x", 3.0);
@@ -280,10 +278,10 @@ TEST(AadTangentNode, RecordsARootThatStaysDirty) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The first root is sel·x, where sel picks e^x or a counted functor of y. With
-// the exponential taken, sel does not hear a move of y, so the node stays clean
-// (flywheel-dag#18). When x moves and moves back, the node records a tape, as
-// the dual calls show, without reading the branch not taken, although a seed
-// sits on that branch's node.
+// the exponential taken, sel does not hear a move of y, so the node stays clean.
+// When x moves and moves back, the node records a tape, as the dual calls show,
+// without reading the branch not taken, although a seed sits on that branch's
+// node.
 TEST(AadTangentNode, EvaluatesOnlyWhatItsRootsDo) {
     auto x    = Input<double>::make("x", 2.0);
     auto y    = Input<double>::make("y", 3.0);

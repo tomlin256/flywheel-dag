@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// Recording a tape and sweeping it in reverse (flywheel-dag#10).
+// Recording a tape and sweeping it in reverse.
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"

@@ -9,7 +9,7 @@
 
 #pragma once
 // aad_test_graphs.hpp — small graphs with known derivatives, shared by the
-// algorithmic-differentiation suites (flywheel-dag#10).
+// algorithmic-differentiation suites.
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"

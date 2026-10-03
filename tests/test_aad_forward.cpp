@@ -7,8 +7,7 @@
 // full license information.
 // =============================================================================
 
-// Sweeping a tape forward, and that it is the dual of the reverse sweep
-// (flywheel-dag#10).
+// Sweeping a tape forward, and that it is the dual of the reverse sweep.
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"

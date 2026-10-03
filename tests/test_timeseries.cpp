@@ -37,7 +37,7 @@ double get_value(const std::shared_ptr<Node>& n) {
 // TimeSeries Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Test: RollingStats + ZScore — detect anomalies in ramp + spike
+// RollingStats + ZScore — detect anomalies in ramp + spike
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, RollingStatsAndZScore) {
     auto raw   = Input<double>::make("raw", 0.0);
@@ -54,7 +54,8 @@ TEST(TimeSeriesTests, RollingStatsAndZScore) {
         double zv = get_value<double>(z->eval(ctx));
 
         if (t == 7) {
-            // At spike (100): previous mean ≈ 4.5, stddev ≈ 1.58, so z ≈ (100-4.5)/1.58 ≈ 60
+            // At the spike (100) the previous window is 3..7: mean 5, stddev ≈ 1.58,
+            // so z ≈ (100-5)/1.58 ≈ 60.
             EXPECT_GT(std::abs(zv), 50.0); // Spike is clearly anomalous
         } else {
             // Normal values should have z-score closer to 0
@@ -64,7 +65,7 @@ TEST(TimeSeriesTests, RollingStatsAndZScore) {
     }
 }
 
-// Test: OutlierGateNode — imputes spike with rolling mean
+// OutlierGateNode — imputes spike with rolling mean
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, OutlierGateNode) {
     auto raw  = Input<double>::make("raw", 0.0);
@@ -91,7 +92,7 @@ TEST(TimeSeriesTests, OutlierGateNode) {
     }
 }
 
-// Test: EWMANode — exponential weighted moving average + laziness
+// EWMANode — a set() to the value the Input holds leaves it clean
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, EWMANodeAndLaziness) {
     auto raw  = Input<double>::make("raw", 0.0);
@@ -106,12 +107,12 @@ TEST(TimeSeriesTests, EWMANodeAndLaziness) {
         (void)e; // suppress unused warning
     }
 
-    // Laziness: setting same value should not mark dirty
+    // The series ended on 5, and an Input ignores a set() to the value it holds.
     raw->set(5.0);
-    EXPECT_FALSE(ewma->dirty()); // Lazy — no invalidation for same value
+    EXPECT_FALSE(ewma->dirty());
 }
 
-// Test: ThresholdNode + DebounceCountNode — alarm after N consecutive ticks
+// ThresholdNode + DebounceCountNode — alarm after N consecutive ticks
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, ThresholdAndDebounce) {
     auto raw   = Input<double>::make("raw", 0.0);
@@ -131,7 +132,7 @@ TEST(TimeSeriesTests, ThresholdAndDebounce) {
         bool al = get_value<bool>(alarm->eval(ctx));
 
         if (t == 7 && al) alarmFiredAt7 = true;  // Alarm fires after 3 sustained ticks
-        if (t == 11 && al) alarmFiredAt11 = true; // Fires again after spike clears and resumes
+        if (t == 11 && al) alarmFiredAt11 = true; // Fires again after the dip at t=8
         ++t;
     }
 
@@ -139,7 +140,7 @@ TEST(TimeSeriesTests, ThresholdAndDebounce) {
     EXPECT_TRUE(alarmFiredAt11);
 }
 
-// Test: RollingMinMaxNode + DeltaNode — range and rate of change
+// RollingMinMaxNode + DeltaNode — range and rate of change
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, MinMaxAndDelta) {
     auto raw    = Input<double>::make("raw", 0.0);
@@ -168,25 +169,11 @@ TEST(TimeSeriesTests, MinMaxAndDelta) {
     }
 }
 
-// Test: RateLimiterNode — suppress downstream when change < threshold
+// RateLimiterNode — a Lazy consumer skips while the limiter holds
 //
-// CONTRACT CHANGE. The sink is declared Lazy, and that is now what asking for
-// suppression means.
-//
-// The limiter used to override invalidate() to absorb upstream dirt without
-// forwarding, which suppressed downstream work for EVERY consumer — and was a
-// bug, because a consumer that is never dirtied never pulls the limiter, so
-// the limiter never reaches the eval() that would release, and a limiter wired
-// mid-graph never propagated its release at all. The override is gone; the
-// tri-state's Maybe is the suppression flag it was hand-rolling, and it does the
-// job without swallowing the release.
-//
-// What changed for an EAGER consumer, stated rather than hidden: it now
-// recomputes on every upstream change where it used to recompute on none, and it
-// gains a release it never used to get. Eager means "recompute whenever anything
-// upstream fired", so that is the mode behaving correctly, and this test would
-// be asserting the opposite of the mode's meaning if it left the sink Eager.
-// ValueSlot.RateLimiterReleaseReachesAnEagerConsumerToo covers that case.
+// The sink is declared Lazy, which is how a consumer asks for suppression: an
+// EAGER sink recomputes on every upstream change, so it could not show it.
+// ValueSlot.RateLimiterReleaseReachesAnEagerConsumerToo covers the Eager case.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeriesTests, RateLimiterNode) {
     auto raw     = Input<double>::make("raw", 0.0);
@@ -209,8 +196,8 @@ TEST(TimeSeriesTests, RateLimiterNode) {
         get_value<double>(sink->eval(ctx));
     }
 
-    // Sink should recompute fewer times than input updates due to rate limiting
-    // With minDelta=2.0, only changes >= 2.0 cause downstream updates
+    // A value less than 2.0 from the last emitted one is held, so the sink
+    // recomputes fewer times than the input is set.
     EXPECT_LT(recomputes, static_cast<int>(vals.size()));
 }
 
@@ -218,7 +205,7 @@ TEST(TimeSeriesTests, RateLimiterNode) {
 // EWMATickRateNode tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-// First eval applies one tick from the initial rate_ = 0.0: result = alpha.
+// The first eval applies one tick to the initial rate of 0.0: the result is alpha.
 TEST(TimeSeriesTests, EWMATickRateFirstEvalReturnsAlpha) {
     auto trigger = Input<double>::make("t", 0.0);
     auto rate    = EWMATickRateNode::make("rate", trigger, 0.5);
@@ -227,7 +214,7 @@ TEST(TimeSeriesTests, EWMATickRateFirstEvalReturnsAlpha) {
     EXPECT_DOUBLE_EQ(v, 0.5);
 }
 
-// Each successive trigger increments the EWMA by exactly alpha.
+// Each trigger folds in one tick: rate = alpha + (1 − alpha)·rate.
 TEST(TimeSeriesTests, EWMATickRateMatchesManualEWMA) {
     const double alpha = 0.5;
     auto trigger = Input<double>::make("t", 0.0);
@@ -243,14 +230,14 @@ TEST(TimeSeriesTests, EWMATickRateMatchesManualEWMA) {
     }
 }
 
-// Node is not dirty when trigger has not fired.
+// Evaluating the node after the trigger fires leaves it clean.
 TEST(TimeSeriesTests, EWMATickRateNotDirtyWhenTriggerClean) {
     auto trigger = Input<double>::make("t", 0.0);
     auto rate    = EWMATickRateNode::make("rate", trigger, 0.5);
 
     EvalContext ctx;
     trigger->set(1.0);
-    rate->eval(ctx);   // clears dirty
+    rate->eval(ctx);
     EXPECT_FALSE(rate->dirty());
 }
 
@@ -271,7 +258,7 @@ TEST(TimeSeriesTests, EWMATickRateAlphaControlsConvergence) {
     EXPECT_GT(get_value<double>(fast->eval(ctx)), get_value<double>(slow->eval(ctx)));
 }
 
-// saveState / restoreState: next tick after restore continues from saved rate_.
+// After a restore, the next tick continues from the saved rate.
 TEST(TimeSeriesTests, EWMATickRateStateRoundTrip) {
     const double alpha = 0.5;
     auto trigger = Input<double>::make("rate.trigger", 0.0);
@@ -289,12 +276,12 @@ TEST(TimeSeriesTests, EWMATickRateStateRoundTrip) {
     InMemoryStateStore store;
     store.save({rate});
 
-    // Fresh node, restore state — same name required.
+    // A fresh node under the same name: state is keyed by node name.
     auto trigger2 = Input<double>::make("rate.trigger", 0.0);
     auto rate2    = EWMATickRateNode::make("rate", trigger2, alpha);
     store.restore({rate2});
 
-    // The next tick on rate2 must continue from the saved accumulator.
+    // The next tick on rate2 continues from the saved rate.
     trigger2->set(1.0);
     double v2       = get_value<double>(rate2->eval(ctx));
     double expected = alpha + (1.0 - alpha) * savedRate;
@@ -304,14 +291,14 @@ TEST(TimeSeriesTests, EWMATickRateStateRoundTrip) {
 // ─────────────────────────────────────────────────────────────────────────────
 // LatchedDebounceNode tests
 //
-// Wire through ThresholdNode<double> so each tick has a distinct input value.
-// This ensures the DAG dirty-propagation chain fires on every tick even when
-// the boolean output stays true — matching real usage where an input changes
-// every tick while a threshold condition persists.
+// Wired through ThresholdNode<double> so each tick sets a distinct raw value: an
+// Input drops a repeated one, and the latch must see every tick while the
+// boolean stays true, as it does when a real input changes every tick under a
+// persisting condition.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Build a raw→ThresholdNode(>50)→LatchedDebounceNode chain with required=N.
-// Each "above" tick sets a fresh value > 50; each "below" tick sets 0.0.
+// raw → ThresholdNode (above `level`) → LatchedDebounceNode(required). A true
+// tick sets a fresh value above the level, a false tick a fresh one below it.
 struct LatchFixture {
     std::shared_ptr<Input<double>>       raw;
     std::shared_ptr<LatchedDebounceNode> node;
@@ -432,9 +419,7 @@ TEST(LatchedDebounceNodeTests, EngineCallbacksFireOnTransitionsAndOnTheReturnToN
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// makeTimeDelayNode<T> — TIME-based delay (value as of now − horizonUs).
-// Two pure inputs: the value series and a monotonic microsecond clock. Warm-up
-// yields nullopt; robust to irregular cadence (unlike the N-tick DelayNode).
+// makeTimeDelayNode<T> — the value as of now − horizonUs
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -501,9 +486,8 @@ TEST(TimeDelayNode, RobustToLongUpdateGap) {
 // ─────────────────────────────────────────────────────────────────────────────
 // RollingSumNode
 //
-// Replaces the WindowNode + fold idiom with an O(1) incremental total. The
-// thing worth testing hardest is that "incremental" never means "drifting":
-// the running total is corrected by an exact re-sum every `window` pushes.
+// The thing worth testing hardest is that "incremental" never means "drifting":
+// an exact re-sum every `window` pushes corrects the running total.
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
@@ -551,7 +535,7 @@ TEST(RollingSumNodeTests, EvictsTheOldestOnceFull) {
     EXPECT_EQ(sum->filled(), 3u);
 }
 
-// The headline check: 10k randomised ticks, incremental vs naive.
+// The headline check: 10k pseudo-random ticks, incremental vs naive.
 TEST(RollingSumNodeTests, IncrementalMatchesNaiveOverALongRandomSequence) {
     constexpr std::size_t kWindow = 50;
     auto in  = Input<double>::make("in", 0.0);
@@ -581,17 +565,16 @@ TEST(RollingSumNodeTests, IncrementalMatchesNaiveOverALongRandomSequence) {
     EXPECT_LT(worst, 1e-9) << "worst relative deviation from the naive sum was " << worst;
 }
 
-// The periodic re-sum is what makes "incremental" safe to run for days. Its
-// effect is invisible on ordinary input — a naive incremental total drifts only
-// ~2e-9 relative over 5M ticks — so this uses catastrophic cancellation to make
-// it unmistakable, and is verified red-then-green against a probe that disables
-// the re-sum.
+// The periodic re-sum is what makes "incremental" safe to run indefinitely. Its
+// effect is invisible on ordinary input: a naive incremental total drifts by a
+// few parts in 1e9 over 5M ticks. So this uses catastrophic cancellation to make
+// it unmistakable: without the re-sum the total ends at 72, not 74.
 //
 // 1e16 + 1.0 == 1e16 in IEEE double (the gap at that magnitude is 2), so the
 // small values are absorbed on the way in. When the huge value is later
-// subtracted on eviction, the total collapses to roughly zero and can never
-// recover on its own — the information was lost, not merely rounded. Only an
-// exact re-sum from the buffer restores it.
+// subtracted on eviction, the total is left short by what was absorbed and
+// cannot recover on its own: the information was lost, not merely rounded. Only
+// an exact re-sum from the buffer restores it.
 TEST(RollingSumNodeTests, PeriodicRecomputeRecoversFromCatastrophicCancellation) {
     constexpr std::size_t kWindow = 4;
     auto in  = Input<double>::make("in", 0.0);
@@ -664,10 +647,8 @@ TEST(RollingSumNodeTests, WindowStatusReportsCapacityAndFilled) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Alpha validation — EWMANode / EWMATickRateNode
 //
-// These were assert()s until the default build type became RelWithDebInfo,
-// which defines NDEBUG and would have compiled them out — turning an invalid
-// alpha from a loud abort into a silently divergent EWMA. They throw now, so
-// the validation survives an optimised build.
+// The checks throw rather than assert(), so they hold in the default build,
+// which defines NDEBUG.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(EWMANodeAlpha, RejectsOutOfRangeAlpha) {
@@ -711,27 +692,21 @@ TEST(EWMATickRateNodeAlpha, RejectsOutOfRangeAlpha) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Why every IWindowed::windowStatusNode() is built InvalidationMode::Eager, and
-// must stay that way.
+// Every IWindowed::windowStatusNode() must be InvalidationMode::Eager: its
+// functor reads filled() off the captured node, and filled() advances while that
+// node's value, the declared input, sits still. The note above the
+// implementations in dag_timeseries.inl has the reason in full.
 //
-// The functor ignores its declared input and returns capacity()/filled() read
-// off the captured upstream node: declared input is that node's VALUE, output is
-// a function of its internal STATE. filled() advances while the value sits
-// still, so feeding a CONSTANT is enough to separate them — the mean never
-// moves, and the window fills underneath it.
-//
-// This family was caught by replaying a recorded session and flagging any node
-// whose value moved in a cycle where none of its declared inputs did. It
-// accounted for most of the witnesses, and every one of its skips would have
-// been unsafe.
+// Only the mode assertion pins this, and only for RollingStats's companion: the
+// sequence below passes for a Lazy companion too (flywheel-dag#33).
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(TimeSeries, WindowStatusChangesWhileItsDeclaredInputDoesNot) {
     auto in     = Input<double>::make("in", 0.0);
     auto stats  = ts::RollingStats::make("stats", in, 4);
     auto status = stats->windowStatusNode();
 
-    // invalidationMode() lives on NodeBase, not INode — deliberately: INode
-    // gains no virtual for a read-only accessor.
+    // invalidationMode() is on NodeBase, not INode: INode gets no virtual for a
+    // read-only accessor.
     const auto asBase = std::dynamic_pointer_cast<NodeBase>(status);
     ASSERT_TRUE(asBase);
     EXPECT_EQ(asBase->invalidationMode(), InvalidationMode::Eager)
@@ -742,17 +717,15 @@ TEST(TimeSeries, WindowStatusChangesWhileItsDeclaredInputDoesNot) {
     status->eval(ctx);
     const auto first = get_value<ts::WindowStatus>(status->eval(ctx));
 
-    // A CONSTANT input: the stats node's value (the mean) stays at 7.0 forever,
-    // so a Lazy companion would resolve to "nothing moved" and never update.
+    // The nudge lets the source propagate. It also moves the mean by about 1e-12.
     for (int i = 0; i < 3; ++i) {
-        in->set(7.0 + 1e-12 * (i + 1));   // nudge so the source propagates
+        in->set(7.0 + 1e-12 * (i + 1));
         status->eval(ctx);
     }
     const auto later = get_value<ts::WindowStatus>(status->eval(ctx));
 
     EXPECT_GT(later.filled, first.filled)
-        << "the window filled while the mean stood still — which is precisely "
-           "the evaluation a Lazy companion would have skipped";
+        << "the status must follow the window as it fills";
     EXPECT_EQ(later.capacity, first.capacity);
 }
 
@@ -760,10 +733,9 @@ TEST(TimeSeries, WindowStatusChangesWhileItsDeclaredInputDoesNot) {
 // Every dag::ts node, registered as an engine output: an unchanged value fires
 // no callback.
 //
-// The engine detects change by ValuePtr identity. StatefulNodeBase::eval, and
-// the eval() overrides in ZScoreNode and OutlierGateNode, used to rebind cached_
-// after notifyDownstream() had decided not to, so each of these fired on every
-// dirty cycle: 20 extra callbacks apiece below (flywheel-dag#1).
+// The engine detects change by ValuePtr identity, so a node must keep its cached
+// pointer when its equality policy says the value is unchanged. One that rebinds
+// it fires on every dirty cycle.
 //
 // Each node sits on an AlwaysChangedPolicy input, so that every cycle dirties
 // it, and is fed values that leave its output unchanged once warm. It must fire
@@ -875,7 +847,7 @@ TEST(UnchangedStatefulOutput, OutlierGateNode) {
 }
 
 TEST(UnchangedStatefulOutput, RateLimiterNode) {
-    auto in = alwaysChangedInput(5.0);   // 5, 6, 7, ...: every change below minDelta
+    auto in = alwaysChangedInput(5.0);   // 5, 6, 7, 5, ...: every move is below minDelta
     int i = 0;
     expectFiresOnlyOnChange(countOutputCallbacks<double>(
         RateLimiterNode<double>::make("limiter", in, 10.0),

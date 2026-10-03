@@ -8,7 +8,7 @@
 // =============================================================================
 
 // DifferentiableNode<N>: a compute node whose functor a tape can differentiate,
-// through dual numbers (flywheel-dag#10).
+// through dual numbers.
 //
 // The allocation counter must be defined before the flywheel headers.
 
@@ -257,8 +257,8 @@ TEST(AadNode, PartialsComeFromOneDualCall) {
     EXPECT_EQ(duals, 2);
 }
 
-// The issue's criterion: a closed-form formula, built from ops and
-// differentiable nodes, differentiated in both modes.
+// A closed-form formula, built from ops and differentiable nodes, differentiated
+// in both modes.
 TEST(AadNode, ACallPriceMatchesItsClosedFormGreeks) {
     const CallPrice c;
     EvalContext ctx;
@@ -301,7 +301,7 @@ TEST(AadNode, ItsDeltaMatchesItsClosedFormDerivatives) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The trigonometric functions (flywheel-dag#14)
+// The trigonometric functions
 // ─────────────────────────────────────────────────────────────────────────────
 
 // One formula over the seven, as a DifferentiableNode and as a graph of ops.

@@ -8,7 +8,7 @@
 // =============================================================================
 
 // Dual numbers: a value and its partials, for differentiating a functor in one
-// call (flywheel-dag#10).
+// call.
 
 #include <gtest/gtest.h>
 #include "flywheel/dag_aad.hpp"

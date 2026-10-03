@@ -8,8 +8,7 @@
 // =============================================================================
 
 // Local partial derivatives: what each differentiable node reports through
-// aad::IDifferentiable, and that reporting them evaluates nothing
-// (flywheel-dag#10).
+// aad::IDifferentiable, and that reporting them evaluates nothing.
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -293,11 +292,11 @@ TEST(AadPartials, AnInputNamedTwiceGetsTwoEntries) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The trigonometric ops (flywheel-dag#14)
+// The trigonometric ops
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The textbook forms, to 4 ulp. tan's is checked against 1/cos² a, so that the
-// check is not the formula it checks.
+// The textbook forms, to 4 ulp. For tan the check is 1/cos² a, not the op's
+// 1 + tan² a, so it does not test the formula against itself.
 TEST(AadPartials, TrigOpsMatchTheirClosedForms) {
     auto a = Input<double>::make("a", 0.0);
     auto b = Input<double>::make("b", 1.0);

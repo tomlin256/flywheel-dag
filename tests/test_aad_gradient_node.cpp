@@ -8,7 +8,7 @@
 // =============================================================================
 
 // aad::GradientNode: a node whose value is a gradient, so an engine delivers
-// sensitivities through addOutput (flywheel-dag#12).
+// sensitivities through addOutput.
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
@@ -65,9 +65,8 @@ TEST(AadGradientNode, MatchesTheTape) {
     expectTheTapesGradient(aad_test::PolarRoundTrip{});
 }
 
-// The issue's example. x·y is 6 at (2, 3) and at (3, 2), so the root's own
-// callback fires once. Its gradient moves from (3, 2) to (2, 3), and the
-// node delivers both.
+// x·y is 6 at (2, 3) and at (3, 2), so the root's own callback fires once. Its
+// gradient moves from (3, 2) to (2, 3), and the node delivers both.
 TEST(AadGradientNode, DeliversAGradientThatMovesWhileTheValueStandsStill) {
     async::Engine engine;
     auto x = async::AsyncInput<double>::make("x", 2.0);
@@ -185,10 +184,10 @@ TEST(AadGradientNode, AnEqualityPolicyGatesDelivery) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The root is sel·x, where sel picks e^x or a counted functor of y. With the
-// exponential taken, sel does not hear a move of y, so the node stays clean
-// (flywheel-dag#18). When x moves and moves back, the node records a tape, as
-// the dual calls show, without reading the branch not taken, although that
-// branch's node is one of its wrt nodes.
+// exponential taken, sel does not hear a move of y, so the node stays clean.
+// When x moves and moves back, the node records a tape, as the dual calls show,
+// without reading the branch not taken, although that branch's node is one of
+// its wrt nodes.
 TEST(AadGradientNode, EvaluatesOnlyWhatItsRootDoes) {
     auto x    = Input<double>::make("x", 2.0);
     auto y    = Input<double>::make("y", 3.0);
@@ -259,8 +258,7 @@ TEST(AadGradientNode, DoesNotAdvanceAStatefulNode) {
 
 // k·x·x, where k is always dirty. The tape's pull evaluates k again, which
 // marks the root dirty again, so the node stays dirty with it. The move of x
-// then reaches the node, although the cascade stops at the root
-// (flywheel-dag#19).
+// then reaches the node, although the cascade stops at the root.
 TEST(AadGradientNode, StaysDirtyWhileItsRootIs) {
     auto k    = test_nodes::AlwaysFiring::make(2.0);
     auto x    = Input<double>::make("x", 3.0);
@@ -281,8 +279,7 @@ TEST(AadGradientNode, StaysDirtyWhileItsRootIs) {
 // k·x·x − (k + 1), where k is always dirty and reaches the root by two paths.
 // The root's own evaluation pulls k twice, and the second pull leaves k·x·x
 // dirty again, so the root stays dirty after its pull. The node records it
-// anyway: an always-dirty node neither hangs nor throws a sensitivity node
-// (flywheel-dag#18).
+// anyway: an always-dirty node makes a sensitivity node neither hang nor throw.
 TEST(AadGradientNode, RecordsARootThatStaysDirty) {
     auto k    = test_nodes::AlwaysFiring::make(2.0);
     auto x    = Input<double>::make("x", 3.0);
