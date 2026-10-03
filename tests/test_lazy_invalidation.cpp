@@ -517,7 +517,9 @@ TEST(LazyInvalidation, Case6_ConditionNodeNeverServesAStaleUntakenBranch) {
         << "the untaken branch is evaluated on the way past, never served stale";
 }
 
-TEST(LazyInvalidation, Case6_ConditionNodeMaySpuriouslyRecomputeAndThatIsAcceptable) {
+// src never moves, so nothing dirties whenTrue while pick takes whenFalse. The
+// switch back pulls whenTrue clean, and its functor does not run again.
+TEST(LazyInvalidation, Case6_ConditionNodeSwitchingAwayAndBackDoesNotRerunTheBranch) {
     auto flag = Input<bool>::make("flag", true);
     auto src  = Input<double>::make("src", 1.0);
     int  takenRuns = 0;
@@ -533,16 +535,13 @@ TEST(LazyInvalidation, Case6_ConditionNodeMaySpuriouslyRecomputeAndThatIsAccepta
 
     EvalContext ctx;
     pick->eval(ctx);
-    const int afterFirst = takenRuns;
+    ASSERT_EQ(takenRuns, 1);
 
-    // Toggle away and back without src moving. A recompute of the taken branch
-    // is allowed here. A stale value is not, which the sibling test pins.
     flag->set(false); pick->eval(ctx);
     flag->set(true);  pick->eval(ctx);
 
-    EXPECT_GE(takenRuns, afterFirst)
-        << "a spurious recompute is allowed here — what is NOT allowed is a "
-           "stale value, which the sibling test pins";
+    EXPECT_EQ(takenRuns, 1)
+        << "src never moved, so the switch back found whenTrue clean";
 }
 
 // ── Case 7 — forceRecompute still forces ────────────────────────────────────
