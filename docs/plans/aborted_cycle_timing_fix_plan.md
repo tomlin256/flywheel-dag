@@ -1,8 +1,9 @@
 # Time a Cycle That Throws
 
-**Status: Proposed (2026-10-03).** Awaiting approval. `Engine::cycle()` times itself from a scope
-guard, so a cycle that a node, a callback or a source throws out of is timed up to the throw, and
-every duration statistic covers the cycles `cycleCount()` counts.
+**Status: Done (2026-10-03).** Approved 2026-10-03. Both steps landed, and v0.1.15 is released.
+`Engine::cycle()` times itself from a scope guard, so a cycle that a node, a callback or a source
+throws out of is timed up to the throw, and every duration statistic covers every cycle that has
+ended.
 
 Closes [flywheel-dag#21](https://github.com/tomlin256/flywheel-dag/issues/21).
 
@@ -147,6 +148,25 @@ Commit: `fix: time a cycle that throws`.
 installed version file reports 0.1.15, the release is published, and flywheel-dag#21 is closed.
 
 Commits: `build: release v0.1.15` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit and step 2 as the release commit. CI run 37142553479 on the release
+commit is green on both legs, `ubuntu-latest` with GCC and `macos-latest` with Apple Clang, with
+`FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the local struct raised no GCC-only warning. Locally the
+build printed no warnings, ctest was 36 of 36, and the installed version file reports 0.1.15.
+`v0.1.15` is tagged on the release commit and released, and flywheel-dag#21 is closed.
+
+The checks on scratch copies of `include/`, with the repo's own tree untouched:
+
+- **The tests.** Built against `include/` from `ef531e6` and from v0.1.14, 77 tests of
+  `test_dag_async` pass and the four new ones fail. The three site tests fail on `lastCycleUs()`
+  reading 0, and `StatsCoverACycleThatThrewAndOneThatDidNot` on the minimum and the rolling mean.
+  With the fix all 81 pass.
+- **The hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`.
+  Over 40 rounds in random order, medians in ns/cycle, `ef531e6` against the fix: chain 259.1 and
+  259.6, idle-queues 231.6 and 232.2, ingest 116.1 and 117.0. Ingest's 0.9 ns (0.8%) is the one
+  row above, inside the spread of a single series, about 6 ns.
 
 ## Not in this plan
 
