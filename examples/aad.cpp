@@ -27,7 +27,7 @@
 #include <cstdio>
 #include <vector>
 
-int main() {
+bool runBlackScholesExample() {
     using namespace dag;
 
     auto spot   = Input<double>::make("spot", 100.0);
@@ -105,5 +105,51 @@ int main() {
 
     std::printf("\n%s\n", agree ? "reverse, forward and bumped agree"
                                 : "reverse, forward and bumped DISAGREE");
-    return agree ? 0 : 1;
+    return agree;
+}
+
+bool runPolynomialExample() {
+    using namespace dag;
+
+    constexpr double xValue = 2.0;
+    auto x = Input<double>::make("x", xValue);
+    auto two = Input<double>::make("two", 2.0);
+    auto ten = Input<double>::make("ten", 10.0);
+
+    auto square = ops::ProductNode<>::make("x^2", {x, x});
+    auto twiceSquare = ops::ProductNode<>::make("2*x^2", {two, square});
+    auto opsResult = ops::SumNode<>::make("ops polynomial", {twiceSquare, x, ten});
+    auto genericResult = aad::DifferentiableNode<1>::make(
+        "generic polynomial", {x},
+        [](const auto& value) { return 2.0 * value * value + value + 10.0; },
+        InvalidationMode::Lazy);
+
+    EvalContext ctx;
+    const double opsValue = get_value<double>(opsResult->eval(ctx));
+    const double genericValue = get_value<double>(genericResult->eval(ctx));
+    const aad::Tape tape({opsResult, genericResult});
+    const std::vector<NodePtr> wrt = {x};
+    const double opsDerivative = tape.adjoints(opsResult, wrt)[0];
+    const double genericDerivative = tape.adjoints(genericResult, wrt)[0];
+    const double expectedValue = 2.0 * xValue * xValue + xValue + 10.0;
+    const double expectedDerivative = 4.0 * xValue + 1.0;
+
+    const bool agree = std::abs(opsValue - expectedValue) <= 1e-12
+        && std::abs(genericValue - expectedValue) <= 1e-12
+        && std::abs(opsDerivative - expectedDerivative) <= 1e-12
+        && std::abs(genericDerivative - expectedDerivative) <= 1e-12;
+
+    std::printf("polynomial at x=%.1f: ops=%.10f generic=%.10f\n",
+                xValue, opsValue, genericValue);
+    std::printf("derivative: ops=%.10f generic=%.10f expected=%.10f\n",
+                opsDerivative, genericDerivative, expectedDerivative);
+    std::printf("%s\n", agree ? "ops and generic polynomial values and derivatives agree"
+                                : "ops and generic polynomial values and derivatives DISAGREE");
+    return agree;
+}
+
+int main() {
+    const bool blackScholesAgrees = runBlackScholesExample();
+    const bool polynomialAgrees = runPolynomialExample();
+    return blackScholesAgrees && polynomialAgrees ? 0 : 1;
 }
