@@ -148,8 +148,45 @@ bool runPolynomialExample() {
     return agree;
 }
 
+bool runAdjointTangentExample() {
+    using namespace dag;
+
+    constexpr double xValue = 3.0;
+    constexpr double yValue = 4.0;
+    auto x = Input<double>::make("x", xValue);
+    auto y = Input<double>::make("y", yValue);
+    auto xSquare = ops::ProductNode<>::make("x^2", {x, x});
+    auto ySquare = ops::ProductNode<>::make("y^2", {y, y});
+    NodePtr result = ops::SumNode<>::make("x^2 + y^2", {xSquare, ySquare});
+
+    EvalContext ctx;
+    const double value = get_value<double>(result->eval(ctx));
+    const aad::Tape tape({result});
+    const std::vector<NodePtr> wrt = {x, y};
+    const std::vector<double> adjoints = tape.adjoints(result, wrt);
+    const std::vector<aad::Seed> direction = {{x, 1.0}, {y, 1.0}};
+    const double tangent = tape.tangents(direction)[0];
+    const double expectedValue = xValue * xValue + yValue * yValue;
+    const double expectedTangent = 2.0 * xValue + 2.0 * yValue;
+
+    const bool agree = std::abs(value - expectedValue) <= 1e-12
+        && std::abs(adjoints[0] - 2.0 * xValue) <= 1e-12
+        && std::abs(adjoints[1] - 2.0 * yValue) <= 1e-12
+        && std::abs(tangent - expectedTangent) <= 1e-12
+        && std::abs(tangent - adjoints[0] - adjoints[1]) <= 1e-12;
+
+    std::printf("f(x,y)=x^2+y^2 at (%.1f,%.1f): %.10f\n",
+                xValue, yValue, value);
+    std::printf("adjoints: df/dx=%.10f df/dy=%.10f\n", adjoints[0], adjoints[1]);
+    std::printf("tangent along (1,1): %.10f\n", tangent);
+    std::printf("%s\n", agree ? "adjoints and directional tangent agree"
+                                : "adjoints and directional tangent DISAGREE");
+    return agree;
+}
+
 int main() {
     const bool blackScholesAgrees = runBlackScholesExample();
     const bool polynomialAgrees = runPolynomialExample();
-    return blackScholesAgrees && polynomialAgrees ? 0 : 1;
+    const bool adjointTangentAgrees = runAdjointTangentExample();
+    return blackScholesAgrees && polynomialAgrees && adjointTangentAgrees ? 0 : 1;
 }
