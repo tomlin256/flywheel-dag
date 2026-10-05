@@ -14,7 +14,8 @@
 //  AsyncInput<T>   — post/flush semantics, latest-wins, skipped/pending counts,
 //                    equality policy, downstream invalidation, wake hook, thread safety
 //  AsyncQueue<T>   — FIFO delivery, max-size overflow, dropped count, wake hook
-//  FeedRegistry    — flush-all, hasPending, wake hook propagation
+//  FeedRegistry    — flush-all, hasPending, pendingCount, order, wake hook propagation,
+//                    nesting, and the engine flushing a member added after addSource()
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
@@ -595,6 +596,141 @@ TEST(FeedRegistry, AllReturnsAllInputs) {
     reg.add(AsyncInput<double>::make("b", 0.0));
     reg.add(AsyncInput<double>::make("c", 0.0));
     EXPECT_EQ(reg.all().size(), 3u);
+}
+
+namespace {
+
+// A source that notes each flush in a shared log, so a test can read the order sources flush in.
+class LoggedSource final : public IFlushable {
+public:
+    LoggedSource(std::string name, std::vector<std::string>& log)
+        : name_(std::move(name)), log_(log) {}
+
+    std::size_t flush() override { log_.push_back(name_); return 0; }
+    std::size_t pendingCount() const override { return 0; }
+    std::string name() const override { return name_; }
+    void setWakeHook(std::function<void()>) override {}
+
+private:
+    std::string               name_;
+    std::vector<std::string>& log_;
+};
+
+}  // namespace
+
+TEST(FeedRegistry, PendingCountSumsTheMembers) {
+    FeedRegistry reg;
+    auto a = AsyncInput<double>::make("a", 0.0);
+    auto q = AsyncQueue<int>::make("q");
+    reg.add(a);
+    reg.add(q);
+
+    EXPECT_EQ(reg.pendingCount(), 0u);
+    a->post(1.0);
+    q->post(1);
+    q->post(2);
+    EXPECT_EQ(reg.pendingCount(), 3u);   // a's one latest-wins value and q's two items
+    reg.flush();
+    EXPECT_EQ(reg.pendingCount(), 0u);
+}
+
+TEST(FeedRegistry, NameIsFeedRegistry) {
+    EXPECT_EQ(FeedRegistry().name(), "feed_registry");
+}
+
+TEST(FeedRegistry, FlushesMembersInTheOrderTheyWereAdded) {
+    std::vector<std::string> log;
+    FeedRegistry reg;
+    reg.add(std::make_shared<LoggedSource>("first", log));
+    reg.add(std::make_shared<LoggedSource>("second", log));
+    reg.flush();
+    reg.add(std::make_shared<LoggedSource>("third", log));   // added after a flush
+    reg.flush();
+
+    EXPECT_EQ(log, (std::vector<std::string>{"first", "second", "first", "second", "third"}));
+}
+
+TEST(FeedRegistry, ARegistryIsAMemberOfAnother) {
+    auto inner = std::make_shared<FeedRegistry>();
+    auto a = AsyncInput<double>::make("a", 0.0);
+    inner->add(a);
+
+    FeedRegistry outer;
+    std::atomic<int> hookCount{0};
+    outer.setWakeHook([&] { ++hookCount; });
+    outer.add(inner);   // after the hook is set: it must reach a through inner
+
+    a->post(1.0);
+    EXPECT_EQ(hookCount.load(), 1);
+    EXPECT_EQ(outer.pendingCount(), 1u);
+    EXPECT_EQ(outer.flush(), 1u);
+    EXPECT_EQ(a->current(), 1.0);
+    EXPECT_EQ(outer.pendingCount(), 0u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine and FeedRegistry
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A registry is a source like any other, so the engine flushes it whole: a member added after
+// addSource() is flushed too (flywheel-dag#27).
+TEST(EngineFeedRegistry, AMemberAddedAfterAddSourceIsFlushed) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    auto a = AsyncInput<int>::make("a", 0);
+    reg->add(a);
+    engine.addSource(reg);
+    auto b = AsyncInput<int>::make("b", 0);
+    reg->add(b);   // after addSource()
+
+    int seenA = -1, seenB = -1;
+    engine.addOutput<int>(a, [&](const int& v) { seenA = v; });
+    engine.addOutput<int>(b, [&](const int& v) { seenB = v; });
+    engine.step();
+    a->post(1);
+    b->post(2);
+    engine.step();
+
+    EXPECT_EQ(seenA, 1);
+    EXPECT_EQ(seenB, 2);
+    EXPECT_EQ(b->pendingCount(), 0u);
+}
+
+// A member added after addSource() posts from inside a cycle, as a feed thread would. The post
+// must wake run() through the hook the engine gave the registry, and the next cycle must flush it.
+// If either fails, run() waits on its condition variable for ever, which ctest reports as a
+// timeout, not a wrong value.
+TEST(EngineFeedRegistry, ALateMemberWakesRunAndIsFlushed) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    engine.addSource(reg);
+    auto late = AsyncInput<int>::make("late", 0);
+    reg->add(late);
+
+    std::vector<int> seen;
+    engine.addOutput<int>(late, [&](const int& v) {
+        seen.push_back(v);
+        if (v == 0) late->post(2);   // cycle 1 delivers the initial value
+        else        engine.stop();
+    });
+    engine.run();
+
+    EXPECT_EQ(seen, (std::vector<int>{0, 2}));
+    EXPECT_EQ(engine.cycleCount(), 2u);
+}
+
+// The registry keeps its place in the engine's order, and a member added late joins it there.
+TEST(EngineFeedRegistry, ALateMemberFlushesInTheRegistrysPlace) {
+    std::vector<std::string> log;
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    engine.addSource(std::make_shared<LoggedSource>("before", log));
+    engine.addSource(reg);
+    engine.addSource(std::make_shared<LoggedSource>("after", log));
+    reg->add(std::make_shared<LoggedSource>("member", log));   // added once "after" is registered
+    engine.step();
+
+    EXPECT_EQ(log, (std::vector<std::string>{"before", "member", "after"}));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

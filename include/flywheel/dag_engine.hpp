@@ -150,15 +150,10 @@ public:
 
     // ── Source registration ───────────────────────────────────────────────────
 
-    /// Register a single async source (AsyncInput, AsyncQueue, …).
-    /// The engine installs its wake hook and flushes the source on every cycle.
+    /// Register an async source (AsyncInput, AsyncQueue, …) or a FeedRegistry of them.
+    /// The engine installs its wake hook and flushes the source on every cycle. It flushes a
+    /// registry as a whole, so a member added to the registry after this call is flushed too.
     void addSource(std::shared_ptr<IFlushable> src);
-
-    /// Register every source inside a FeedRegistry.
-    /// The registry propagates the hook to all current and future members, but
-    /// the engine flushes only the members present now: a source added to the
-    /// registry later is never flushed (flywheel-dag#27).
-    void addSource(FeedRegistry& reg);
 
     /// Create a synchronous Input<T> that wakes the engine on set().
     /// This is the right type for thresholds, configuration, user-driven params.

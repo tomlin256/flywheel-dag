@@ -203,6 +203,14 @@ inline std::size_t FeedRegistry::flush() {
     return total;
 }
 
+inline std::size_t FeedRegistry::pendingCount() const {
+    std::size_t total = 0;
+    for (auto& inp : inputs_) total += inp->pendingCount();
+    return total;
+}
+
+inline std::string FeedRegistry::name() const { return "feed_registry"; }
+
 inline bool FeedRegistry::hasPending() const {
     for (auto& inp : inputs_) if (inp->pendingCount() > 0) return true;
     return false;

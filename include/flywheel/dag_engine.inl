@@ -150,11 +150,6 @@ inline void Engine::addSource(std::shared_ptr<IFlushable> src) {
     sources_.push_back(std::move(src));
 }
 
-inline void Engine::addSource(FeedRegistry& reg) {
-    reg.setWakeHook(makeWakeHook());
-    for (auto& s : reg.all()) sources_.push_back(s);
-}
-
 template<typename T>
 dag::InputPtr<T> Engine::makeInput(
     std::string name, T initial,

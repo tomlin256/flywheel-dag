@@ -25,7 +25,7 @@
 //  IFlushable       — interface for sources the eval thread must drain
 //  AsyncInput<T>    — "latest wins" thread-safe input node
 //  AsyncQueue<T>    — FIFO; eval() yields std::vector<T> (each flush's batch)
-//  FeedRegistry     — groups sources; propagates wake hook to all members
+//  FeedRegistry     — an IFlushable that groups sources; hands on the wake hook
 //  TickLoop         — fixed-rate loop for use without the Engine
 
 #include "dag.hpp"
@@ -193,17 +193,38 @@ template<typename T>
 using QueuePtr = std::shared_ptr<AsyncQueue<T>>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FeedRegistry — groups IFlushable sources.
+// FeedRegistry — groups IFlushable sources, and is one itself.
 //
-// Propagates the wake hook to all current and future members so the engine
-// only needs to call registry.setWakeHook() once.
+// An Engine takes a registry through addSource() like any other source and
+// flushes it each cycle, which flushes every member in the order it was added.
+// A member added after that call is flushed too, in the registry's place in the
+// engine's order. setWakeHook() on the registry reaches every member, present
+// and future, so the engine installs its hook once. A registry may itself be a
+// member of another.
+//
+// add() and flush() share the member list: call add() on the thread that
+// flushes, never from another thread while the engine runs and never from a
+// member's own flush(). A new member must not be posted to from another thread
+// before add() returns, because add() installs its wake hook, which must be set
+// before any thread posts (IFlushable::setWakeHook()).
 // ─────────────────────────────────────────────────────────────────────────────
-class FeedRegistry {
+class FeedRegistry : public IFlushable {
 public:
+    /// Add a member. It is flushed after the members already here, and it gets
+    /// the wake hook the registry holds, if any.
     void add(std::shared_ptr<IFlushable> input);
-    std::size_t flush();
+
+    // ── IFlushable ────────────────────────────────────────────────────────────
+    /// Flush every member, in the order added. Returns the total they applied.
+    std::size_t flush() override;
+    /// The members' pending counts, summed.
+    std::size_t pendingCount() const override;
+    std::string name() const override;
+    void setWakeHook(std::function<void()> hook) override;
+
+    /// True when any member has values waiting: pendingCount() > 0, without
+    /// summing the rest once one is found.
     bool hasPending() const;
-    void setWakeHook(std::function<void()> hook);
     const std::vector<std::shared_ptr<IFlushable>>& all() const;
 
 private:

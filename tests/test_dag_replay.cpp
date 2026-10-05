@@ -186,9 +186,9 @@ TEST(ReplayInput, InOrderDelivery) {
         "price", {{1, 10.0}, {2, 20.0}, {3, 30.0}}, coord);
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);
-    reg.add(price);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);
+    reg->add(price);
     engine.addSource(reg);
 
     std::vector<double> seq;
@@ -206,9 +206,9 @@ TEST(ReplayInput, RepeatedValueEqualitySuppressed) {
         "price", {{1, 5.0}, {2, 5.0}, {3, 7.0}}, coord);
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);
-    reg.add(price);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);
+    reg->add(price);
     engine.addSource(reg);
 
     std::vector<double> seq;
@@ -224,9 +224,9 @@ TEST(ReplayQueue, BatchBoundariesPreserved) {
         "trades", {{1, {10, 11, 12}}, {2, {20}}}, coord);
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);
-    reg.add(trades);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);
+    reg->add(trades);
     engine.addSource(reg);
 
     std::vector<std::vector<int>> batches;
@@ -247,11 +247,11 @@ TEST(ReplayAlignment, TwoInputsOneQueueInterleavedSeqs) {
     auto trades = ReplayQueue<int>::make("trades",    {{1, {10, 11, 12}}, {2, {20}}}, coord);
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);            // coordinator FIRST
-    reg.add(price);
-    reg.add(spread);
-    reg.add(trades);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);            // coordinator FIRST
+    reg->add(price);
+    reg->add(spread);
+    reg->add(trades);
     engine.addSource(reg);
 
     std::vector<std::pair<std::uint64_t, double>> priceSeq, spreadSeq;
@@ -278,10 +278,10 @@ TEST(ReplayAlignment, ShorterStreamIdlesWhileOthersContinue) {
     auto spread = ReplayInput<double>::make("spread", {{1, 0.5}}, coord);   // only seq 1
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);
-    reg.add(price);
-    reg.add(spread);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);
+    reg->add(price);
+    reg->add(spread);
     engine.addSource(reg);
 
     std::vector<double> priceSeq, spreadSeq;
@@ -299,9 +299,9 @@ TEST(ReplayInput, StepDrivenMiniSession) {
         "price", {{1, 10.0}, {2, 20.0}, {3, 30.0}}, coord);
 
     Engine engine;
-    FeedRegistry reg;
-    reg.add(coord);
-    reg.add(price);
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(coord);
+    reg->add(price);
     engine.addSource(reg);
 
     std::vector<double> seq;
