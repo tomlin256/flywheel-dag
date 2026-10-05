@@ -1,6 +1,8 @@
 # Make FeedRegistry an IFlushable
 
-**Status: Proposed (2026-10-05), awaiting approval.**
+**Status: Done (2026-10-05).** Approved 2026-10-05. Both steps landed, and v0.2.0 is released.
+`FeedRegistry` is an `IFlushable` and `Engine::addSource(FeedRegistry&)` is gone, so the engine
+flushes a registry as a whole and a member added after `addSource()` is flushed too.
 
 Closes [flywheel-dag#27](https://github.com/tomlin256/flywheel-dag/issues/27).
 
@@ -181,6 +183,29 @@ Commit: `fix: make FeedRegistry an IFlushable`.
 installed version file reports 0.2.0, the release is published, and flywheel-dag#27 is closed.
 
 Commits: `build: release v0.2.0` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit and step 2 as the release commit. CI run 37367623870 on the release
+commit is green on both legs, `ubuntu-latest` with GCC and `macos-latest` with Apple Clang, with
+`FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the new tests raised no GCC-only warning. The macOS job
+passed first time. The ubuntu job did not start: GitHub reported that no hosted runner acquired it,
+no step ran, and it passed on a re-run, so no code change was involved. Locally the build printed
+no warnings, ctest was 36 of 36, and the installed version file reports 0.2.0. `v0.2.0` is tagged
+on the release commit and released, and flywheel-dag#27 is closed.
+
+The checks on scratch copies of `include/`, with the repo's own tree untouched:
+
+- **The mutations,** rerun on a copy of the committed tree: the same results as the prototype's.
+  The control copy passes all 88 `test_dag_async` tests, and each mutation fails the tests the
+  Prototype section names. The three that hang were killed after 30 s.
+- **The hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`.
+  Over 40 rounds in random order, medians in ns/cycle, `c3965ee` against the committed tree: chain
+  262.1 and 262.8, idle-queues 233.6 and 233.6, ingest 118.5 and 118.2. The engine's headers are
+  the same in `c3965ee` and v0.1.15, so those are v0.1.15's numbers too.
+
+Nothing was pushed while the ubuntu job re-ran, because the workflow cancels the run in flight
+when a newer push lands on `main`.
 
 ## Not in this plan
 
