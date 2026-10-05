@@ -4,20 +4,20 @@
 #
 #   FetchContent_Declare(flywheel_dag
 #     GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-#     GIT_TAG        v0.1.15)
+#     GIT_TAG        v0.2.0)
 #   FetchContent_MakeAvailable(flywheel_dag)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
 # or install it (cmake --install <build> --prefix <prefix>) and find it. The
 # consumer then provides spdlog and nlohmann/json itself:
 #
-#   find_package(flywheel_dag 0.1 CONFIG REQUIRED)
+#   find_package(flywheel_dag 0.2 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
 # 3.18 is a plain minimum, not a <min>...<max> range: a range flips every policy
 # up to <max> to NEW, which needs its own audit.
 cmake_minimum_required(VERSION 3.18)
-project(FLYWHEEL_DAG VERSION 0.1.15 LANGUAGES CXX)
+project(FLYWHEEL_DAG VERSION 0.2.0 LANGUAGES CXX)
 
 # Export compile_commands.json for clangd and other tooling.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -143,8 +143,8 @@ if(FLYWHEEL_DAG_INSTALL)
     configure_package_config_file(cmake/flywheel_dagConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfig.cmake
         INSTALL_DESTINATION ${_flywheel_dag_config_dir})
-    # Before 1.0 a minor release may break the API, so a request for 0.1 accepts
-    # any 0.1.z and nothing else. At 1.0 this becomes SameMajorVersion.
+    # Before 1.0 a minor release may break the API, so a request for 0.2 accepts
+    # any 0.2.z and nothing else. At 1.0 this becomes SameMajorVersion.
     # ARCH_INDEPENDENT: headers do not care what pointer size the consumer has.
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfigVersion.cmake

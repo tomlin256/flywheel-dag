@@ -43,7 +43,7 @@ evaluates only the part of the graph they dirtied.
 include(FetchContent)
 FetchContent_Declare(flywheel_dag
   GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-  GIT_TAG        v0.1.15)
+  GIT_TAG        v0.2.0)
 FetchContent_MakeAvailable(flywheel_dag)
 
 target_link_libraries(my_app PRIVATE flywheel::dag)
@@ -67,7 +67,7 @@ The prefix holds the engine alone: its headers, a `find_package` config and the 
 Configure your project with `-DCMAKE_PREFIX_PATH=/opt/flywheel-dag`, and find it:
 
 ```cmake
-find_package(flywheel_dag 0.1 CONFIG REQUIRED)
+find_package(flywheel_dag 0.2 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE flywheel::dag)
 ```
 
@@ -79,7 +79,7 @@ Your project provides spdlog and nlohmann/json, in one of two ways:
   and looks for a package only when there is none, so your build holds one copy of each.
 
 The engine is tested with spdlog 1.17.0 and nlohmann/json 3.12.0. Before 1.0 a minor release may
-break the API, so `find_package(flywheel_dag 0.1)` accepts any 0.1.z release and nothing newer.
+break the API, so `find_package(flywheel_dag 0.2)` accepts any 0.2.z release and nothing newer.
 
 ### A first graph
 
