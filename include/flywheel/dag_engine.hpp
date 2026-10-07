@@ -153,6 +153,11 @@ public:
     /// Register an async source (AsyncInput, AsyncQueue, …) or a FeedRegistry of them.
     /// The engine installs its wake hook and flushes the source on every cycle. It flushes a
     /// registry as a whole, so a member added to the registry after this call is flushed too.
+    /// A source the engine already flushes, as one of its own or inside a registry it holds, is
+    /// ignored: it keeps its first place in the order, and its wake hook is not installed again.
+    /// The check sees what the engine holds, so a registry that holds a source the engine flushes
+    /// outside it flushes that source twice (flywheel-dag#37): add a source to one place.
+    /// Register a source between cycles, on the thread that runs them.
     void addSource(std::shared_ptr<IFlushable> src);
 
     /// Create a synchronous Input<T> that wakes the engine on set().

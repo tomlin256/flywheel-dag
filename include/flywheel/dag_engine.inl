@@ -146,6 +146,8 @@ inline void Engine::install(std::shared_ptr<IComputeModule> m) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline void Engine::addSource(std::shared_ptr<IFlushable> src) {
+    for (const auto& s : sources_)
+        if (s->includes(*src)) return;
     src->setWakeHook(makeWakeHook());
     sources_.push_back(std::move(src));
 }

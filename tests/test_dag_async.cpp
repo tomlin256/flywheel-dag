@@ -15,7 +15,9 @@
 //                    equality policy, downstream invalidation, wake hook, thread safety
 //  AsyncQueue<T>   — FIFO delivery, max-size overflow, dropped count, wake hook
 //  FeedRegistry    — flush-all, hasPending, pendingCount, order, wake hook propagation,
-//                    nesting, and the engine flushing a member added after addSource()
+//                    nesting, includes(), and the engine flushing a member added after
+//                    addSource()
+//  Engine sources  — a source the engine already flushes is not added again
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
@@ -616,6 +618,22 @@ private:
     std::vector<std::string>& log_;
 };
 
+// A source that counts the flushes it gets and the wake hooks it is given.
+class CountedSource final : public IFlushable {
+public:
+    std::size_t flush() override { ++flushes_; return 0; }
+    std::size_t pendingCount() const override { return 0; }
+    std::string name() const override { return "counted"; }
+    void setWakeHook(std::function<void()>) override { ++hooks_; }
+
+    int flushes() const { return flushes_; }
+    int hooks()   const { return hooks_; }
+
+private:
+    int flushes_ = 0;
+    int hooks_   = 0;
+};
+
 }  // namespace
 
 TEST(FeedRegistry, PendingCountSumsTheMembers) {
@@ -666,6 +684,78 @@ TEST(FeedRegistry, ARegistryIsAMemberOfAnother) {
     EXPECT_EQ(outer.flush(), 1u);
     EXPECT_EQ(a->current(), 1.0);
     EXPECT_EQ(outer.pendingCount(), 0u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A source held twice (flywheel-dag#36)
+//
+// flush() drains, so a second flush in a cycle finds nothing, and an AsyncQueue's
+// rebinds its value to [] before any node has read the batch the first made.
+// The engine and a registry hold a source once for that reason.
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(IFlushable, IncludesItselfAndNoOtherSource) {
+    const CountedSource a;
+    const CountedSource b;
+    EXPECT_TRUE(a.includes(a));
+    EXPECT_FALSE(a.includes(b));
+}
+
+TEST(FeedRegistry, IncludesItselfAndItsMembersAtAnyDepth) {
+    auto deep = std::make_shared<CountedSource>();
+    auto inner = std::make_shared<FeedRegistry>();
+    inner->add(deep);
+    auto member = std::make_shared<CountedSource>();
+    FeedRegistry outer;
+    outer.add(member);
+    outer.add(inner);
+    const CountedSource stranger;
+
+    EXPECT_TRUE(outer.includes(outer));
+    EXPECT_TRUE(outer.includes(*member));
+    EXPECT_TRUE(outer.includes(*inner));
+    EXPECT_TRUE(outer.includes(*deep));
+    EXPECT_FALSE(outer.includes(stranger));
+    EXPECT_FALSE(inner->includes(*member)) << "a registry does not include its siblings";
+}
+
+TEST(FeedRegistry, AMemberAddedTwiceIsHeldOnce) {
+    FeedRegistry reg;
+    reg.setWakeHook([] {});
+    auto a = std::make_shared<CountedSource>();
+    reg.add(a);
+    reg.add(a);
+
+    EXPECT_EQ(reg.all().size(), 1u);
+    reg.flush();
+    EXPECT_EQ(a->flushes(), 1);
+    EXPECT_EQ(a->hooks(), 1) << "the repeat must not install the hook again";
+}
+
+TEST(FeedRegistry, AMemberOfAMemberRegistryIsNotAddedAgain) {
+    auto inner = std::make_shared<FeedRegistry>();
+    auto a = std::make_shared<CountedSource>();
+    inner->add(a);
+    FeedRegistry outer;
+    outer.add(inner);
+    outer.add(a);
+
+    EXPECT_EQ(outer.all().size(), 1u);
+    outer.flush();
+    EXPECT_EQ(a->flushes(), 1);
+}
+
+// A registry includes itself, so adding it to itself is ignored. Held, it would send flush() and
+// includes() round for ever; the check comes before anything is added or flushed for that reason.
+TEST(FeedRegistry, ARegistryAddedToItselfIsIgnored) {
+    auto reg = std::make_shared<FeedRegistry>();
+    reg->add(reg);
+    ASSERT_TRUE(reg->all().empty());
+
+    auto a = std::make_shared<CountedSource>();
+    reg->add(a);
+    reg->flush();
+    EXPECT_EQ(a->flushes(), 1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -731,6 +821,106 @@ TEST(EngineFeedRegistry, ALateMemberFlushesInTheRegistrysPlace) {
     engine.step();
 
     EXPECT_EQ(log, (std::vector<std::string>{"before", "member", "after"}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine and a source added twice (flywheel-dag#36)
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(EngineSources, ASourceAddedTwiceIsFlushedOncePerCycle) {
+    Engine engine;
+    auto s = std::make_shared<CountedSource>();
+    engine.addSource(s);
+    engine.addSource(s);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+    EXPECT_EQ(s->hooks(), 1) << "the repeat must not install the hook again";
+}
+
+// The issue's sequence: the queue was flushed twice in the second cycle, and the second flush
+// replaced its batch with [] before the output read it.
+TEST(EngineSources, AnAsyncQueueAddedTwiceDeliversItsBatch) {
+    Engine engine;
+    auto q = AsyncQueue<int>::make("q");
+    engine.addSource(q);
+    engine.addSource(q);
+    int calls = 0;
+    std::vector<int> last;
+    engine.addOutput<std::vector<int>>(q, [&](const std::vector<int>& batch) {
+        ++calls;
+        last = batch;
+    });
+    engine.step();   // delivers the empty batch every new output gets
+    q->post(1);
+    q->post(2);
+    engine.step();
+
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(last, (std::vector<int>{1, 2}));
+}
+
+TEST(EngineSources, ARepeatKeepsTheSourcesFirstPlaceInTheOrder) {
+    std::vector<std::string> log;
+    Engine engine;
+    auto a = std::make_shared<LoggedSource>("a", log);
+    engine.addSource(a);
+    engine.addSource(std::make_shared<LoggedSource>("b", log));
+    engine.addSource(a);   // after b, and ignored, so a still flushes first
+    engine.step();
+
+    EXPECT_EQ(log, (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(EngineSources, ASourceInsideARegistryIsNotAddedAgain) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    reg->add(s);
+    engine.addSource(reg);
+    engine.addSource(s);
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 1);
+}
+
+TEST(EngineSources, ASourceAddedToARegistryAfterItsAddSourceIsNotAddedAgain) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    engine.addSource(reg);
+    auto s = std::make_shared<CountedSource>();
+    reg->add(s);   // after addSource()
+    engine.addSource(s);
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 1);
+}
+
+TEST(EngineSources, ASourceInsideANestedRegistryIsNotAddedAgain) {
+    Engine engine;
+    auto inner = std::make_shared<FeedRegistry>();
+    auto outer = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    inner->add(s);
+    outer->add(inner);
+    engine.addSource(outer);
+    engine.addSource(s);
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 1);
+}
+
+TEST(EngineSources, ARegistryAddedTwiceIsFlushedOnce) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    reg->add(s);
+    engine.addSource(reg);
+    engine.addSource(reg);
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -193,6 +193,7 @@ AsyncQueue<T>::AsyncQueue(std::string n, std::size_t maxSz)
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline void FeedRegistry::add(std::shared_ptr<IFlushable> input) {
+    if (includes(*input)) return;
     if (wakeHook_) input->setWakeHook(wakeHook_);
     inputs_.push_back(std::move(input));
 }
@@ -219,6 +220,12 @@ inline bool FeedRegistry::hasPending() const {
 inline void FeedRegistry::setWakeHook(std::function<void()> hook) {
     wakeHook_ = hook;
     for (auto& inp : inputs_) inp->setWakeHook(hook);
+}
+
+inline bool FeedRegistry::includes(const IFlushable& src) const {
+    if (this == &src) return true;
+    for (const auto& inp : inputs_) if (inp->includes(src)) return true;
+    return false;
 }
 
 inline const std::vector<std::shared_ptr<IFlushable>>& FeedRegistry::all() const {

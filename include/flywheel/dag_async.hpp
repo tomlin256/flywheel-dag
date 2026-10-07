@@ -42,6 +42,12 @@ namespace dag::async {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IFlushable — anything the eval thread must drain before pulling the graph.
+//
+// The engine flushes a source once per cycle. A second flush in a cycle finds
+// nothing staged, and an AsyncQueue then rebinds its value to [] before any
+// node has read the batch the first flush made (flywheel-dag#36). So the engine
+// and a registry hold a source once, and includes() is how they tell they
+// already do.
 // ─────────────────────────────────────────────────────────────────────────────
 class IFlushable {
 public:
@@ -59,6 +65,11 @@ public:
     /// once, before any thread posts. It runs on the feed thread, outside the
     /// staging lock, so it must be cheap.
     virtual void setWakeHook(std::function<void()> hook) = 0;
+
+    /// True when flushing this source also flushes `src`: this source itself or, for a source that
+    /// flushes others, one of them. A group of your own overrides it, so that the engine and a
+    /// registry see through it as they do through a FeedRegistry.
+    virtual bool includes(const IFlushable& src) const { return this == &src; }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,6 +213,13 @@ using QueuePtr = std::shared_ptr<AsyncQueue<T>>;
 // and future, so the engine installs its hook once. A registry may itself be a
 // member of another.
 //
+// A registry holds a source once: add() ignores one the registry already
+// includes, directly or inside a member registry, and does not install its wake
+// hook again. The check sees only this registry. A source that another registry
+// holds, or that the engine flushes outside this one, flushes once for each, and
+// an AsyncQueue then drops its batch (flywheel-dag#37): add a source to one
+// place.
+//
 // add() and flush() share the member list: call add() on the thread that
 // flushes, never from another thread while the engine runs and never from a
 // member's own flush(). A new member must not be posted to from another thread
@@ -211,7 +229,8 @@ using QueuePtr = std::shared_ptr<AsyncQueue<T>>;
 class FeedRegistry : public IFlushable {
 public:
     /// Add a member. It is flushed after the members already here, and it gets
-    /// the wake hook the registry holds, if any.
+    /// the wake hook the registry holds, if any. A source the registry already
+    /// includes is ignored.
     void add(std::shared_ptr<IFlushable> input);
 
     // ── IFlushable ────────────────────────────────────────────────────────────
@@ -221,6 +240,8 @@ public:
     std::size_t pendingCount() const override;
     std::string name() const override;
     void setWakeHook(std::function<void()> hook) override;
+    /// This registry, or a member that includes `src`, at any depth.
+    bool includes(const IFlushable& src) const override;
 
     /// True when any member has values waiting: pendingCount() > 0, without
     /// summing the rest once one is found.

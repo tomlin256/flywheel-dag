@@ -163,6 +163,23 @@ TEST(ReplayCoordinator, EngineRunCompletesUnattended) {
     EXPECT_EQ(engine.cycleCount(), 5u);           // 3 groups + 1 drain + 1 exhaust-detect
 }
 
+// A coordinator the engine already flushes inside a registry is not added again: flushed twice,
+// it would advance two groups in a cycle, and a replayed source would never see the one between
+// (flywheel-dag#36).
+TEST(ReplayCoordinator, ACoordinatorAddedAgainAdvancesOneGroupPerCycle) {
+    Engine engine;
+    auto coord = ReplayCoordinator::make({{1, 100}, {2, 200}, {3, 300}}, /*drain*/ 1);
+    auto registry = std::make_shared<FeedRegistry>();
+    registry->add(coord);
+    engine.addSource(registry);
+    engine.addSource(coord);   // the registry holds it already
+
+    engine.step();
+    EXPECT_EQ(coord->currentSeq(), 1u);
+    engine.step();
+    EXPECT_EQ(coord->currentSeq(), 2u);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ReplayInput<T> + ReplayQueue<T>
 // ═══════════════════════════════════════════════════════════════════════════════
