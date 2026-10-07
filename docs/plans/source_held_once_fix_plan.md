@@ -1,9 +1,9 @@
 # Hold a Source Once
 
-**Status: Proposed (2026-10-07), awaiting approval.** The engine and a registry ignore a source
-they already flush, so a source registered twice is flushed once per cycle and an `AsyncQueue`
-keeps its batch. The plan recommends this design over a flush-time one. Both were prototyped, and
-the choice is open (see "The alternative").
+**Status: Approved (2026-10-07).** The engine and a registry ignore a source they already flush,
+so a source registered twice is flushed once per cycle and an `AsyncQueue` keeps its batch. This
+design was chosen over a flush-time one. Both were prototyped (see "The alternative"), and
+[flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37) holds the flush-time design.
 
 Closes [flywheel-dag#36](https://github.com/tomlin256/flywheel-dag/issues/36).
 
@@ -130,10 +130,10 @@ It costs more:
 - **It leaves a repeat in place.** `all()` lists it, `pendingCount()` counts it twice, and its hook is
   installed twice.
 
-**This plan recommends the registration check:** it costs the flush loop nothing, it is the fix the
-issue proposes, and it covers the wirings an engine's own setup code is likely to produce. If the
-other four must be closed, the plan changes to the flush-time design. Otherwise a follow-up issue
-records the four, with that design in it.
+**The plan takes the registration check:** it costs the flush loop nothing, it is the fix the issue
+proposes, and it covers the wirings an engine's own setup code is likely to produce.
+[flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37) records the four it leaves,
+with the flush-time design in it.
 
 ## Tests
 
@@ -231,8 +231,10 @@ Commits: `build: release v0.2.1` and `docs: mark the plan done`.
 
 ## Not in this plan
 
-- **The four wirings marked 2.** A follow-up issue, opened once this design is approved, with the
-  flush-time design in it. Until then the comments tell a caller to add a source to one place.
+- **The four wirings marked 2.**
+  [flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37), opened once this design
+  was approved, holds the flush-time design. Until then the comments tell a caller to add a source
+  to one place.
 - **A cycle through two registries,** `R1:R2 R2:R1`. It recurses without end in `flush()` and
   `setWakeHook()`, as before, and `includes()` and so `add()` now recurse too, where `add()` did not.
   Refusing a member that includes the registry (`input->includes(*this)`) would stop the cycle
