@@ -1,8 +1,9 @@
 # Hold a Source Once
 
-**Status: Approved (2026-10-07).** The engine and a registry ignore a source they already flush,
-so a source registered twice is flushed once per cycle and an `AsyncQueue` keeps its batch. This
-design was chosen over a flush-time one. Both were prototyped (see "The alternative"), and
+**Status: Done (2026-10-08).** Approved 2026-10-07. Both steps landed, and v0.2.1 is released.
+The engine and a registry ignore a source they already flush, so a source registered twice is
+flushed once per cycle and an `AsyncQueue` keeps its batch. This design was chosen over a
+flush-time one. Both were prototyped (see "The alternative"), and
 [flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37) holds the flush-time design.
 
 Closes [flywheel-dag#36](https://github.com/tomlin256/flywheel-dag/issues/36).
@@ -228,6 +229,28 @@ Commit: `fix: hold a source once`.
 installed version file reports 0.2.1, the release is published, and flywheel-dag#36 is closed.
 
 Commits: `build: release v0.2.1` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit and step 2 as the release commit. CI run 37745040031 on the release
+commit is green on both legs, `ubuntu-latest` with GCC and `macos-latest` with Apple Clang, with
+`FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the new tests raised no GCC-only warning. Both jobs passed
+first time. Locally the build printed no warnings, ctest was 36 of 36, and the installed version
+file reports 0.2.1. `v0.2.1` is tagged on the release commit and released, and flywheel-dag#36 is
+closed.
+
+The checks on scratch copies of `include/`, with the repo's own tree untouched:
+
+- **The mutations,** rerun on the committed tree: the same results as the prototype's. The control
+  copy passes all 100 `test_dag_async` and 15 `test_dag_replay` tests, and each change fails the
+  tests the "Fails under" column names.
+- **The hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`.
+  Over 40 rounds in random order, medians in ns/cycle, `1f79d99` against the committed tree: chain
+  259.4 and 260.0, idle-queues 232.0 and 231.6, ingest 115.9 and 115.3. The engine's headers are
+  the same in `1f79d99` and v0.2.0, so those are v0.2.0's numbers too.
+
+The comments over `FeedRegistry` and `addSource()`, and the `CLAUDE.md` clause, point at
+flywheel-dag#37 for the four wirings the check misses.
 
 ## Not in this plan
 
