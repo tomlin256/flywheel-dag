@@ -1,10 +1,11 @@
 # Flush a Source Once, However Many Registries Hold It
 
-**Status: Proposed (2026-10-10), awaiting approval.** The engine flushes from a list it builds out of
-the sources and registries it holds, with each source listed once. A source that two containers
-hold without seeing each other is then flushed once per cycle, and an `AsyncQueue` keeps its batch.
-This is not the design the issue sketches, a stamp on each source: that one costs the registry path
-3.2%, and this one costs nothing measurable (see "The alternative").
+**Status: Approved (2026-10-10).** The engine flushes from a list it builds out of the sources and
+registries it holds, with each source listed once. A source that two containers hold without seeing
+each other is then flushed once per cycle, and an `AsyncQueue` keeps its batch. This is not the
+design the issue sketches, a stamp on each source: that one costs the registry path 3.2%, and this
+one costs nothing measurable (see "The alternative"). The plan was approved as written, with the
+flush list over the stamp.
 
 Closes [flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37).
 
