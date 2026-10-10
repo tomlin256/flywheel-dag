@@ -1,11 +1,11 @@
 # Flush a Source Once, However Many Registries Hold It
 
-**Status: Approved (2026-10-10).** The engine flushes from a list it builds out of the sources and
-registries it holds, with each source listed once. A source that two containers hold without seeing
-each other is then flushed once per cycle, and an `AsyncQueue` keeps its batch. This is not the
-design the issue sketches, a stamp on each source: that one costs the registry path 3.2%, and this
-one costs nothing measurable (see "The alternative"). The plan was approved as written, with the
-flush list over the stamp.
+**Status: Done (2026-10-10).** Approved 2026-10-10. All three steps landed, and v0.2.2 is released.
+The engine flushes from a list it builds out of the sources and registries it holds, with each
+source listed once. A source that two containers hold without seeing each other is then flushed once
+per cycle, and an `AsyncQueue` keeps its batch. This is not the design the issue sketches, a stamp on
+each source: that one costs the registry path 3.2%, and this one costs nothing measurable (see "The
+alternative"). The plan was approved as written, with the flush list over the stamp.
 
 Closes [flywheel-dag#37](https://github.com/tomlin256/flywheel-dag/issues/37).
 
@@ -182,9 +182,9 @@ untouched. The code is the sketch above, and the tests are the table.
   returns null (8 and 1); the walk keeps the last place (1); `cycle()` does not look for growth (3);
   the walk watches only the first group (1); the list is always stale (1); the rebuild does not
   clear the list (2); `FeedRegistry::members()` has no exact-type check (2); `addSource()` does not
-  mark the list stale (1, and old tests fail with it, and a test that calls `run()` waits for ever,
-  since no source is flushed); the default `members()` returns a list (test 1, and the engine
-  tests, for the same reason).
+  mark the list stale (13 and 1, with 7 older tests, and a test that calls `run()` waits for ever,
+  since no source is flushed); the default `members()` returns a list (12 and 1, with the same 7
+  older tests, for the same reason).
 - **Hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt` for both
   builds. 30 rounds of the benchmark, each running the two builds in a random order. Medians in
   ns/cycle, v0.2.1 against the change: chain 264.5 and 262.1 (-0.9%), idle-queues 234.8 and 234.9
@@ -250,6 +250,43 @@ green (36 of 36), CI is green on the release commit on both legs, the installed 
 0.2.2, the release is published, and flywheel-dag#37 is closed.
 
 Commits: `build: release v0.2.2` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit, step 2 as one, and the release as a third. CI run 38069373831 on the
+release commit is green on both legs, `ubuntu-latest` with GCC and `macos-latest` with Apple Clang,
+with `FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the new tests raised no GCC-only warning. Locally the
+build printed no warnings, ctest was 36 of 36, and the installed version file reports 0.2.2.
+`v0.2.2` is tagged on the release commit and released, and flywheel-dag#37 is closed.
+
+The checks on scratch copies of the committed tree, with the repo's own tree untouched:
+
+- **The mutations,** rerun on the committed tree. The control copy passes all 116 `test_dag_async`
+  and 16 `test_dag_replay` tests, and each change fails the tests the "Fails under" column names, as
+  in the prototype, except that two changes stop the engine flushing at all and fail more than their
+  column says. With `addSource()` not marking the list stale the list is never built: 13 new tests
+  and the new one in `test_dag_replay` fail, with 7 older ones. The prototype paragraph said 1 for
+  it, and is corrected. With the default `members()` returning a list every plain source is walked
+  as an empty group: 12 new tests and the one in `test_dag_replay` fail, with the same 7 older ones.
+  A test that calls `run()` waits for ever under either, so both runs were limited to the tests that
+  only step.
+- **The hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`. Over
+  40 rounds in random order, medians in ns/cycle, v0.2.1 and the committed tree: chain 265.5 and
+  264.8 (-0.3%), idle-queues 235.3 and 235.2 (0.0%), ingest 117.8 and 118.8 (+0.9%). The step 1
+  commit, whose engine is v0.2.1's, ran in the same rounds and read 265.0, 234.9 and 119.8 (-0.2%,
+  -0.2% and +1.7%), so the spread is code layout, not the list.
+- **The registry path.** 32 idle `AsyncQueue`s behind one registry, 15 shuffled rounds at each of
+  eight code alignments. Median over alignments, v0.2.1 and the committed tree: 238.01 and 237.22
+  ns/cycle (-0.3%, and -0.9% to -0.1% at the eight). Directly registered queues: 237.15 and 237.36
+  (+0.1%). The step 1 commit read 0.0% on both. A cost would show at every alignment, and none does.
+- **Rebuilding.** The first cycle after a registration, medians of five: 0.11 ms for 1,000 sources
+  behind a registry where v0.2.1's takes 0.03, and 0.58 ms for 10,000 where v0.2.1's takes 0.12. A
+  steady cycle takes the same: 0.013 ms and 0.070 ms against v0.2.1's 0.015 ms and 0.070 ms.
+  Registration is the scan of flywheel-dag#36, unchanged.
+
+The code is the sketch in "The fix". `FeedRegistry`'s member list and `all()` are spelled
+`IFlushable::Members`, the type they had, and `CountingRegistry` is defined with test 3 in step 1,
+since that test needs a derived registry too.
 
 ## Not in this plan
 
