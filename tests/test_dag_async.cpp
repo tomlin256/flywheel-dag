@@ -11,12 +11,13 @@
 //
 // Coverage
 // ────────
+//  IFlushable      — the defaults: a source includes only itself and has no members
 //  AsyncInput<T>   — post/flush semantics, latest-wins, skipped/pending counts,
 //                    equality policy, downstream invalidation, wake hook, thread safety
 //  AsyncQueue<T>   — FIFO delivery, max-size overflow, dropped count, wake hook
 //  FeedRegistry    — flush-all, hasPending, pendingCount, order, wake hook propagation,
-//                    nesting, includes(), and the engine flushing a member added after
-//                    addSource()
+//                    nesting, includes(), members(), and the engine flushing a member
+//                    added after addSource()
 //  Engine sources  — a source the engine already flushes is not added again
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
@@ -756,6 +757,49 @@ TEST(FeedRegistry, ARegistryAddedToItselfIsIgnored) {
     reg->add(a);
     reg->flush();
     EXPECT_EQ(a->flushes(), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A group's members (flywheel-dag#37)
+//
+// A group says which sources it flushes through members(), so that a caller can see through it.
+// A plain source flushes no others, and a class derived from FeedRegistry may override flush(),
+// so only an exact FeedRegistry answers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// A registry that counts its flushes, as a class derived from FeedRegistry might to time them.
+class CountingRegistry final : public FeedRegistry {
+public:
+    std::size_t flush() override { ++flushes_; return FeedRegistry::flush(); }
+
+    int flushes() const { return flushes_; }
+
+private:
+    int flushes_ = 0;
+};
+
+}  // namespace
+
+TEST(IFlushable, ASourceHasNoMembers) {
+    const CountedSource a;
+    EXPECT_EQ(a.members(), nullptr);
+}
+
+TEST(FeedRegistry, MembersAreTheListAllReturns) {
+    FeedRegistry reg;
+    ASSERT_NE(reg.members(), nullptr);
+    EXPECT_EQ(reg.members(), &reg.all());
+    reg.add(std::make_shared<CountedSource>());
+    EXPECT_EQ(reg.members()->size(), 1u);
+}
+
+// A derived class may do more in flush() than flush the members, so it keeps the default and is
+// flushed through its own flush(), unless it overrides members() to be seen through.
+TEST(FeedRegistry, AClassDerivedFromItHasNoMembers) {
+    const CountingRegistry reg;
+    EXPECT_EQ(reg.members(), nullptr);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

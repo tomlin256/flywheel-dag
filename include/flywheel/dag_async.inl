@@ -228,7 +228,11 @@ inline bool FeedRegistry::includes(const IFlushable& src) const {
     return false;
 }
 
-inline const std::vector<std::shared_ptr<IFlushable>>& FeedRegistry::all() const {
+inline const IFlushable::Members* FeedRegistry::members() const {
+    return typeid(*this) == typeid(FeedRegistry) ? &inputs_ : nullptr;
+}
+
+inline const IFlushable::Members& FeedRegistry::all() const {
     return inputs_;
 }
 

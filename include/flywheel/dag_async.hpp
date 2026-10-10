@@ -37,6 +37,7 @@
 #include <chrono>
 #include <functional>
 #include <condition_variable>
+#include <typeinfo>
 
 namespace dag::async {
 
@@ -51,6 +52,8 @@ namespace dag::async {
 // ─────────────────────────────────────────────────────────────────────────────
 class IFlushable {
 public:
+    using Members = std::vector<std::shared_ptr<IFlushable>>;
+
     virtual ~IFlushable() = default;
 
     /// Drain staged data on the eval thread. Returns values applied (0 = nothing new).
@@ -70,6 +73,13 @@ public:
     /// flushes others, one of them. A group of your own overrides it, so that the engine and a
     /// registry see through it as they do through a FeedRegistry.
     virtual bool includes(const IFlushable& src) const { return this == &src; }
+
+    /// The sources this one flushes, in the order it flushes them, when its flush() does no more than
+    /// that. Null, the default, is a source that flushes no others, or a group that cannot promise so:
+    /// either is flushed through its flush(). A group that returns a list promises that its flush()
+    /// does no more than flush that list in order, that the list only grows, and that it stays at one
+    /// address for the life of the group.
+    virtual const Members* members() const { return nullptr; }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,14 +252,17 @@ public:
     void setWakeHook(std::function<void()> hook) override;
     /// This registry, or a member that includes `src`, at any depth.
     bool includes(const IFlushable& src) const override;
+    /// The members, when this is a FeedRegistry itself. A class derived from it may override
+    /// flush(), so this answers null for one, and it overrides members() to be seen through.
+    const Members* members() const override;
 
     /// True when any member has values waiting: pendingCount() > 0, without
     /// summing the rest once one is found.
     bool hasPending() const;
-    const std::vector<std::shared_ptr<IFlushable>>& all() const;
+    const Members& all() const;
 
 private:
-    std::vector<std::shared_ptr<IFlushable>> inputs_;
+    Members inputs_;
     std::function<void()> wakeHook_;
 };
 
