@@ -44,11 +44,19 @@ namespace dag::async {
 // ─────────────────────────────────────────────────────────────────────────────
 // IFlushable — anything the eval thread must drain before pulling the graph.
 //
-// The engine flushes a source once per cycle. A second flush in a cycle finds
-// nothing staged, and an AsyncQueue then rebinds its value to [] before any
-// node has read the batch the first flush made (flywheel-dag#36). So the engine
-// and a registry hold a source once, and includes() is how they tell they
-// already do.
+// The engine flushes a source once per cycle, however many groups hold it. A
+// second flush in a cycle finds nothing staged, and an AsyncQueue then rebinds
+// its value to [] before any node has read the batch the first flush made
+// (flywheel-dag#36). Two things keep it so:
+//
+//   - The engine and a registry hold a source once, and includes() is how they
+//     tell they already do. That keeps a plain repeat out of all() and
+//     pendingCount(), and its wake hook from going in twice. It sees only what
+//     one holder holds.
+//   - The engine flushes from a list it builds out of the sources and groups it
+//     holds, with each source listed once (flywheel-dag#37). members() is how a
+//     group lets it see inside, and the list closes what includes() cannot: a
+//     source in two groups that cannot see each other.
 // ─────────────────────────────────────────────────────────────────────────────
 class IFlushable {
 public:
@@ -64,9 +72,9 @@ public:
 
     virtual std::string name() const = 0;
 
-    /// Register the wake hook that post() invokes to signal pending work. Called
-    /// once, before any thread posts. It runs on the feed thread, outside the
-    /// staging lock, so it must be cheap.
+    /// Register the wake hook that post() invokes to signal pending work. Called before any thread
+    /// posts, once for each holder: a source that two registries hold gets the engine's hook from
+    /// each. It runs on the feed thread, outside the staging lock, so it must be cheap.
     virtual void setWakeHook(std::function<void()> hook) = 0;
 
     /// True when flushing this source also flushes `src`: this source itself or, for a source that
@@ -76,9 +84,12 @@ public:
 
     /// The sources this one flushes, in the order it flushes them, when its flush() does no more than
     /// that. Null, the default, is a source that flushes no others, or a group that cannot promise so:
-    /// either is flushed through its flush(). A group that returns a list promises that its flush()
-    /// does no more than flush that list in order, that the list only grows, and that it stays at one
-    /// address for the life of the group.
+    /// either is flushed through its flush().
+    ///
+    /// The engine flushes a group that returns a list by flushing the members itself, once each
+    /// however many groups hold them, and does not call the group's flush(). So the group promises
+    /// that its flush() does no more than flush that list in order, that the list only grows, and
+    /// that it stays at one address for the life of the group.
     virtual const Members* members() const { return nullptr; }
 };
 
@@ -217,18 +228,22 @@ using QueuePtr = std::shared_ptr<AsyncQueue<T>>;
 // FeedRegistry — groups IFlushable sources, and is one itself.
 //
 // An Engine takes a registry through addSource() like any other source and
-// flushes it each cycle, which flushes every member in the order it was added.
-// A member added after that call is flushed too, in the registry's place in the
-// engine's order. setWakeHook() on the registry reaches every member, present
-// and future, so the engine installs its hook once. A registry may itself be a
-// member of another.
+// flushes every member each cycle, in the order it was added. A member added
+// after that call is flushed too, in the registry's place in the engine's order.
+// The engine does it through members(), not flush(), so that a member held
+// elsewhere too is flushed once (below). setWakeHook() on the registry reaches
+// every member, present and future, so the engine installs its hook once. A
+// registry may itself be a member of another.
 //
 // A registry holds a source once: add() ignores one the registry already
 // includes, directly or inside a member registry, and does not install its wake
 // hook again. The check sees only this registry. A source that another registry
-// holds, or that the engine flushes outside this one, flushes once for each, and
-// an AsyncQueue then drops its batch (flywheel-dag#37): add a source to one
-// place.
+// holds, or that the engine flushes outside this one, is held again, and the
+// engine flushes it once all the same: it lists each source once, at the first
+// place it reaches it (flywheel-dag#37). setWakeHook() reaches such a source
+// once for each registry that holds it. A registry flushed on its own, outside
+// an engine, flushes each member as it holds it, so a source that it and one of
+// its member registries both hold is flushed twice there.
 //
 // add() and flush() share the member list: call add() on the thread that
 // flushes, never from another thread while the engine runs and never from a

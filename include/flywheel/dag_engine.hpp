@@ -45,6 +45,17 @@
 //   next cycle.  A new output starts due, so the first cycle after it is
 //   registered delivers the value its node holds then.
 //
+// Flush list
+//   A cycle flushes from a list the engine builds out of the sources and groups
+//   it holds, in registration order, with a group replaced by its members() and
+//   each source listed once, at the first place the walk reaches it.  A source
+//   that two groups hold, without either seeing the other, is then flushed once
+//   per cycle.  Flushed twice, it would find nothing staged the second time, and
+//   an AsyncQueue would drop its batch (flywheel-dag#37).  addSource() marks the
+//   list stale and the next cycle rebuilds it.  A cycle rebuilds it too when a
+//   group it walked through has grown, which a size compare per group finds, with
+//   no work per source.
+//
 // Input<T> (with wake hook)
 //   Use makeInput<T>() for config / parameter values you set from application
 //   code.  set() propagates dirty flags through the graph AND wakes the engine,
@@ -72,6 +83,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unordered_set>
 
 namespace dag::async {
 
@@ -152,11 +164,14 @@ public:
 
     /// Register an async source (AsyncInput, AsyncQueue, …) or a FeedRegistry of them.
     /// The engine installs its wake hook and flushes the source on every cycle. It flushes a
-    /// registry as a whole, so a member added to the registry after this call is flushed too.
+    /// registry member by member, in the registry's place in the order, so a member added to the
+    /// registry after this call is flushed too, from the next cycle.
     /// A source the engine already flushes, as one of its own or inside a registry it holds, is
     /// ignored: it keeps its first place in the order, and its wake hook is not installed again.
-    /// The check sees what the engine holds, so a registry that holds a source the engine flushes
-    /// outside it flushes that source twice (flywheel-dag#37): add a source to one place.
+    /// The check sees what the engine holds when this is called. A source that reaches the engine
+    /// by another route, through two registries or into a registry after it is registered, is
+    /// flushed once all the same, at the first place the engine reaches it (flywheel-dag#37), and
+    /// is given the wake hook once for each registry that holds it.
     /// Register a source between cycles, on the thread that runs them.
     void addSource(std::shared_ptr<IFlushable> src);
 
@@ -267,6 +282,13 @@ private:
     void cycle();
     std::function<void()> makeWakeHook();
 
+    // The flush list (flywheel-dag#37). expandSource() walks one source into it: a source with no
+    // members() is listed, once, and a group is entered, once, and its members walked in its place.
+    void rebuildFlushList();
+    void expandSource(const std::shared_ptr<IFlushable>& src,
+                      std::unordered_set<const IFlushable*>& seen);
+    bool flushListStale() const;
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     struct OutputEntry {
@@ -275,9 +297,20 @@ private:
         std::function<void(const ValuePtr&)> callback;
     };
 
+    // A group the flush list was walked through, and the size its member list had then. A group's
+    // list only grows (IFlushable::members()), so a different size is a member added since.
+    struct WatchedGroup {
+        std::shared_ptr<const IFlushable::Members> list;   // kept alive by the group it belongs to
+        std::size_t                                size;
+    };
+
     std::shared_ptr<IStateStore>                 store_;
     std::vector<std::shared_ptr<IComputeModule>> modules_;
-    std::vector<std::shared_ptr<IFlushable>>     sources_;
+    std::vector<std::shared_ptr<IFlushable>>     sources_;      // as registered
+    std::vector<std::shared_ptr<IFlushable>>     flushList_;    // what cycle() flushes: sources_ with
+                                                                // each group replaced by its members
+    std::vector<WatchedGroup>                    watched_;
+    bool                                         flushListStale_ = false;   // addSource() sets it
     std::vector<OutputEntry>                     outputs_;
     // One per output: owed a visit by cycle(). addOutput() sets it, so a new output is due; cycle()
     // marks an output whose node is dirty, and clears it once it reaches the output.

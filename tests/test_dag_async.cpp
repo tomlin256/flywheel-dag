@@ -18,7 +18,9 @@
 //  FeedRegistry    — flush-all, hasPending, pendingCount, order, wake hook propagation,
 //                    nesting, includes(), members(), and the engine flushing a member
 //                    added after addSource()
-//  Engine sources  — a source the engine already flushes is not added again
+//  Engine sources  — a source the engine already flushes is not added again, and a
+//                    source held by groups that cannot see each other is flushed
+//                    once per cycle, from the flush list the engine builds
 //  TickLoop        — start/stop lifecycle, callback delivery
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
@@ -965,6 +967,261 @@ TEST(EngineSources, ARegistryAddedTwiceIsFlushedOnce) {
     engine.step();
 
     EXPECT_EQ(s->flushes(), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine and a source held where the holders cannot see each other (flywheel-dag#37)
+//
+// `E` is the engine, `R` a registry, and `X:Y` means X.add(Y), which is addSource() for E. In each
+// wiring the second holder cannot see the first, so no check at registration catches it. The engine
+// flushes from a list that holds each source once, so the source is flushed once per cycle. Each
+// test steps twice: one flush per cycle, not one flush for ever.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// E:S R:S E:R
+TEST(EngineSources, ASourceTheEngineHoldsIsNotFlushedAgainByARegistryAddedAfterIt) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    engine.addSource(s);
+    reg->add(s);
+    engine.addSource(reg);   // addSource() does not look inside the registry
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+}
+
+// E:S E:R R:S
+TEST(EngineSources, ASourceAddedToARegistryTheEngineHoldsIsFlushedOncePerCycle) {
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    engine.addSource(s);
+    engine.addSource(reg);
+    reg->add(s);   // the registry cannot see the engine
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+}
+
+// E:R1 E:R2 R1:S R2:S
+TEST(EngineSources, ASourceInTwoRegistriesIsFlushedOncePerCycle) {
+    Engine engine;
+    auto first  = std::make_shared<FeedRegistry>();
+    auto second = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    first->add(s);
+    second->add(s);   // the second registry cannot see the first
+    engine.addSource(first);
+    engine.addSource(second);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+}
+
+// R1:R2 R1:S R2:S E:R1
+TEST(EngineSources, ASourceInARegistryAndItsMemberRegistryIsFlushedOncePerCycle) {
+    Engine engine;
+    auto outer = std::make_shared<FeedRegistry>();
+    auto inner = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    outer->add(inner);
+    outer->add(s);
+    inner->add(s);   // the inner registry cannot see the outer one that holds it
+    engine.addSource(outer);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+}
+
+// The issue's sequence, with the queue in two registries: the second flush in a cycle replaced
+// the queue's batch with [] before the output read it.
+TEST(EngineSources, AnAsyncQueueInTwoRegistriesDeliversItsBatch) {
+    Engine engine;
+    auto first  = std::make_shared<FeedRegistry>();
+    auto second = std::make_shared<FeedRegistry>();
+    auto q = AsyncQueue<int>::make("q");
+    first->add(q);
+    second->add(q);
+    engine.addSource(first);
+    engine.addSource(second);
+    int calls = 0;
+    std::vector<int> last;
+    engine.addOutput<std::vector<int>>(q, [&](const std::vector<int>& batch) {
+        ++calls;
+        last = batch;
+    });
+    engine.step();   // delivers the empty batch every new output gets
+    q->post(1);
+    q->post(2);
+    engine.step();
+
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(last, (std::vector<int>{1, 2}));
+}
+
+// A source held twice keeps the place it is first reached in.
+TEST(EngineSources, ASourceHeldTwiceFlushesAtItsFirstPlaceInTheOrder) {
+    std::vector<std::string> log;
+    Engine engine;
+    auto first  = std::make_shared<FeedRegistry>();
+    auto second = std::make_shared<FeedRegistry>();
+    auto shared = std::make_shared<LoggedSource>("shared", log);
+    first->add(std::make_shared<LoggedSource>("a", log));
+    first->add(shared);
+    second->add(std::make_shared<LoggedSource>("b", log));
+    second->add(shared);
+    second->add(std::make_shared<LoggedSource>("c", log));
+    engine.addSource(first);
+    engine.addSource(second);
+    engine.step();
+
+    EXPECT_EQ(log, (std::vector<std::string>{"a", "shared", "b", "c"}));
+}
+
+// The engine builds its list once, so it must notice a registry that grows afterwards: a member
+// added after a cycle has run is flushed from the next one, in the registry's place.
+TEST(EngineSources, AMemberAddedToARegistryAfterTheFirstCycleIsFlushedFromTheNext) {
+    std::vector<std::string> log;
+    Engine engine;
+    auto reg = std::make_shared<FeedRegistry>();
+    engine.addSource(std::make_shared<LoggedSource>("before", log));
+    engine.addSource(reg);
+    engine.addSource(std::make_shared<LoggedSource>("after", log));
+    engine.step();
+    log.clear();
+    reg->add(std::make_shared<LoggedSource>("late", log));
+    engine.step();
+
+    EXPECT_EQ(log, (std::vector<std::string>{"before", "late", "after"}));
+}
+
+TEST(EngineSources, AMemberAddedToANestedRegistryAfterTheFirstCycleIsFlushedFromTheNext) {
+    Engine engine;
+    auto outer = std::make_shared<FeedRegistry>();
+    auto inner = std::make_shared<FeedRegistry>();
+    outer->add(inner);
+    engine.addSource(outer);
+    engine.step();
+    auto late = std::make_shared<CountedSource>();
+    inner->add(late);   // the engine holds outer, which holds inner
+    engine.step();
+
+    EXPECT_EQ(late->flushes(), 1);
+}
+
+TEST(EngineSources, ASourceAddedAfterTheFirstCycleIsFlushedFromTheNext) {
+    Engine engine;
+    engine.addSource(std::make_shared<CountedSource>());
+    engine.step();
+    auto late = std::make_shared<CountedSource>();
+    engine.addSource(late);
+    engine.step();
+
+    EXPECT_EQ(late->flushes(), 1);
+}
+
+// A member added late that another registry holds already stays at one flush per cycle, in the
+// cycle it is added after as in the ones that follow.
+TEST(EngineSources, ALateMemberAnotherRegistryHoldsIsFlushedOncePerCycle) {
+    Engine engine;
+    auto first  = std::make_shared<FeedRegistry>();
+    auto second = std::make_shared<FeedRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    first->add(s);
+    engine.addSource(first);
+    engine.addSource(second);
+    engine.step();
+    second->add(s);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 3) << "one flush per cycle, over three cycles";
+}
+
+namespace {
+
+// A group of your own: it flushes its members in order and says so through members(). It counts
+// the calls to members(), which the engine makes only when it builds its flush list.
+class ListGroup final : public IFlushable {
+public:
+    explicit ListGroup(std::shared_ptr<int> memberCalls) : memberCalls_(std::move(memberCalls)) {}
+
+    void add(std::shared_ptr<IFlushable> member) { members_.push_back(std::move(member)); }
+
+    std::size_t flush() override {
+        std::size_t total = 0;
+        for (const auto& m : members_) total += m->flush();
+        return total;
+    }
+    std::size_t pendingCount() const override {
+        std::size_t total = 0;
+        for (const auto& m : members_) total += m->pendingCount();
+        return total;
+    }
+    std::string name() const override { return "list_group"; }
+    void setWakeHook(std::function<void()> hook) override {
+        for (const auto& m : members_) m->setWakeHook(hook);
+    }
+    const Members* members() const override { ++*memberCalls_; return &members_; }
+
+private:
+    std::shared_ptr<int> memberCalls_;
+    Members              members_;
+};
+
+}  // namespace
+
+// A group that returns its members is flushed member by member, like a registry: a source it
+// holds that the engine holds too is flushed once.
+TEST(EngineSources, AGroupThatReturnsItsMembersIsSeenThrough) {
+    Engine engine;
+    auto group = std::make_shared<ListGroup>(std::make_shared<int>(0));
+    auto s = std::make_shared<CountedSource>();
+    engine.addSource(s);
+    group->add(s);
+    engine.addSource(group);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
+}
+
+// The engine builds its list when a source is added or a group grows, and reuses it otherwise.
+// Nothing is rebuilt in a cycle where nothing changed, which is what keeps the hot path as it was.
+TEST(EngineSources, TheEngineRebuildsItsFlushListOnlyWhenAGroupGrows) {
+    auto memberCalls = std::make_shared<int>(0);
+    auto group = std::make_shared<ListGroup>(memberCalls);
+    Engine engine;
+    engine.addSource(group);
+    EXPECT_EQ(*memberCalls, 0) << "addSource() builds no list";
+    engine.step();
+    engine.step();
+    engine.step();
+    EXPECT_EQ(*memberCalls, 1) << "three cycles, one list";
+    group->add(std::make_shared<CountedSource>());
+    engine.step();
+    engine.step();
+    EXPECT_EQ(*memberCalls, 2) << "the group grew once";
+}
+
+// A class derived from FeedRegistry may do more in flush() than flush the members, which the
+// engine would skip if it flushed them itself: it is flushed through its own flush().
+TEST(EngineSources, ARegistryDerivedFromFeedRegistryIsFlushedThroughItsOwnFlush) {
+    Engine engine;
+    auto reg = std::make_shared<CountingRegistry>();
+    auto s = std::make_shared<CountedSource>();
+    reg->add(s);
+    engine.addSource(reg);
+    engine.step();
+    engine.step();
+
+    EXPECT_EQ(reg->flushes(), 2);
+    EXPECT_EQ(s->flushes(), 2);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

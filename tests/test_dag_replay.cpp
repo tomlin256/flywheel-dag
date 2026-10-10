@@ -180,6 +180,24 @@ TEST(ReplayCoordinator, ACoordinatorAddedAgainAdvancesOneGroupPerCycle) {
     EXPECT_EQ(coord->currentSeq(), 2u);
 }
 
+// A coordinator two registries hold is flushed once a cycle, though neither registry can see the
+// other (flywheel-dag#37).
+TEST(ReplayCoordinator, ACoordinatorInTwoRegistriesAdvancesOneGroupPerCycle) {
+    Engine engine;
+    auto coord = ReplayCoordinator::make({{1, 100}, {2, 200}, {3, 300}}, /*drain*/ 1);
+    auto first  = std::make_shared<FeedRegistry>();
+    auto second = std::make_shared<FeedRegistry>();
+    first->add(coord);
+    second->add(coord);
+    engine.addSource(first);
+    engine.addSource(second);
+
+    engine.step();
+    EXPECT_EQ(coord->currentSeq(), 1u);
+    engine.step();
+    EXPECT_EQ(coord->currentSeq(), 2u);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ReplayInput<T> + ReplayQueue<T>
 // ═══════════════════════════════════════════════════════════════════════════════

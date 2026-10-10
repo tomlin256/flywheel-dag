@@ -150,6 +150,45 @@ inline void Engine::addSource(std::shared_ptr<IFlushable> src) {
         if (s->includes(*src)) return;
     src->setWakeHook(makeWakeHook());
     sources_.push_back(std::move(src));
+    flushListStale_ = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flush list
+//
+// A source two groups hold, where neither group sees the other, is held twice and cannot be
+// refused at registration (flywheel-dag#37). So cycle() flushes from a list that holds each source
+// once, built by walking sources_ in order.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A source or a group is entered once, at the first place the walk reaches it, which is the place a
+// source flushes in. That also ends a walk through a ring of registries.
+inline void Engine::expandSource(const std::shared_ptr<IFlushable>& src,
+                                 std::unordered_set<const IFlushable*>& seen)
+{
+    if (!seen.insert(src.get()).second) return;
+    const IFlushable::Members* members = src->members();
+    if (!members) { flushList_.push_back(src); return; }
+    // The group owns its list, so the pointer shares the group's ownership: it cannot outlive it.
+    watched_.push_back({std::shared_ptr<const IFlushable::Members>(src, members), members->size()});
+    for (const auto& m : *members) expandSource(m, seen);
+}
+
+inline void Engine::rebuildFlushList() {
+    flushList_.clear();
+    watched_.clear();
+    std::unordered_set<const IFlushable*> seen;
+    for (const auto& s : sources_) expandSource(s, seen);
+    flushListStale_ = false;
+}
+
+// A size read and a compare for each group, none for each source. With no group it is an empty
+// loop, so an engine that registers only plain sources pays nothing for the list.
+inline bool Engine::flushListStale() const {
+    if (flushListStale_) return true;
+    for (const auto& w : watched_)
+        if (w.list->size() != w.size) return true;
+    return false;
 }
 
 template<typename T>
@@ -314,7 +353,11 @@ inline void Engine::cycle() {
 
     // 1. Flush all sources — the only point where feed-thread data enters
     //    the DAG.  Invalidations propagate forward synchronously from here.
-    for (auto& s : sources_) s->flush();
+    //    Each source is flushed once, from the list of the sources and groups
+    //    the engine holds (flywheel-dag#37), rebuilt first if a source was
+    //    added since the last cycle or a group grew.
+    if (flushListStale()) rebuildFlushList();
+    for (auto& s : flushList_) s->flush();
 
     // 2. Mark each output whose node is dirty as due, before any eval() call
     //    clears the flags.  ComputeNode::eval() recursively calls eval() on

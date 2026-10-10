@@ -111,10 +111,14 @@ ctest --test-dir build
   `FeedRegistry`). Do not call `AsyncQueue::flush()` directly outside a unit test
   that owns the queue: it always refreshes the cached batch, so a redundant flush
   after a drain replaces the batch with `[]` and silently drops it
-  (`post(t); flush(); engine.step()` loses `t`). The engine and a registry
-  ignore a source they already include, so a source goes in one place: two
-  registries, or a registry and the engine outside it, still flush it twice
-  (flywheel-dag#37).
+  (`post(t); flush(); engine.step()` loses `t`). The engine flushes a source
+  once per cycle however many registries hold it, from a list it builds out of
+  its sources and the `members()` of its groups (flywheel-dag#37). A group of
+  your own overrides `members()` only if its `flush()` is a loop over that list
+  and the list only grows, since the engine skips the group's `flush()`. A class
+  derived from `FeedRegistry` that overrides `flush()` is flushed through it
+  unless it overrides `members()` too. A registry flushed outside an engine
+  still flushes each member as it holds it.
 - Register outputs and install modules between cycles, never from an output
   callback or an `eval()` (flywheel-dag#24).
 - Do not call `CycleSeqLock::readConsistent()` while holding a lock an output
