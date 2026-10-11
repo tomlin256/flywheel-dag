@@ -1,6 +1,6 @@
 # Refuse a Cycle Begun Inside a Cycle
 
-**Status: Proposed (2026-10-11).** `Engine::step()` and `Engine::run()` would throw `std::runtime_error`
+**Status: Approved (2026-10-11).** `Engine::step()` and `Engine::run()` throw `std::runtime_error`
 while a cycle is in flight, from an output callback, a node's `eval()` or a source's `flush()`, and
 begin no cycle. Today such a call runs a cycle inside the cycle, which flushes every source a second
 time, drops an `AsyncQueue`'s batch and leaves `CycleSeqLock` out of step. The test is the one
@@ -8,7 +8,8 @@ time, drops an `AsyncQueue`'s batch and leaves `CycleSeqLock` out of step. The t
 two counters `Engine` keeps already, and it goes first in `cycle()`, which both calls end in. The check
 adds four instructions to `cycle()`, and `bench_hot_path` reads inside the spread of two controls built
 from `22aeb99`'s own headers. The plan refuses rather than makes a nested call work, and "The
-decision" gives the reasons.
+decision" gives the reasons. The plan was approved as written, with the check at the top of `cycle()`
+and the nested call refused rather than made to work by a deferral or a nested cycle.
 
 Closes [flywheel-dag#39](https://github.com/tomlin256/flywheel-dag/issues/39).
 
