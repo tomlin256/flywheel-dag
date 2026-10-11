@@ -212,11 +212,14 @@ dag::InputPtr<T> Engine::makeInput(
 // enough for the function's own buffer then reads freed memory (flywheel-dag#24). These calls are
 // refused while a cycle is in flight. cycles_ counts a cycle as it begins and timedCycles_ as its
 // guard ends it, so they differ from the fetch_add at the top of cycle() to the count in the guard's
-// destructor, a throw included, and still differ when a cycle opened inside the cycle ends. A record
-// of the cycle's thread would be cleared by that nested end. Reading the counters adds nothing to
-// cycle().
+// destructor, a throw included. cycle() asks the same question of a step() or run() made inside a
+// cycle (flywheel-dag#39).
+inline bool Engine::cycleInFlight() const {
+    return cycles_.load(std::memory_order_relaxed) != timedCycles_;
+}
+
 inline void Engine::refuseInCycle(const std::string_view call) const {
-    if (cycles_.load(std::memory_order_relaxed) != timedCycles_)
+    if (cycleInFlight())
         throw std::runtime_error(
             std::string("Engine::").append(call).append("() called during a cycle"));
 }
@@ -339,7 +342,18 @@ inline CycleSeqLockPtr Engine::cycleSeqLock() const { return cycleSeqLock_; }
 // Internal cycle
 // ─────────────────────────────────────────────────────────────────────────────
 
+[[noreturn]] inline void Engine::throwNestedCycle() {
+    throw std::runtime_error("Engine::step() or Engine::run() called during a cycle");
+}
+
 inline void Engine::cycle() {
+    // A step() or run() made inside a cycle (flywheel-dag#39) would flush every source a second
+    // time, which drops an AsyncQueue's batch, and open a second scope on the lock: while it lasts a
+    // reader on another thread sees no cycle open, and its end clears the record of the cycle's
+    // thread, so a read from the callback waits for ever. Refuse before the scope, the count and the
+    // guard, so a refused call begins nothing. The throw is out of line: the check is two loads, a
+    // compare and a branch.
+    if (cycleInFlight()) throwNestedCycle();
     const CycleSeqLock::WriteScope writeScope(*cycleSeqLock_);
     cycles_.fetch_add(1, std::memory_order_relaxed);
 

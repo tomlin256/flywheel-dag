@@ -43,8 +43,9 @@
 //   output stays due until a cycle reaches it, so a node or a callback that
 //   throws out of a cycle leaves the outputs the cycle did not reach to the
 //   next cycle.  A new output starts due, so the first cycle after it is
-//   registered delivers the value its node holds then.  A registration made
-//   inside a cycle, from a callback or a node's eval(), throws (addOutput()).
+//   registered delivers the value its node holds then.  A registration, step()
+//   or run() made inside a cycle, from a callback, a node's eval() or a source's
+//   flush(), throws (addOutput(), step()).
 //
 // Flush list
 //   A cycle flushes from a list the engine builds out of the sources and groups
@@ -120,6 +121,9 @@ inline constexpr std::size_t kDefaultCycleSeqReadAttempts = 64;
 class CycleSeqLock {
 public:
     // Holds one cycle open. RAII so a throwing callback can't leave it open and stall every reader.
+    // Scopes on one lock must not nest: an inner scope turns the sequence word even while the outer
+    // cycle is still open, and its end clears the record of the cycle's thread. Engine::cycle()
+    // takes none while a cycle is in flight (flywheel-dag#39).
     class WriteScope {
     public:
         explicit WriteScope(CycleSeqLock& lock);
@@ -241,6 +245,9 @@ public:
     /// An exception from a node's eval() or an output callback ends the run and leaves through
     /// run(), which can then be called again. The next cycle delivers the outputs the aborted
     /// one did not reach.
+    /// Call it between cycles. Inside a cycle of an engine that step() drives, from an output
+    /// callback, a node's eval() or a source's flush(), it throws std::runtime_error and starts no
+    /// loop. Inside a cycle of an engine that run() drives, it throws as for any second run().
     void run();
 
     /// Signal the engine to stop after the current cycle finishes.
@@ -253,6 +260,11 @@ public:
 
     /// Execute one cycle synchronously (flush → eval → callbacks).
     /// For deterministic testing only — do not call while run() is active.
+    /// Call it between cycles. Inside a cycle, from an output callback, a node's eval() or a
+    /// source's flush(), it throws std::runtime_error and begins no cycle: a cycle inside a cycle
+    /// would flush every source a second time, which drops an AsyncQueue's batch, and leave
+    /// CycleSeqLock out of step. To get another cycle, call step() once this one has returned, or
+    /// poke() an engine that run() drives (flywheel-dag#39).
     void step();
 
     // ── Graph inspection ─────────────────────────────────────────────────────
@@ -289,9 +301,19 @@ private:
     void cycle();
     std::function<void()> makeWakeHook();
 
+    // True from the count at the top of cycle() to the count in its guard, a throw included
+    // (cycles_ and timedCycles_). Ask it on the thread that runs cycles: timedCycles_ is a plain
+    // field that thread writes. cycle() asks it of a step() or run(), refuseInCycle() of a
+    // registration.
+    bool cycleInFlight() const;
+
     // Throws if a cycle is in flight. install(), addOutput() and addFeedback() call it before they
     // change anything.
     void refuseInCycle(std::string_view call) const;
+
+    // What cycle() throws when one is in flight. step() and run() are the only callers of cycle(),
+    // so the message names both rather than the one that called.
+    [[noreturn]] static void throwNestedCycle();
 
     // The flush list (flywheel-dag#37). expandSource() walks one source into it: a source with no
     // members() is listed, once, and a group is entered, once, and its members walked in its place.
@@ -341,8 +363,8 @@ private:
     // touches the total and the count, and publishes their quotient in one store at the end of its
     // guard, so a reader on another thread sees the mean from before a cycle or from after it, never
     // a total from one over a count from the other. It is not totalCycleNs_ / cycles_: cycles_ also
-    // counts a cycle in flight (flywheel-dag#34), and that difference is how refuseInCycle() tells
-    // one is, so it reads the count too, on the thread that runs cycles.
+    // counts a cycle in flight (flywheel-dag#34), and that difference is how cycleInFlight() tells
+    // one is, so cycle() and refuseInCycle() read the count too, on the thread that runs cycles.
     uint64_t              totalCycleNs_ = 0;
     uint64_t              timedCycles_  = 0;
     std::atomic<double>   meanCycleNs_{0.0};

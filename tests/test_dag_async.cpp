@@ -26,8 +26,9 @@
 //                    a read logs when it gives up, which names the read
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
 //  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
-//                    a new output gets the value its node holds at its first cycle, and
-//                    a registration made inside a cycle is refused
+//                    a new output gets the value its node holds at its first cycle,
+//                    a registration made inside a cycle is refused, and so is a
+//                    step() or run() (a cycle begun inside a cycle)
 
 #include <gtest/gtest.h>
 #include <spdlog/sinks/ostream_sink.h>
@@ -2443,9 +2444,8 @@ TEST(EngineRegistrationInCycle, AnotherEnginesOutputMayBeAddedFromACallback) {
     EXPECT_EQ(seen, std::vector<double>{5.0});
 }
 
-// A cycle opened inside a cycle leaves the counters apart when it ends, because the cycle it is in
-// has not. A record of the cycle's thread would be cleared by the nested cycle's end, and the
-// registration after it would get through.
+// A refused step() changes nothing (flywheel-dag#39): it counts no cycle and takes no scope on the
+// lock, so the cycle in flight stays in flight, and a registration after the refusal is refused too.
 TEST(EngineRegistrationInCycle, ARegistrationAfterANestedStepIsStillRefused) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -2457,7 +2457,7 @@ TEST(EngineRegistrationInCycle, ARegistrationAfterANestedStepIsStillRefused) {
     engine.addOutput(probe.node, [&engine, &probe](const ValuePtr&) {
         try {
             engine.step();
-        } catch (const std::runtime_error& e) {   // whatever the nested step() does, the registration is refused
+        } catch (const std::runtime_error& e) {   // the nested step() is refused
             probe.nested = e.what();
         }
         for (int i = 0; i < 8; ++i)
@@ -2467,6 +2467,225 @@ TEST(EngineRegistrationInCycle, ARegistrationAfterANestedStepIsStillRefused) {
     EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle")
         << "the nested step() " << (probe.nested.empty() ? "ran" : "threw: " + probe.nested);
     EXPECT_EQ(engine.outputNodes().size(), 1u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A cycle begun inside a cycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// A source whose flush() steps the engine once. The cycle is in flight by then, in its first phase.
+struct SteppingSource : IFlushable {
+    explicit SteppingSource(Engine& e) : engine(e) {}
+
+    std::size_t flush() override {
+        if (!stepped) {
+            stepped = true;
+            try {
+                engine.step();
+            } catch (const std::runtime_error& e) {
+                refusal = e.what();
+            }
+        }
+        return 0;
+    }
+    std::size_t pendingCount() const override { return 0; }
+    std::string name() const override { return "stepping-source"; }
+    void setWakeHook(std::function<void()>) override {}
+
+    Engine&     engine;
+    bool        stepped = false;
+    std::string refusal;   // what the nested step() threw, if it threw
+};
+
+}  // namespace
+
+// The issue's program. A cycle begun inside the cycle flushed every source a second time, and the
+// queue, which the outer cycle had flushed already, found nothing staged: its batch was gone.
+TEST(EngineNestedCycle, ACallbackThatStepsTheEngineIsRefused) {
+    Engine engine;
+    auto trigger = engine.makeInput<int>("trigger", 0);
+    auto q = AsyncQueue<int>::make("q");
+    engine.addSource(q);
+    std::string refusal;
+    bool inside = false;
+    engine.addOutput<int>(trigger, [&](const int&) {
+        if (inside) return;
+        inside = true;
+        try {
+            engine.step();
+        } catch (const std::runtime_error& e) {
+            refusal = e.what();
+        }
+    });
+    std::vector<std::size_t> sizes;
+    engine.addOutput<std::vector<int>>(q, [&](const std::vector<int>& batch) {
+        sizes.push_back(batch.size());
+    });
+    engine.step();   // the starting values
+    sizes.clear();
+    inside = false;
+    refusal.clear();
+
+    trigger->set(1);
+    q->post(1);
+    q->post(2);
+
+    EXPECT_EQ(stepAndCatch(engine), "");
+    EXPECT_EQ(refusal, "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_EQ(sizes, std::vector<std::size_t>{2});   // the batch the outer cycle flushed
+    EXPECT_EQ(engine.cycleCount(), 2u);              // the refused step() began no cycle
+}
+
+// A node's eval() runs inside the cycle too. The node is left dirty, as for any throw out of a
+// node, so the next cycle retries it.
+TEST(EngineNestedCycle, ANodeThatStepsTheEngineInEvalIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    int evals = 0;
+    auto node = ComputeNode<double, double>::make(
+        "node",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [&engine, &evals](const double& v) {
+            if (++evals == 1) engine.step();   // the first evaluation only, or a nested cycle would recurse
+            return v * 2.0;
+        });
+    std::vector<double> seen;
+    engine.addOutput<double>(node, [&seen](const double& v) { seen.push_back(v); });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_TRUE(seen.empty());
+    EXPECT_EQ(engine.cycleCount(), 1u);
+
+    engine.step();   // the node is evaluated again, and no longer steps
+    EXPECT_EQ(seen, std::vector<double>{2.0});
+    EXPECT_EQ(engine.cycleCount(), 2u);
+}
+
+// The first phase of a cycle is inside it too.
+TEST(EngineNestedCycle, ASourceThatStepsTheEngineInFlushIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    std::vector<double> seen;
+    engine.addOutput<double>(x, [&seen](const double& v) { seen.push_back(v); });
+    auto source = std::make_shared<SteppingSource>(engine);
+    engine.addSource(source);
+
+    EXPECT_EQ(stepAndCatch(engine), "");
+    EXPECT_EQ(source->refusal, "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_EQ(seen, std::vector<double>{1.0});
+    EXPECT_EQ(engine.cycleCount(), 1u);
+}
+
+// run() is refused from inside a cycle, and the refusal clears the flag it set on the way in, or no
+// later run() could start. y's output stops a run that was not refused, which would otherwise wait
+// for ever inside the cycle. It acts only while `nested` is unset, that is inside that run, since a
+// stop() after the refusal would clear the flag itself and hide a refusal that left it set.
+TEST(EngineNestedCycle, ACallbackThatRunsTheEngineIsRefusedAndRunStaysUsable) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto y = engine.makeInput<double>("y", 0.0);
+    std::string nested;
+    bool stopNow = false;
+    engine.addOutput<double>(x, [&](const double&) {
+        if (stopNow) {
+            engine.stop();
+            return;
+        }
+        nested = runAndCatch(engine);
+    });
+    engine.addOutput<double>(y, [&](const double&) {
+        if (nested.empty()) engine.stop();
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "");
+    EXPECT_EQ(nested, "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_EQ(engine.cycleCount(), 1u);
+
+    stopNow = true;
+    x->set(2.0);
+    EXPECT_EQ(runAndCatch(engine), "");   // "already running" if the refusal left the flag set
+}
+
+// A running engine's callback is inside a cycle like a stepping engine's.
+TEST(EngineNestedCycle, ACallbackOfARunningEngineThatStepsIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    std::string nested;
+    engine.addOutput<double>(x, [&](const double&) {
+        try {
+            engine.step();
+        } catch (const std::runtime_error& e) {
+            nested = e.what();
+        }
+        engine.stop();
+    });
+
+    EXPECT_EQ(runAndCatch(engine), "");
+    EXPECT_EQ(nested, "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_EQ(engine.cycleCount(), 1u);
+}
+
+// A refusal is a throw out of a callback like any other: the outputs the cycle did not reach get
+// their value next cycle.
+TEST(EngineNestedCycle, ARefusedStepLeavesTheEngineUsable) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto y = engine.makeInput<double>("y", 2.0);
+    bool nest = true;
+    engine.addOutput<double>(x, [&engine, &nest](const double&) {
+        if (nest) engine.step();
+    });
+    std::vector<double> seenY;
+    engine.addOutput<double>(y, [&seenY](const double& v) { seenY.push_back(v); });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_TRUE(seenY.empty());   // the cycle ended at x's callback, before y's output
+
+    nest = false;
+    engine.step();
+    EXPECT_EQ(seenY, std::vector<double>{2.0});
+    EXPECT_EQ(engine.cycleCount(), 2u);
+}
+
+// CycleSeqLock records the cycle's thread, so that a read from inside the cycle returns at once. A
+// cycle begun inside it cleared the record when it ended, and a read after that waited for ever for
+// a cycle that could not finish.
+TEST(EngineNestedCycle, AReadAfterARefusedStepInTheCallbackReturnsAtOnce) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    const auto lock = engine.cycleSeqLock();
+    std::string refusal;
+    int calls = 0;
+    int got = 0;
+    engine.addOutput<double>(x, [&](const double&) {
+        try {
+            engine.step();
+        } catch (const std::runtime_error& e) {
+            refusal = e.what();
+        }
+        got = lock->readConsistent([&] { ++calls; return 7; });   // waiting would hang
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "");
+    EXPECT_EQ(refusal, "Engine::step() or Engine::run() called during a cycle");
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(got, 7);
+}
+
+// The refusal is per engine: the inner engine has no cycle in flight, so the outer engine's
+// callback may step it.
+TEST(EngineNestedCycle, AnotherEnginesStepMayBeCalledFromACallback) {
+    Engine outer, inner;
+    auto x = outer.makeInput<double>("x", 1.0);
+    auto y = inner.makeInput<double>("y", 5.0);
+    std::vector<double> seen;
+    inner.addOutput<double>(y, [&seen](const double& v) { seen.push_back(v); });
+    outer.addOutput<double>(x, [&inner](const double&) { inner.step(); });
+
+    EXPECT_EQ(stepAndCatch(outer), "");
+    EXPECT_EQ(seen, std::vector<double>{5.0});
 }
 
 int main(int argc, char** argv) {
