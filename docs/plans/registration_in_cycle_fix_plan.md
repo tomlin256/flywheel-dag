@@ -1,12 +1,13 @@
 # Refuse a Registration Made Inside a Cycle
 
-**Status: Proposed (2026-10-11), awaiting approval.** `Engine::addOutput()`, `addFeedback()` and
-`install()` throw `std::runtime_error` while a cycle is in flight, from an output callback or a node's
-`eval()`, and register nothing. Today such a call can free the callback that is running. The check reads
-two counters that `Engine` keeps already, so `Engine::cycle()` and `step()` compile to the same
-instructions as v0.2.3's, and `bench_hot_path` reads within the noise of an identical build. This is the
-first of the issue's three designs. The other two make a registration inside a cycle work, and "The
-decision" gives the reasons this plan does not take them.
+**Status: Approved (2026-10-11).** `Engine::addOutput()`, `addFeedback()` and `install()` throw
+`std::runtime_error` while a cycle is in flight, from an output callback or a node's `eval()`, and
+register nothing. Today such a call can free the callback that is running. The check reads two counters
+that `Engine` keeps already, so `Engine::cycle()` and `step()` compile to the same instructions as
+v0.2.3's, and `bench_hot_path` reads within the noise of an identical build. This is the first of the
+issue's three designs. The other two make a registration inside a cycle work, and "The decision" gives
+the reasons this plan does not take them. The plan was approved as written, with the registration
+refused rather than made to work by a deferral, a `std::deque` or a callback behind a `shared_ptr`.
 
 Closes [flywheel-dag#24](https://github.com/tomlin256/flywheel-dag/issues/24).
 
