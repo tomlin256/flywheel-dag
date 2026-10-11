@@ -1,12 +1,12 @@
 # Take the Mean Over the Cycles That Have Ended
 
-**Status: Approved (2026-10-11).** `Engine::meanCycleUs()` returns a mean that the cycle's thread
-publishes, in one atomic word, as each cycle ends. It does not divide the total by `cycleCount()`,
-which also counts the cycle a read lands in. A read from an output callback, or from another thread
-inside a cycle, then returns the mean of the cycles that have ended, as the other duration
-statistics do, and no read sees a total from one cycle over a count from another. The plan was
-approved as written, with the mean published whole over the count beside the total that the issue
-sketches.
+**Status: Done (2026-10-11).** Approved 2026-10-11. Both steps landed, and v0.2.3 is released.
+`Engine::meanCycleUs()` returns a mean that the cycle's thread publishes, in one atomic word, as
+each cycle ends. It does not divide the total by `cycleCount()`, which also counts the cycle a read
+lands in. A read from an output callback, or from another thread inside a cycle, then returns the
+mean of the cycles that have ended, as the other duration statistics do, and no read sees a total
+from one cycle over a count from another. The plan was approved as written, with the mean published
+whole over the count beside the total that the issue sketches.
 
 Closes [flywheel-dag#34](https://github.com/tomlin256/flywheel-dag/issues/34).
 
@@ -164,7 +164,8 @@ The repo tree is untouched. The code is the sketch above, and the tests are the 
   1,000, with a median of 226 of 5,213 distinct reads off a prefix mean (88 to 294 in a run), and
   299 of the 300 under load. The plain-field getter fails all 1,000 (median 133 of 5,118); a mean
   refreshed on entry fails all 1,000 (median 4,795 of 9,788); v0.2.2 fails all 1,000 (median 4,931 of
-  9,934). A mean a cycle late fails them through the last assertion. Each run takes under 2 ms.
+  9,934). A mean a cycle late fails them through the last assertion, in 997 to 1,000 runs of 1,000
+  (see Outcome). Each run takes under 2 ms.
 - **ThreadSanitizer.** With the change, the 13 `EngineCycleStats` tests, among them the three that
   read the statistics while another thread steps, and the 6 `CycleSeqLock` and 4 `EngineCycleSeqLock`
   tests pass under `-fsanitize=thread` with no report. The plain-field getter draws a data race
@@ -234,6 +235,36 @@ green (36 of 36), CI is green on the release commit on both legs, the installed 
 0.2.3, the release is published, and flywheel-dag#34 is closed.
 
 Commits: `build: release v0.2.3` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit and the release as a second. CI run 38136113846 on the release commit is
+green on both legs, `ubuntu-latest` with GCC and `macos-latest` with Apple Clang, with
+`FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so the new tests raised no GCC-only warning. Locally the build
+printed no warnings, ctest was 36 of 36, and the installed version file reports 0.2.3. `v0.2.3` is
+tagged on the release commit and released, and flywheel-dag#34 is closed.
+
+The checks on scratch copies of the committed tree, with the repo's own tree untouched:
+
+- **The mutations,** rerun on the committed tree. The control copy passes all 119 `test_dag_async`
+  tests, and each change fails the tests the table names, as in the prototype: a mean refreshed on
+  entry fails 1, 2 and 3; a mean a cycle late fails 1, 2, 3 and the four tests of flywheel-dag#21;
+  the count bumped at the end of `cycle()` fails the four; the plain-field getter fails 3; the
+  issue's sketch fails 3. Nothing else fails.
+- **The stress test,** 1,000 repeats on each copy. The committed tree fails none. The issue's sketch,
+  the plain-field getter, a mean refreshed on entry and v0.2.2 fail all 1,000. A mean a cycle late
+  fails 997. Its last assertion cannot tell a late mean from the right one when the last cycle took
+  as long as the mean before it, which a clock that ticks every 41.7 ns makes likely, and the
+  prototype's 1,000 of 1,000 was luck of that kind. Tests 1 and 2 failed it in both full runs. The
+  prototype paragraph is corrected.
+- **ThreadSanitizer,** on the committed headers: the 13 `EngineCycleStats`, 6 `CycleSeqLock` and 4
+  `EngineCycleSeqLock` tests pass with no report.
+- **The hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`. 15
+  shuffled rounds at each of eight code alignments, v0.2.2 against the committed tree, as the median
+  over the eight and then the lowest and highest: chain +0.08% (-0.15% to +0.34%), idle-queues +0.36%
+  (+0.21% to +0.64%), ingest -0.25% (-1.41% to +1.52%). The control read -0.04%, +0.02% and +0.63%.
+  The sweep before the commit read +0.21%, +0.36% and +0.75% for the same code, so ingest moves by
+  about 1% between runs, and the bar is the median.
 
 ## Not in this plan
 
