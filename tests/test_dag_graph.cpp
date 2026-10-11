@@ -235,6 +235,62 @@ TEST(DagGraph, HyphenInClusterPrefixIsQuoted) {
     EXPECT_EQ(dot.find("subgraph cluster_my-module"), std::string::npos);
 }
 
+// ── Test 16: each NodeKind has its own shape and fill ────────────────────────
+// A node's whole attribute line is pinned, so a shape, a fill or the rounded
+// style given to the wrong kind shows up here.
+
+TEST(DagGraph, EachNodeKindHasItsShapeAndFill) {
+    auto input      = Input<double>::make("input");
+    auto asyncInput = dag::async::AsyncInput<double>::make("async_input");
+    auto asyncQueue = dag::async::AsyncQueue<double>::make("async_queue");
+    auto compute    = makePassthrough("compute", input);
+    auto series     = dag::ts::EWMANode::make("series", input, 0.1);
+
+    const std::string dot =
+        GraphExporter::toDot({ input, asyncInput, asyncQueue, compute, series });
+
+    const auto declares = [&dot](const std::string& attributes) {
+        return dot.find(attributes) != std::string::npos;
+    };
+    EXPECT_TRUE(declares(R"("input" [shape=ellipse fillcolor="#90EE90" style="filled"];)")) << dot;
+    EXPECT_TRUE(declares(R"("async_input" [shape=ellipse fillcolor="#3CB371" style="filled"];)"))
+        << dot;
+    EXPECT_TRUE(declares(R"("async_queue" [shape=cylinder fillcolor="#2E8B57" style="filled"];)"))
+        << dot;
+    EXPECT_TRUE(declares(R"("compute" [shape=box fillcolor="#87CEEB" style="filled"];)")) << dot;
+    EXPECT_TRUE(declares(R"("series" [shape=box fillcolor="#FFD700" style="filled,rounded"];)"))
+        << dot;
+}
+
+// ── Test 17: a kind with no entry is drawn as a white box ────────────────────
+// The switches in shapeFor() and fillFor() name every NodeKind there is, so
+// only a kind() the library never returns reaches the lines after them.
+
+namespace {
+
+class UnknownKindNode : public NodeBase {
+public:
+    static std::shared_ptr<UnknownKindNode> make() {
+        return std::shared_ptr<UnknownKindNode>(new UnknownKindNode);
+    }
+    ValuePtr eval(EvalContext&) override { return make_value(0.0); }
+    std::string name() const override { return "unknown"; }
+    std::vector<NodePtr> inputs() const override { return {}; }
+    NodeKind kind() const override { return static_cast<NodeKind>(99); }
+
+private:
+    UnknownKindNode() = default;
+};
+
+}  // namespace
+
+TEST(DagGraph, AKindWithNoEntryIsDrawnAsAWhiteBox) {
+    const std::string dot = GraphExporter::toDot({ UnknownKindNode::make() });
+
+    EXPECT_NE(dot.find(R"("unknown" [shape=box fillcolor="#FFFFFF" style="filled"];)"),
+              std::string::npos) << dot;
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

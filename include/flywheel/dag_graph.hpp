@@ -23,6 +23,7 @@
 #include <sstream>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -49,7 +50,7 @@ public:
 private:
     // ── DOT attribute helpers ────────────────────────────────────────────────
 
-    static const char* shapeFor(NodeKind k) {
+    static std::string_view shapeFor(NodeKind k) {
         switch (k) {
             case NodeKind::Input:      return "ellipse";
             case NodeKind::AsyncInput: return "ellipse";
@@ -60,7 +61,7 @@ private:
         return "box";
     }
 
-    static const char* fillFor(NodeKind k) {
+    static std::string_view fillFor(NodeKind k) {
         switch (k) {
             case NodeKind::Input:      return "#90EE90";
             case NodeKind::AsyncInput: return "#3CB371";
@@ -85,7 +86,7 @@ private:
     // ── Quote helper ─────────────────────────────────────────────────────────
 
     /// Wrap `s` in DOT double quotes, escaping '"' and replacing '/' with '_'.
-    static std::string quoted(const std::string& s) {
+    static std::string quoted(const std::string_view s) {
         std::string out = "\"";
         for (char c : s) {
             if (c == '"') out += "\\\"";
