@@ -137,6 +137,7 @@ Engine::discoverStatefulNodes() const {
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline void Engine::install(std::shared_ptr<IComputeModule> m) {
+    refuseInCycle("install");
     modules_.push_back(m);
     m->wire(*this);
 }
@@ -205,6 +206,19 @@ dag::InputPtr<T> Engine::makeInput(
 // Output registration
 // ─────────────────────────────────────────────────────────────────────────────
 
+// cycle() walks outputs_ and calls each callback where it is stored, so a registration from a
+// callback can reallocate the vector under the std::function that is running, and a functor small
+// enough for the function's own buffer then reads freed memory (flywheel-dag#24). These calls are
+// refused while a cycle is in flight. cycles_ counts a cycle as it begins and timedCycles_ as its
+// guard ends it, so they differ from the fetch_add at the top of cycle() to the count in the guard's
+// destructor, a throw included, and still differ when a cycle opened inside the cycle ends. A record
+// of the cycle's thread would be cleared by that nested end. Reading the counters adds nothing to
+// cycle().
+inline void Engine::refuseInCycle(const char* call) const {
+    if (cycles_.load(std::memory_order_relaxed) != timedCycles_)
+        throw std::runtime_error(std::string("Engine::") + call + "() called during a cycle");
+}
+
 template<typename T>
 void Engine::addOutput(NodePtr node, std::function<void(const T&)> cb) {
     addOutput(std::move(node), [cb = std::move(cb)](const ValuePtr& v) {
@@ -215,6 +229,7 @@ void Engine::addOutput(NodePtr node, std::function<void(const T&)> cb) {
 inline void Engine::addOutput(
     NodePtr node, std::function<void(const ValuePtr&)> cb)
 {
+    refuseInCycle("addOutput");
     outputs_.push_back({ std::move(node), nullptr, std::move(cb) });
     // Due from the start, so the next cycle reaches the output even when its node is already
     // clean, because an earlier cycle pulled it as another output's input or a caller evaluated
@@ -224,6 +239,7 @@ inline void Engine::addOutput(
 
 template<typename T>
 void Engine::addFeedback(NodePtr node, dag::InputPtr<T> input) {
+    refuseInCycle("addFeedback");
     addOutput<T>(std::move(node), [inp = std::move(input)](const T& v) {
         inp->set(v);
     });

@@ -25,7 +25,8 @@
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
 //  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
-//                    and a new output gets the value its node holds at its first cycle
+//                    a new output gets the value its node holds at its first cycle, and
+//                    a registration made inside a cycle is refused
 
 #include <gtest/gtest.h>
 #include "flywheel/dag.hpp"
@@ -2193,6 +2194,208 @@ TEST(EngineNewOutput, AModuleInstalledAfterACycleGetsItsOutputsValue) {
 
     g.engine.step();
     EXPECT_EQ(downstream->seen, std::vector<double>{10.0});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A registration inside a cycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// What step() threw, or "" when it returned.
+std::string stepAndCatch(Engine& engine) {
+    try {
+        engine.step();
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    return "";
+}
+
+// A module that counts its wire() calls and registers one output there.
+struct WireCountingModule : IComputeModule {
+    explicit WireCountingModule(NodePtr n) : node(std::move(n)) {}
+
+    std::string name() const override { return "wire-counting"; }
+
+    void wire(Engine& engine) override {
+        ++wired;
+        engine.addOutput(node, [](const ValuePtr&) {});
+    }
+
+    NodePtr node;
+    int     wired = 0;
+};
+
+}  // namespace
+
+// The callback holds two references, which fit std::function's own buffer, so it lives in the
+// vector cycle() is walking. Eight registrations reallocate that vector. Under
+// -fsanitize=address this is a heap-use-after-free without the refusal, and in a build like this
+// one it dies with SIGSEGV.
+TEST(EngineRegistrationInCycle, ACallbackThatAddsOutputsIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    NodePtr node = x;
+    engine.addOutput(node, [&engine, &node](const ValuePtr&) {
+        for (int i = 0; i < 8; ++i)
+            engine.addOutput(node, [](const ValuePtr&) {});
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle");
+    EXPECT_EQ(engine.outputNodes().size(), 1u);   // nothing was registered
+}
+
+// The typed overload wraps the callback in a lambda too big for the buffer, so it never read freed
+// memory: it registered without error.
+TEST(EngineRegistrationInCycle, ATypedCallbackThatAddsAnOutputIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    engine.addOutput<double>(x, [&engine, &x](const double&) {
+        engine.addOutput<double>(x, [](const double&) {});
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle");
+    EXPECT_EQ(engine.outputNodes().size(), 1u);
+}
+
+TEST(EngineRegistrationInCycle, ACallbackThatAddsAFeedbackIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto y = engine.makeInput<double>("y", 0.0);
+    engine.addOutput<double>(x, [&engine, &x, &y](const double&) {
+        engine.addFeedback<double>(x, y);
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addFeedback() called during a cycle");
+    EXPECT_EQ(engine.outputNodes().size(), 1u);
+    engine.step();
+    EXPECT_EQ(y->get(), 0.0);   // no feedback was registered to set it
+}
+
+// install() is refused before it keeps the module or calls wire(), so a refusal leaves the engine
+// as it was.
+TEST(EngineRegistrationInCycle, ACallbackThatInstallsAModuleIsRefusedBeforeItWires) {
+    Engine engine;
+    auto x   = engine.makeInput<double>("x", 1.0);
+    auto mod = std::make_shared<WireCountingModule>(x);
+    engine.addOutput<double>(x, [&engine, &mod](const double&) { engine.install(mod); });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::install() called during a cycle");
+    EXPECT_EQ(mod->wired, 0);
+    EXPECT_EQ(mod.use_count(), 1);   // the engine did not keep it
+    EXPECT_EQ(engine.outputNodes().size(), 1u);
+}
+
+// A node's eval() runs inside the cycle too. The node is left dirty, as for any throw out of a
+// node, so the next cycle retries it.
+TEST(EngineRegistrationInCycle, ANodeThatAddsAnOutputInEvalIsRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    bool add = true;
+    auto node = ComputeNode<double, double>::make(
+        "node",
+        std::make_tuple(std::static_pointer_cast<INode>(x)),
+        [&engine, &x, &add](const double& v) {
+            if (add) engine.addOutput<double>(x, [](const double&) {});
+            return v * 2.0;
+        });
+    std::vector<double> seen;
+    engine.addOutput<double>(node, [&seen](const double& v) { seen.push_back(v); });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle");
+    EXPECT_EQ(engine.outputNodes().size(), 1u);
+    EXPECT_TRUE(seen.empty());
+
+    add = false;
+    engine.step();
+    EXPECT_EQ(seen, std::vector<double>{2.0});
+}
+
+// A refusal is a throw out of a callback like any other: the outputs the cycle did not reach get
+// their value next cycle. A registration is accepted again once the cycle has ended.
+TEST(EngineRegistrationInCycle, ARefusedCycleLeavesTheEngineUsable) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    auto y = engine.makeInput<double>("y", 2.0);
+    bool add = true;
+    engine.addOutput<double>(x, [&engine, &y, &add](const double&) {
+        if (add) engine.addOutput<double>(y, [](const double&) {});
+    });
+    std::vector<double> seenY, seenLate;
+    engine.addOutput<double>(y, [&seenY](const double& v) { seenY.push_back(v); });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle");
+    EXPECT_TRUE(seenY.empty());   // the cycle ended at x's callback, before y's output
+
+    add = false;
+    engine.addOutput<double>(y, [&seenLate](const double& v) { seenLate.push_back(v); });
+    engine.step();
+    EXPECT_EQ(seenY, std::vector<double>{2.0});
+    EXPECT_EQ(seenLate, std::vector<double>{2.0});
+    EXPECT_EQ(engine.outputNodes().size(), 3u);
+}
+
+TEST(EngineRegistrationInCycle, ACallbackThatCatchesTheRefusalLetsTheCycleFinish) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    std::string refusal;
+    engine.addOutput<double>(x, [&engine, &x, &refusal](const double&) {
+        try {
+            engine.addOutput<double>(x, [](const double&) {});
+        } catch (const std::runtime_error& e) {
+            refusal = e.what();
+        }
+    });
+    std::vector<double> seen;
+    engine.addOutput<double>(x, [&seen](const double& v) { seen.push_back(v); });
+
+    EXPECT_EQ(stepAndCatch(engine), "");
+    EXPECT_EQ(refusal, "Engine::addOutput() called during a cycle");
+    EXPECT_EQ(seen, std::vector<double>{1.0});
+    EXPECT_EQ(engine.outputNodes().size(), 2u);
+}
+
+// The refusal is per engine: the inner engine has no cycle in flight, so it takes a registration
+// from the outer engine's callback.
+TEST(EngineRegistrationInCycle, AnotherEnginesOutputMayBeAddedFromACallback) {
+    Engine outer, inner;
+    auto x = outer.makeInput<double>("x", 1.0);
+    auto y = inner.makeInput<double>("y", 5.0);
+    std::vector<double> seen;
+    outer.addOutput<double>(x, [&inner, &y, &seen](const double&) {
+        inner.addOutput<double>(y, [&seen](const double& v) { seen.push_back(v); });
+    });
+
+    outer.step();
+    inner.step();
+    EXPECT_EQ(seen, std::vector<double>{5.0});
+}
+
+// A cycle opened inside a cycle leaves the counters apart when it ends, because the cycle it is in
+// has not. A record of the cycle's thread would be cleared by the nested cycle's end, and the
+// registration after it would get through.
+TEST(EngineRegistrationInCycle, ARegistrationAfterANestedStepIsStillRefused) {
+    Engine engine;
+    auto x = engine.makeInput<double>("x", 1.0);
+    // Two references again, so the callback fits the buffer as test 1's does.
+    struct Probe {
+        NodePtr     node;
+        std::string nested;   // what the nested step() threw, if it threw
+    } probe{x, ""};
+    engine.addOutput(probe.node, [&engine, &probe](const ValuePtr&) {
+        try {
+            engine.step();
+        } catch (const std::runtime_error& e) {   // whatever the nested step() does, the registration is refused
+            probe.nested = e.what();
+        }
+        for (int i = 0; i < 8; ++i)
+            engine.addOutput(probe.node, [](const ValuePtr&) {});
+    });
+
+    EXPECT_EQ(stepAndCatch(engine), "Engine::addOutput() called during a cycle")
+        << "the nested step() " << (probe.nested.empty() ? "ran" : "threw: " + probe.nested);
+    EXPECT_EQ(engine.outputNodes().size(), 1u);
 }
 
 int main(int argc, char** argv) {

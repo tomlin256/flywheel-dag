@@ -119,8 +119,9 @@ ctest --test-dir build
   derived from `FeedRegistry` that overrides `flush()` is flushed through it
   unless it overrides `members()` too. A registry flushed outside an engine
   still flushes each member as it holds it.
-- Register outputs and install modules between cycles, never from an output
-  callback or an `eval()` (flywheel-dag#24).
+- Register outputs and install modules between cycles. `addOutput()`,
+  `addFeedback()` and `install()` throw inside a cycle, from an output callback
+  or an `eval()`.
 - Do not call `CycleSeqLock::readConsistent()` while holding a lock an output
   callback needs: it waits on a cycle that cannot finish.
 

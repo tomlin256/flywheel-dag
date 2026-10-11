@@ -43,7 +43,8 @@
 //   output stays due until a cycle reaches it, so a node or a callback that
 //   throws out of a cycle leaves the outputs the cycle did not reach to the
 //   next cycle.  A new output starts due, so the first cycle after it is
-//   registered delivers the value its node holds then.
+//   registered delivers the value its node holds then.  A registration made
+//   inside a cycle, from a callback or a node's eval(), throws (addOutput()).
 //
 // Flush list
 //   A cycle flushes from a list the engine builds out of the sources and groups
@@ -157,7 +158,8 @@ public:
     /// Install a compute module: calls module->wire(*this) exactly once and
     /// keeps the module alive for the lifetime of the engine.
     /// Call it between cycles, as addOutput(): an output that wire() registers
-    /// fires on the next cycle, with the value its node holds then.
+    /// fires on the next cycle, with the value its node holds then. Inside a cycle it throws
+    /// std::runtime_error, before the module is kept or wired.
     void install(std::shared_ptr<IComputeModule> module);
 
     // ── Source registration ───────────────────────────────────────────────────
@@ -189,8 +191,10 @@ public:
     /// node holds then, even when an earlier cycle or a caller has already evaluated the node.
     /// After that it fires only when the output's value actually changes.
     /// Register an output between cycles: before the first, between step()s, or once run() has
-    /// returned. Never register one from inside a cycle, from an output callback or a node's
-    /// eval() (flywheel-dag#24), or from another thread while run() is going.
+    /// returned. Inside a cycle, from an output callback or a node's eval(), it throws
+    /// std::runtime_error and registers nothing. To add an output in response to a value, note the
+    /// request in the callback and register once the cycle has ended. From another thread while
+    /// run() is going it races the cycle: never do it.
     /// A cycle that a node or a callback throws out of leaves the outputs it did not reach to
     /// the next cycle, which delivers the value each holds then. A callback that throws has had
     /// its value: it is not offered that value again, only the next one.
@@ -203,6 +207,7 @@ public:
     /// Wire a node's output directly to an Input: on each cycle when the node
     /// fires a new value, the Input is updated, which dirties downstream nodes
     /// for the following cycle.  One-cycle lag is inherent and expected.
+    /// It registers an output, so it follows addOutput()'s rule and throws inside a cycle.
     template<typename T>
     void addFeedback(NodePtr node, std::shared_ptr<dag::Input<T>> input);
 
@@ -283,6 +288,10 @@ private:
     void cycle();
     std::function<void()> makeWakeHook();
 
+    // Throws if a cycle is in flight. install(), addOutput() and addFeedback() call it before they
+    // change anything.
+    void refuseInCycle(const char* call) const;
+
     // The flush list (flywheel-dag#37). expandSource() walks one source into it: a source with no
     // members() is listed, once, and a group is entered, once, and its members walked in its place.
     void rebuildFlushList();
@@ -331,7 +340,8 @@ private:
     // touches the total and the count, and publishes their quotient in one store at the end of its
     // guard, so a reader on another thread sees the mean from before a cycle or from after it, never
     // a total from one over a count from the other. It is not totalCycleNs_ / cycles_: cycles_ also
-    // counts a cycle in flight (flywheel-dag#34).
+    // counts a cycle in flight (flywheel-dag#34), and that difference is how refuseInCycle() tells
+    // one is, so it reads the count too, on the thread that runs cycles.
     uint64_t              totalCycleNs_ = 0;
     uint64_t              timedCycles_  = 0;
     std::atomic<double>   meanCycleNs_{0.0};
