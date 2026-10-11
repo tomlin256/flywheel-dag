@@ -1,10 +1,12 @@
 # Take the Mean Over the Cycles That Have Ended
 
-**Status: Proposed (2026-10-11), awaiting approval.** `Engine::meanCycleUs()` returns a mean that the
-cycle's thread publishes, in one atomic word, as each cycle ends. It does not divide the total by
-`cycleCount()`, which also counts the cycle a read lands in. A read from an output callback, or from
-another thread inside a cycle, then returns the mean of the cycles that have ended, as the other
-duration statistics do, and no read sees a total from one cycle over a count from another.
+**Status: Approved (2026-10-11).** `Engine::meanCycleUs()` returns a mean that the cycle's thread
+publishes, in one atomic word, as each cycle ends. It does not divide the total by `cycleCount()`,
+which also counts the cycle a read lands in. A read from an output callback, or from another thread
+inside a cycle, then returns the mean of the cycles that have ended, as the other duration
+statistics do, and no read sees a total from one cycle over a count from another. The plan was
+approved as written, with the mean published whole over the count beside the total that the issue
+sketches.
 
 Closes [flywheel-dag#34](https://github.com/tomlin256/flywheel-dag/issues/34).
 
