@@ -1,8 +1,8 @@
 # Refuse a Registration Made Inside a Cycle
 
-**Status: Approved (2026-10-11).** `Engine::addOutput()`, `addFeedback()` and `install()` throw
-`std::runtime_error` while a cycle is in flight, from an output callback or a node's `eval()`, and
-register nothing. Today such a call can free the callback that is running. The check reads two counters
+**Status: Done (2026-10-11).** Approved 2026-10-11. Both steps landed, and v0.2.4 is released.
+`Engine::addOutput()`, `addFeedback()` and `install()` throw `std::runtime_error` while a cycle is in
+flight, from an output callback or a node's `eval()`, and register nothing. Today such a call can free the callback that is running. The check reads two counters
 that `Engine` keeps already, so `Engine::cycle()` and `step()` compile to the same instructions as
 v0.2.3's, and `bench_hot_path` reads within the noise of an identical build. This is the first of the
 issue's three designs. The other two make a registration inside a cycle work, and "The decision" gives
@@ -249,6 +249,46 @@ green (36 of 36), CI is green on the release commit on both legs, the installed 
 0.2.4, the release is published, and flywheel-dag#24 is closed.
 
 Commits: `build: release v0.2.4` and `docs: mark the plan done`.
+
+## Outcome
+
+Step 1 landed as one commit and the release as a second. CI run 38156386654 on the release commit is
+green on both legs, `ubuntu-latest` with GCC 13.3 and `macos-latest` with Apple Clang 21, with
+`FLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`. Each ran 36 of 36 tests and printed no compiler warning, so the
+new tests raised no GCC-only warning. Locally the build printed no warnings, ctest was 36 of 36, and the
+installed version file reports 0.2.4. `v0.2.4` is tagged on the release commit and released, and
+flywheel-dag#24 is closed.
+
+The checks on a scratch copy of the committed headers and test file, with the repository's own tree
+untouched:
+
+- **The tests.** Against `2384c8a`'s headers, one at a time: tests 1 and 9 die with SIGSEGV, tests 2 to
+  7 fail, test 8 passes, and the 119 existing tests pass.
+- **The mutations,** rerun on the committed tree: the control passes all 128, and each change in the
+  table fails the tests it lists and no others. Changes f and g also fail the existing tests the table
+  names.
+- **The sanitizers.** `test_dag_async` passes under `-fsanitize=address,undefined` with no report, the
+  issue's program ends in the refusal at `-O0` and at `-O2` with no report, and the 44 tests pass under
+  `-fsanitize=thread`.
+- **The hot path.** `bench_hot_path --invariants` matches. `Engine::cycle()` (179 instructions) and its
+  guard's destructor (75) are the instructions of `2384c8a`'s. 15 shuffled rounds at 16 matched
+  alignments, against `2384c8a`, as the median and then the lowest to the highest: chain -0.26%
+  (-0.53% to +0.57%), idle-queues -0.02% (-0.21% to +2.63%) and ingest +0.04% (-2.38% to +1.49%). The
+  control, built from `2384c8a`'s headers, read -0.17% (-0.57% to +5.48%), -0.02% (-0.21% to +0.13%)
+  and +0.33% (-1.31% to +2.51%) in the same rounds. The sweeps before the commit read -0.38%, +0.00%
+  and +0.00% for the same code, so `ingest` moves by about 0.6% between runs, and the bar is the
+  median.
+
+Two things differ from the plan as written:
+
+- **Test 9 keeps a `Probe`.** The `catch` around the nested `step()` first had an empty body, which
+  clang-tidy's `bugprone-empty-catch` flags. It now records what the nested `step()` threw in a struct
+  that also holds the node, so the callback still captures two references and fits the buffer (test 9
+  still dies on `2384c8a`'s headers), and the failure message says whether the nested `step()` ran or
+  threw.
+- **`addOutput()`'s doc says that a call from another thread "races the cycle: never do it".** Its
+  first draft said that such a call "is not detected", which the plan's own bullet on another thread
+  contradicts: the counters may show the cycle in flight to that thread, and nothing promises it.
 
 ## Not in this plan
 
