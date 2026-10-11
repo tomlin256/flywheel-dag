@@ -1562,6 +1562,102 @@ TEST(EngineCycleStats, StatsCoverACycleThatThrewAndOneThatDidNot) {
     EXPECT_NEAR(engine.rollingMeanCycleUs(), (thrown + completed) / 2.0, 1e-9);
 }
 
+// meanCycleUs() covers the cycles that have ended and leaves out the one a read lands in, as the
+// other duration statistics do. The output callback of cycle k + 1 runs with k cycles ended, so what
+// it reads is the mean of the first k durations, which lastCycleUs() gives between steps.
+
+namespace {
+
+struct MeanInEachCycle {
+    std::vector<double> read;       // read[k]: what readMean returned inside cycle k + 1
+    std::vector<double> duration;   // duration[k]: cycle k + 1, once it had ended
+};
+
+MeanInEachCycle meanInEachCycle(const std::function<double(const Engine&)>& readMean, int cycles) {
+    Engine engine;
+    auto x = engine.makeInput<int>("x", 0);
+    MeanInEachCycle result;
+    engine.addOutput<int>(x, [&](const int&) { result.read.push_back(readMean(engine)); });
+    for (int i = 1; i <= cycles; ++i) {
+        x->set(i);
+        engine.step();
+        result.duration.push_back(engine.lastCycleUs());
+    }
+    return result;
+}
+
+void expectMeanOfTheCyclesThatEnded(const MeanInEachCycle& m) {
+    ASSERT_EQ(m.read.size(), m.duration.size());
+    double sum = 0.0;
+    for (std::size_t k = 0; k < m.read.size(); ++k) {
+        const double ended = (k == 0) ? 0.0 : sum / static_cast<double>(k);   // none ended: 0
+        EXPECT_NEAR(m.read[k], ended, 1e-9) << "in cycle " << k + 1;
+        sum += m.duration[k];
+    }
+}
+
+}  // namespace
+
+TEST(EngineCycleStats, MeanReadInACallbackCoversTheCyclesThatHaveEnded) {
+    expectMeanOfTheCyclesThatEnded(meanInEachCycle(
+        [](const Engine& engine) { return engine.meanCycleUs(); }, 6));
+}
+
+// Another thread reads the mean. The callback waits for it, so the read lands inside the cycle, and
+// nothing depends on timing.
+TEST(EngineCycleStats, MeanReadFromAnotherThreadInsideACycleCoversTheCyclesThatHaveEnded) {
+    expectMeanOfTheCyclesThatEnded(meanInEachCycle(
+        [](const Engine& engine) {
+            return std::async(std::launch::async, [&engine] { return engine.meanCycleUs(); }).get();
+        }, 6));
+}
+
+// A reader that samples meanCycleUs() while another thread steps sees only the mean of the first k
+// cycles, for some k. The cycle's thread publishes the mean in one store, so no read lands between a
+// total and a count, and a read inside a cycle leaves that cycle out. Which reads land where is up to
+// the scheduler, so a defect that no read reaches passes this test; a correct engine cannot fail it.
+// It asserts after the join, as the other stress tests do. The output callback of cycle k + 1 reads
+// the duration of cycle k.
+TEST(EngineCycleStats, MeanReadWhileAnotherThreadStepsIsTheMeanOfSomePrefixOfTheCycles) {
+    constexpr int n = 5000;
+    Engine engine;
+    auto x = engine.makeInput<int>("x", 0);
+    std::vector<double> lastSeen;
+    engine.addOutput<int>(x, [&](const int&) { lastSeen.push_back(engine.lastCycleUs()); });
+
+    std::vector<double> sample;   // each mean the reader saw, when it differed from the one before
+    const auto readMean = [&] {
+        const double mean = engine.meanCycleUs();
+        if (sample.empty() || mean != sample.back()) sample.push_back(mean);
+    };
+    stressConcurrentReads(engine, x, n, readMean);
+    readMean();   // the mean of all n, which the reader may not have reached
+
+    ASSERT_EQ(lastSeen.size(), static_cast<std::size_t>(n));
+    std::vector<double> duration(lastSeen.begin() + 1, lastSeen.end());   // cycles 1 to n - 1
+    duration.push_back(engine.lastCycleUs());                             // cycle n
+
+    std::vector<double> prefixMean{0.0};   // none ended
+    uint64_t totalNs = 0;
+    for (std::size_t k = 0; k < duration.size(); ++k) {
+        totalNs += static_cast<uint64_t>(duration[k] * 1'000.0 + 0.5);   // whole nanoseconds
+        prefixMean.push_back(static_cast<double>(totalNs) / static_cast<double>(k + 1) / 1'000.0);
+    }
+    EXPECT_NEAR(sample.back(), prefixMean.back(), 1e-9);
+
+    std::sort(prefixMean.begin(), prefixMean.end());
+    std::size_t offPrefix = 0;
+    double firstOff = 0.0;
+    for (const double s : sample) {
+        const auto it = std::lower_bound(prefixMean.begin(), prefixMean.end(), s - 1e-9);
+        if (it == prefixMean.end() || *it > s + 1e-9) {
+            if (offPrefix++ == 0) firstOff = s;
+        }
+    }
+    EXPECT_EQ(offPrefix, 0u) << "of " << sample.size() << " distinct reads, the first was "
+                             << firstOff << " us";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CycleSeqLock
 // ─────────────────────────────────────────────────────────────────────────────

@@ -297,10 +297,7 @@ inline double Engine::lastCycleUs() const {
     return static_cast<double>(lastCycleNs_.load(std::memory_order_relaxed)) / 1'000.0;
 }
 inline double Engine::meanCycleUs() const {
-    const uint64_t cycles = cycles_.load(std::memory_order_relaxed);
-    return (cycles == 0) ? 0.0
-        : static_cast<double>(totalCycleNs_.load(std::memory_order_relaxed))
-            / static_cast<double>(cycles) / 1'000.0;
+    return meanCycleNs_.load(std::memory_order_relaxed) / 1'000.0;
 }
 inline double Engine::minCycleUs() const {
     const uint64_t ns = minCycleNs_.load(std::memory_order_relaxed);
@@ -328,11 +325,12 @@ inline void Engine::cycle() {
     const CycleSeqLock::WriteScope writeScope(*cycleSeqLock_);
     cycles_.fetch_add(1, std::memory_order_relaxed);
 
-    // Times the cycle on every exit, a throw included, so every cycle that ends is counted and
-    // timed alike. Declared after writeScope, so it is destroyed first and records while a
-    // CycleSeqLock reader still sees the cycle open. It records in its own destructor: Apple Clang
-    // does not inline a member function called from there, which slows bench_hot_path's
-    // idle-queues row by 3%.
+    // Times the cycle on every exit, a throw included, so every cycle that ends is timed, counted
+    // beside its duration, and in the mean it publishes. Declared after writeScope, so it is
+    // destroyed first and records while a CycleSeqLock reader still sees the cycle open. It records
+    // in its own destructor: Apple Clang does not inline a member function called from there, which
+    // slows bench_hot_path's idle-queues row by 3%. It divides first and stores the mean last: stored
+    // before rollingCycles_.record(), the mean costs the benchmark's rows 1% to 3%.
     struct TimeOnExit {
         Engine&                                     engine;
         const std::chrono::steady_clock::time_point started;
@@ -341,12 +339,16 @@ inline void Engine::cycle() {
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - started).count());
             engine.lastCycleNs_.store(ns, std::memory_order_relaxed);
-            engine.totalCycleNs_.fetch_add(ns, std::memory_order_relaxed);
+            engine.totalCycleNs_ += ns;
+            ++engine.timedCycles_;
+            const double mean = static_cast<double>(engine.totalCycleNs_)
+                                    / static_cast<double>(engine.timedCycles_);
             if (ns < engine.minCycleNs_.load(std::memory_order_relaxed))
                 engine.minCycleNs_.store(ns, std::memory_order_relaxed);
             if (ns > engine.maxCycleNs_.load(std::memory_order_relaxed))
                 engine.maxCycleNs_.store(ns, std::memory_order_relaxed);
             engine.rollingCycles_.record(ns);
+            engine.meanCycleNs_.store(mean, std::memory_order_relaxed);
         }
     };
     const TimeOnExit timeCycle{*this, std::chrono::steady_clock::now()};
