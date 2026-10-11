@@ -100,8 +100,8 @@ void RingBuffer<T>::for_each_contiguous(Fn&& fn) const {
 }
 
 template <typename T>
-void RingBuffer<T>::throwEmpty(const char* op) {
-    throw std::logic_error(std::string("RingBuffer::") + op + " on an empty buffer");
+void RingBuffer<T>::throwEmpty(const std::string_view op) {
+    throw std::logic_error(std::string("RingBuffer::").append(op).append(" on an empty buffer"));
 }
 
 }  // namespace dag

@@ -22,13 +22,16 @@
 //                    source held by groups that cannot see each other is flushed
 //                    once per cycle, from the flush list the engine builds
 //  TickLoop        — start/stop lifecycle, callback delivery
-//  CycleSeqLock    — consistent cross-thread reads over Engine::cycle()
+//  CycleSeqLock    — consistent cross-thread reads over Engine::cycle(), and the warning
+//                    a read logs when it gives up, which names the read
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
 //  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
 //                    a new output gets the value its node holds at its first cycle, and
 //                    a registration made inside a cycle is refused
 
 #include <gtest/gtest.h>
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_async.hpp"
 #include "flywheel/dag_engine.hpp"
@@ -40,8 +43,10 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1682,6 +1687,37 @@ void writeCycle(CycleSeqLock& lock, PairedValues& v, int value) {
     v.b.store(value, std::memory_order_relaxed);
 }
 
+/// A read that a whole cycle interrupts on every attempt, so readConsistent() gives up. args are
+/// passed on after the function: the name of the read, then the attempts.
+template<typename... Args>
+void readThatIsAlwaysInterrupted(CycleSeqLock& lock, Args&&... args) {
+    PairedValues v;
+    int calls = 0;
+    lock.readConsistent([&] {
+        writeCycle(lock, v, ++calls);
+        return v.read();
+    }, std::forward<Args>(args)...);
+}
+
+/// Sends what the library logs to a string while it lives, then puts the default logger back.
+class LogCapture {
+public:
+    LogCapture() : previous_(spdlog::default_logger()) {
+        spdlog::set_default_logger(std::make_shared<spdlog::logger>(
+            "capture", std::make_shared<spdlog::sinks::ostream_sink_mt>(out_)));
+    }
+    ~LogCapture() { spdlog::set_default_logger(previous_); }
+
+    LogCapture(const LogCapture&)            = delete;
+    LogCapture& operator=(const LogCapture&) = delete;
+
+    std::string text() const { return out_.str(); }
+
+private:
+    std::ostringstream              out_;
+    std::shared_ptr<spdlog::logger> previous_;
+};
+
 }  // namespace
 
 TEST(CycleSeqLock, ReadIsImmediateWithNoConcurrentWriter) {
@@ -1777,6 +1813,41 @@ TEST(CycleSeqLock, GivesUpAfterMaxAttemptsAndReturnsTheLastRead) {
 
     EXPECT_EQ(calls, 3);
     EXPECT_EQ(got, std::make_pair(3, 3));
+}
+
+TEST(CycleSeqLock, TheGiveUpWarningNamesTheRead) {
+    CycleSeqLock lock;
+    const LogCapture log;
+
+    const std::string what = "order table";   // not a literal: a std::string converts too
+    readThatIsAlwaysInterrupted(lock, what, 2);
+
+    EXPECT_NE(log.text().find("CycleSeqLock: order table interrupted by a cycle 2 times in a row"),
+              std::string::npos) << log.text();
+}
+
+TEST(CycleSeqLock, TheGiveUpWarningCallsAnUnnamedReadSnapshot) {
+    CycleSeqLock lock;
+    const LogCapture log;
+
+    readThatIsAlwaysInterrupted(lock);
+
+    const std::string expected = "CycleSeqLock: snapshot interrupted by a cycle "
+                               + std::to_string(kDefaultCycleSeqReadAttempts) + " times in a row";
+    EXPECT_NE(log.text().find(expected), std::string::npos) << log.text();
+}
+
+TEST(CycleSeqLock, TheNameInTheGiveUpWarningStopsWhereItsViewEnds) {
+    CycleSeqLock lock;
+    const LogCapture log;
+
+    // A view into a longer string, with no terminator after it: the name is what the view holds.
+    const std::string_view what = std::string_view("order table: ignore this").substr(0, 11);
+    readThatIsAlwaysInterrupted(lock, what, 2);
+
+    EXPECT_NE(log.text().find("CycleSeqLock: order table interrupted by a cycle"),
+              std::string::npos) << log.text();
+    EXPECT_EQ(log.text().find("ignore"), std::string::npos) << log.text();
 }
 
 TEST(CycleSeqLock, ZeroMaxAttemptsThrows) {

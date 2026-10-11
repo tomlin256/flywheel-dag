@@ -82,6 +82,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <unordered_set>
@@ -132,9 +133,9 @@ public:
 
     /// Returns fn() from a call that overlapped no cycle. Waiting out an open cycle is free; only
     /// a call another cycle interrupts spends an attempt. After maxAttempts it logs a warning and
-    /// returns the last, possibly inconsistent, result.
+    /// returns the last, possibly inconsistent, result. what names the read in that warning.
     template<typename F>
-    auto readConsistent(F&& fn, const char* what = "snapshot",
+    auto readConsistent(F&& fn, std::string_view what = "snapshot",
                         std::size_t maxAttempts = kDefaultCycleSeqReadAttempts) const
         -> std::decay_t<std::invoke_result_t<F&>>;
 
@@ -290,7 +291,7 @@ private:
 
     // Throws if a cycle is in flight. install(), addOutput() and addFeedback() call it before they
     // change anything.
-    void refuseInCycle(const char* call) const;
+    void refuseInCycle(std::string_view call) const;
 
     // The flush list (flywheel-dag#37). expandSource() walks one source into it: a source with no
     // members() is listed, once, and a group is entered, once, and its members walked in its place.

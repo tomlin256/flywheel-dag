@@ -41,6 +41,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -81,7 +82,7 @@ public:
     void for_each_contiguous(Fn&& fn) const;
 
 private:
-    [[noreturn]] static void throwEmpty(const char* op);
+    [[noreturn]] static void throwEmpty(std::string_view op);
 
     std::vector<T> buf_;
     std::size_t    head_ = 0;   // index of the oldest element

@@ -60,7 +60,8 @@ inline CycleSeqLock::WriteScope::~WriteScope() {
 }
 
 template<typename F>
-auto CycleSeqLock::readConsistent(F&& fn, const char* what, std::size_t maxAttempts) const
+auto CycleSeqLock::readConsistent(F&& fn, const std::string_view what,
+                                  std::size_t maxAttempts) const
     -> std::decay_t<std::invoke_result_t<F&>>
 {
     if (maxAttempts == 0)
@@ -214,9 +215,10 @@ dag::InputPtr<T> Engine::makeInput(
 // destructor, a throw included, and still differ when a cycle opened inside the cycle ends. A record
 // of the cycle's thread would be cleared by that nested end. Reading the counters adds nothing to
 // cycle().
-inline void Engine::refuseInCycle(const char* call) const {
+inline void Engine::refuseInCycle(const std::string_view call) const {
     if (cycles_.load(std::memory_order_relaxed) != timedCycles_)
-        throw std::runtime_error(std::string("Engine::") + call + "() called during a cycle");
+        throw std::runtime_error(
+            std::string("Engine::").append(call).append("() called during a cycle"));
 }
 
 template<typename T>

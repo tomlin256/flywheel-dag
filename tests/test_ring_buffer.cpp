@@ -165,6 +165,23 @@ TEST(RingBuffer, AccessorsOnEmptyThrow) {
     EXPECT_THROW(rb[0],          std::out_of_range);
 }
 
+TEST(RingBuffer, AccessorsOnEmptyNameTheCall) {
+    RingBuffer<int> rb(4);
+    const auto messageOf = [](const auto& call) {
+        try {
+            call();
+        } catch (const std::logic_error& e) {
+            return std::string(e.what());
+        }
+        return std::string("did not throw");
+    };
+
+    EXPECT_EQ(messageOf([&] { rb.front(); }),     "RingBuffer::front on an empty buffer");
+    EXPECT_EQ(messageOf([&] { rb.back(); }),      "RingBuffer::back on an empty buffer");
+    EXPECT_EQ(messageOf([&] { rb.pop_front(); }), "RingBuffer::pop_front on an empty buffer");
+    EXPECT_EQ(messageOf([&] { rb.pop_back(); }),  "RingBuffer::pop_back on an empty buffer");
+}
+
 TEST(RingBuffer, IndexBeyondSizeThrowsEvenWithinCapacity) {
     RingBuffer<int> rb(8);
     rb.push_back(1);
