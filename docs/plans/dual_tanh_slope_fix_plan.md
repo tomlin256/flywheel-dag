@@ -1,6 +1,7 @@
 # Dual `tanh`: Take the Slope as sech², Not 1 − tanh²
 
-**Status: Proposed.** Awaiting approval.
+**Status: Approved (2026-10-12).** The plan was approved as written, with the slope taken as
+`1/cosh(x)/cosh(x)` and pinned by two new tests rather than by the check the issue suggests.
 
 Closes [flywheel-dag#15](https://github.com/tomlin256/flywheel-dag/issues/15).
 
