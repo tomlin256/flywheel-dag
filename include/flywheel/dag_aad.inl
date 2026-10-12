@@ -387,9 +387,14 @@ template<std::size_t N> Dual<N> acos(const Dual<N>& x) {
 template<std::size_t N> Dual<N> atan(const Dual<N>& x) {
     return chain(x, std::atan(x.value), ops::Derivative<ops::AtanOp<double>>::d(x.value));
 }
+// tanh′ is sech², taken as 1/cosh/cosh. Not 1 − tanh²: once tanh rounds to ±1,
+// from |x| ≈ 19, that reads 0, and no rearrangement of it helps, because
+// rounding tanh has already lost the answer. Not 1/(cosh·cosh) either: cosh²
+// overflows past |x| ≈ 355, where sech² is still a subnormal number, though
+// cosh itself overflows only past 710.
 template<std::size_t N> Dual<N> tanh(const Dual<N>& x) {
-    const double t = std::tanh(x.value);
-    return chain(x, t, 1.0 - t * t);
+    const double c = std::cosh(x.value);
+    return chain(x, std::tanh(x.value), 1.0 / c / c);
 }
 template<std::size_t N> Dual<N> erf(const Dual<N>& x) {
     return chain(x, std::erf(x.value), detail::kTwoOverRootPi * std::exp(-x.value * x.value));

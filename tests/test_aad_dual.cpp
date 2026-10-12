@@ -160,6 +160,52 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
     }
 }
 
+// tanh′ is sech², and 1 − tanh² cancels once tanh rounds close to ±1: it is off
+// by 2.5e-13 (relative) at 5 and 9e-9 at 10, and reads 0 from |x| ≈ 19. The
+// references are 4/(eˣ + e⁻ˣ)² to 17 digits, from
+//     echo 'scale=400; x=10; 4/((e(x)+e(-x))^2)' | bc -l
+// so they do not lean on the C library's cosh. FunctionsMatchTheirDerivatives
+// cannot see the defect: its tolerance is absolute below a slope of 1, and it
+// accepts 0 for 1.7e-17 at x = 20.
+TEST(AadDual, TanhSlopeIsAccurateWhereTanhRoundsToOne) {
+    struct Point {
+        double x;
+        double sech2;
+    };
+    const Point points[] = {
+        {5.0,   1.8158323094380668e-4},
+        {10.0,  8.2446144557673974e-9},
+        {15.0,  3.7430491875353693e-13},
+        {18.0,  9.2780913209742732e-16},
+        {20.0,  1.6993417021166356e-17},
+        {30.0,  3.5026043050786081e-26},
+        {100.0, 5.5355861069469501e-87},
+        {300.0, 1.0601586212017243e-260},
+    };
+    for (const Point& p : points) {
+        for (const double x : {p.x, -p.x}) {
+            const Dual<1> r = tanh(arg<1>(x, 0));
+            EXPECT_EQ(r.value, std::tanh(x)) << "at " << x;
+            EXPECT_NEAR(r.d[0], p.sech2, 1e-14 * p.sech2) << "at " << x;
+        }
+    }
+}
+
+// The slope reaches 0 only where sech² does. 1/(cosh·cosh) overflows its square
+// past |x| ≈ 355.6 and reads 0 while sech² is still subnormal, to |x| ≈ 373.3.
+// Past cosh's own overflow at |x| ≈ 710.5, and at ±∞, the slope is 0 and not NaN.
+TEST(AadDual, TanhSlopeReachesZeroOnlyWhereSechSquaredDoes) {
+    for (const double x : {360.0, -360.0}) {
+        const double slope = tanh(arg<1>(x, 0)).d[0];
+        EXPECT_GT(slope, 0.0) << "at " << x;
+        EXPECT_LT(slope, std::numeric_limits<double>::min()) << "at " << x;   // subnormal
+    }
+    for (const double x : {400.0, 710.0, 711.0, 1e300, std::numeric_limits<double>::infinity()}) {
+        EXPECT_EQ(tanh(arg<1>(x, 0)).d[0], 0.0) << "at " << x;
+        EXPECT_EQ(tanh(arg<1>(-x, 0)).d[0], 0.0) << "at " << -x;
+    }
+}
+
 TEST(AadDual, PowCoversEachMix) {
     const Dual<2> a = arg<2>(2.0, 0);
     const Dual<2> b = arg<2>(3.0, 1);
