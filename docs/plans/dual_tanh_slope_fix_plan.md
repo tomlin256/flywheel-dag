@@ -1,7 +1,7 @@
 # Dual `tanh`: Take the Slope as sech², Not 1 − tanh²
 
-**Status: Approved (2026-10-12).** The plan was approved as written, with the slope taken as
-`1/cosh(x)/cosh(x)` and pinned by two new tests rather than by the check the issue suggests.
+**Status: Done (2026-10-12), released as v0.2.6.** The plan was approved as written, with the slope
+taken as `1/cosh(x)/cosh(x)` and pinned by two new tests rather than by the check the issue suggests.
 
 Closes [flywheel-dag#15](https://github.com/tomlin256/flywheel-dag/issues/15).
 
@@ -232,3 +232,29 @@ Commits: `build: release v0.2.6` and `docs: mark the plan done`.
 - **Assumptions:** the engine stays header-only C++17. `Dual` has no other path to `tanh`: the only
   other mention in the repository is the declaration. Pushing and releasing are assumed, as in the
   earlier plans; if either is to be done by hand, Step 2 stops before it.
+
+## Outcome
+
+Released as [v0.2.6](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.2.6) from the release
+commit `c65dad4`. [CI run 38305810115](https://github.com/tomlin256/flywheel-dag/actions/runs/38305810115)
+is green on both legs, `build (ubuntu-latest)` and `build (macos-latest)`. CI builds with warnings as
+errors, under GCC 13.3 on ubuntu and Apple Clang 21 on macOS, so GCC printed no warning for the new
+tests, and the ubuntu leg ran them on glibc's `cosh`, which "Prototype" could not. Both legs pass all 36
+tests and the benchmark's invariants diff.
+
+Rerun on the committed tree, with the headers of `0a4d867` (the release commit changes only the version):
+
+- **Tests.** The build prints no warnings with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and ctest passes
+  36 of 36. `test_aad_dual` passes 13 of 13. Built with the two tests written first and the header
+  unchanged, tests 1 and 2 failed and the other 11 passed.
+- **Mutations.** Each of a to g fails the tests the table lists and no others, one test at a time, and the
+  control copy passes all 13. None crashed or hung.
+- **Hot path.** `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt`.
+- **Install.** The installed version file reports 0.2.6.
+
+Where the work differs from the plan:
+
+- **The tag and the release came after the CI run,** not before it. The run is the plan's "Done when"
+  for the release commit, and a red run would have left no tag to delete.
+- **The release carries only the fix and the plan.** `git diff v0.2.5..v0.2.6 --stat -- include` names
+  `dag_aad.inl` alone, so "no signature changes" holds for the whole release, as the plan says.
