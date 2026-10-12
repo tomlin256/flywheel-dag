@@ -1,6 +1,6 @@
 # Refuse a Cycle Begun Inside a Cycle
 
-**Status: Approved (2026-10-11).** `Engine::step()` and `Engine::run()` throw `std::runtime_error`
+**Status: Done (2026-10-12), released as v0.2.5.** `Engine::step()` and `Engine::run()` throw `std::runtime_error`
 while a cycle is in flight, from an output callback, a node's `eval()` or a source's `flush()`, and
 begin no cycle. Today such a call runs a cycle inside the cycle, which flushes every source a second
 time, drops an `AsyncQueue`'s batch and leaves `CycleSeqLock` out of step. The test is the one
@@ -355,3 +355,40 @@ Commits: `build: release v0.2.5` and `docs: mark the plan done`.
 - **Assumptions:** the engine stays header-only C++17. One thread runs cycles. `step()` and `run()` are
   called between cycles. Pushing and releasing are assumed, as in the earlier plans; if either is to be
   done by hand, step 2 stops before it.
+
+## Outcome
+
+Released as [v0.2.5](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.2.5) from the release
+commit `4e9a428`. [CI run 38283897454](https://github.com/tomlin256/flywheel-dag/actions/runs/38283897454)
+is green on both legs, `build (ubuntu-latest)` and `build (macos-latest)`. CI builds with warnings as
+errors, so GCC's build of the new code and tests printed no warning.
+
+Rerun on the committed tree, with the headers of `9c3f184` (the release commit changes only the version):
+
+- **Tests.** The build prints no warnings with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and ctest passes
+  36 of 36. `test_dag_async` passes 139 of 139. Against the headers before the fix, run one at a time,
+  tests 1 to 6 fail, test 7 waits for ever and test 8 passes.
+- **Mutations.** Each of a, e, f, g, h, i, k, m, n and p fails the tests the table lists. f fails 38
+  existing tests and aborts 4, g fails 13 existing tests, and the control copy passes all 139.
+- **Sanitizers.** `test_dag_async` passes under the address and undefined-behaviour sanitizers (139 of
+  139), and the 55 tests of the eight suites named above pass under the thread sanitizer, with no
+  report.
+- **Programs.** On the headers before the fix, the issue's first program counts 4 cycles where 2 were
+  asked for and the queue's output never fires, the second is killed after 5 s, and the third reads
+  `(1, 0)`. With the fix they give a batch of 2 in 2 cycles, a read of 1, and `(1, 1)`.
+- **Hot path.** `bench_hot_path --invariants` matches. `Engine::cycle()` goes from 199 to 205
+  instructions and the guard's destructor stays at 80. Over 16 alignments and 20 shuffled rounds, the
+  medians against `22aeb99` are +0.06% (chain), +0.04% (idle-queues) and +0.41% (ingest), and two
+  controls built from `22aeb99`'s headers read +0.22%, +0.04% and +0.06%, and +0.08%, +0.01% and
+  -0.36%.
+- **Install.** The installed version file reports 0.2.5.
+
+Where the work differs from the plan:
+
+- **`cycleInFlight()` is defined in `dag_engine.inl`,** not in the class as "The fix" sketches. Every
+  member body of `Engine` lives in the `.inl`, and `dag_engine.hpp` declares it.
+- **The release is wider than the fix.** v0.2.5 also carries the two `std::string_view` commits made
+  since v0.2.4 (`f3ba449` and `22aeb99`). One of them changes the public parameter of
+  `CycleSeqLock::readConsistent()` from `const char*` to `std::string_view`. That is source-compatible,
+  but it is a signature change, so Step 2's "no signature changes" holds for the fix alone. The release
+  commit and the notes say so under **Changed**.
