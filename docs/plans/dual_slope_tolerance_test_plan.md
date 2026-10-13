@@ -1,6 +1,7 @@
 # Hold `FunctionsMatchTheirDerivatives` to a Relative Slope Tolerance
 
-**Status: Proposed.** Awaiting approval.
+**Status: Approved (2026-10-13).** The plan was approved as written: the slope tolerance becomes
+`1e-15 * |slope|`, with no floor for a slope of 0, and nothing under `include/` changes.
 
 Closes [flywheel-dag#41](https://github.com/tomlin256/flywheel-dag/issues/41).
 
