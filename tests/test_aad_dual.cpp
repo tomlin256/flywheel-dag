@@ -149,13 +149,19 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
         if (name == "asin" || name == "acos") return v / 5.0;
         return v;
     };
+    // Relative, so that a small slope gets no more room than a large one: an
+    // absolute 1e-15 accepted a relative error of 1.1e-12 for tanh at 4.2, and of
+    // 4.1e-8 for erf and erfc (flywheel-dag#41). The Dual and its oracle reach
+    // most slopes by the same expression and agree to an ulp or two. erf and erfc
+    // at 4.2 are 1e-15 from the true slope in both, since −x² rounds before exp,
+    // so a more accurate slope would have to move the oracle too.
     for (const Case& c : cases) {
         for (const double v : {0.3, 1.7, 4.2}) {
             const double at = pointFor(c, v);
             const Dual<1> r = c.f(arg<1>(at, 0));
             EXPECT_EQ(r.value, c.value(at)) << c.name << " at " << at;
-            EXPECT_NEAR(r.d[0], c.slope(at), 1e-15 * std::max(1.0, std::abs(c.slope(at))))
-                << c.name << " at " << at;
+            const double slope = c.slope(at);
+            EXPECT_NEAR(r.d[0], slope, 1e-15 * std::abs(slope)) << c.name << " at " << at;
         }
     }
 }
@@ -165,8 +171,8 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
 // references are 4/(eˣ + e⁻ˣ)² to 17 digits, from
 //     echo 'scale=400; x=10; 4/((e(x)+e(-x))^2)' | bc -l
 // so they do not lean on the C library's cosh. FunctionsMatchTheirDerivatives
-// cannot see the defect: its tolerance is absolute below a slope of 1, and it
-// accepts 0 for 1.7e-17 at x = 20.
+// looks no further than 4.2, where the defect is 5.6e-14 off, and its tolerance
+// was absolute below a slope of 1 until flywheel-dag#41: it accepted that.
 TEST(AadDual, TanhSlopeIsAccurateWhereTanhRoundsToOne) {
     struct Point {
         double x;
