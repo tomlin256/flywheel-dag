@@ -1,6 +1,6 @@
 # Hold `FunctionsMatchTheirDerivatives` to a Relative Slope Tolerance
 
-**Status: Approved (2026-10-13).** The plan was approved as written: the slope tolerance becomes
+**Status: Done (2026-10-14), no release.** The plan was approved as written: the slope tolerance becomes
 `1e-15 * |slope|`, with no floor for a slope of 0, and nothing under `include/` changes.
 
 Closes [flywheel-dag#41](https://github.com/tomlin256/flywheel-dag/issues/41).
@@ -219,3 +219,33 @@ Commit: `docs: mark the plan done`.
   all three platforms, and the mutation outcomes, are what bind it to the real code.
 - **Assumptions:** the engine stays header-only C++17; the oracle lambdas stay as they are; and pushing is
   assumed, as in the earlier plans, with Step 2 stopping before it.
+
+## Outcome
+
+[CI run 38626903111](https://github.com/tomlin256/flywheel-dag/actions/runs/38626903111) on `c62d7c1` is
+green on both legs, `build (ubuntu-latest)` and `build (macos-latest)`, each through its Build, Test and
+Benchmark steps. CI builds with warnings as errors, under GCC 13.3 on ubuntu and Apple Clang 21 on macOS.
+It is the check the self-review names: the new tolerance holds on the real runners, not only on the
+container and this machine that stood in for them.
+
+Rerun on the committed tree:
+
+- **Tests.** A clean build prints no warnings with `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and ctest passes
+  36 of 36. `test_aad_dual` passes 13 of 13.
+- **Mutations.** M1, M2, A1 and A2 each fail only the tests the table below lists, one test at a time under
+  a watchdog, on scratch copies of `include/`, against the test file before `c62d7c1` and the one at it.
+  The control copy passes all 13 under both files. None crashed or hung.
+- **No `include/` change.** `git diff v0.2.6 HEAD --stat -- include` is empty, so v0.2.6 stays the latest
+  and no tag is cut.
+
+| | Old file fails | New file fails |
+|---|---|---|
+| M1 | `TanhSlopeIsAccurateWhereTanhRoundsToOne`, `TanhSlopeReachesZeroOnlyWhereSechSquaredDoes` | the same two, and `FunctionsMatchTheirDerivatives` at `tanh` at 4.2 |
+| M2 | none | `FunctionsMatchTheirDerivatives` at `erf` at 4.2 and `erfc` at 4.2 |
+| A1 | `TanhSlopeReachesZeroOnlyWhereSechSquaredDoes` | the same |
+| A2 | none | none |
+
+Where the work differs from the plan:
+
+- **The mutations were rerun on Apple Clang alone,** not in the two GCC 13.3 containers. CI's ubuntu leg
+  runs the new check on the real `Dual` under GCC 13.3 and glibc 2.39, and runs no mutations.
