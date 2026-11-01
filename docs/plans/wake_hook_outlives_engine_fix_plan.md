@@ -1,7 +1,8 @@
 # A Source's Wake Hook Must Not Hold the Engine by Raw Pointer
 
-**Status: Approved (2026-11-01).** The plan was approved as written: D1 to D3 stand, the engine's wake state
-becomes shared, and the fix is released as v0.2.7.
+**Status: Done (2026-11-01), released as v0.2.7.** The plan was approved as written: D1 to D3 stood, the
+engine's wake state is shared, and the fix is in [v0.2.7](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.2.7).
+The Outcome section at the end records what the steps found.
 
 Closes [flywheel-dag#42](https://github.com/tomlin256/flywheel-dag/issues/42).
 
@@ -237,7 +238,92 @@ Commits: `build: release v0.2.7` and `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-01. |
-| 1 — Start from green | | |
-| 2 — Tests, red first | | |
-| 3 — The fix | | |
-| 4 — Release | | |
+| 1 — Start from green | Done | ctest 36 of 36, no warnings, invariants match. |
+| 2 — Tests, red first | Done | `d4e872f`. Red on Apple Clang and, in CI, on GCC 15 with glibc. |
+| 3 — The fix | Done | `1b398cd`, after `cdd9b37` (flywheel-dag#44). CI green on both legs. |
+| 4 — Release | Done | `8d4376e`, tag `v0.2.7`, release published. |
+
+## Outcome
+
+Released as [v0.2.7](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.2.7), tag `v0.2.7` on `8d4376e`.
+
+| Commit | Step | What |
+|---|---|---|
+| `a5411fe` | 0 | the approval, recorded |
+| `d4e872f` | 2 | the five `EngineWakeHook.*` tests, four of them red on purpose |
+| `cdd9b37` | none | flywheel-dag#44: an existing test that GCC 15 rejects (below) |
+| `1b398cd` | 3 | the fix |
+| `8d4376e` | 4 | release v0.2.7 |
+
+**Step 1.** The baseline was green: no configure or build warnings with warnings as errors, ctest 36 of 36,
+and `bench_hot_path --invariants` matching `benchmarks/expected_invariants.txt`.
+
+**Step 2, red first.**
+
+- On Apple Clang 21 with libc++, against v0.2.6, the first four tests failed with
+  `std::system_error: mutex lock failed: Invalid argument` and the fifth passed. Nothing else in
+  `test_dag_async` failed.
+- **The `0xFF` fill is what makes them fail everywhere.** On a scratch copy of the test with the Engine never
+  destroyed and no fill, all five passed on the bug: a dead Engine whose bytes are intact, which is what
+  libstdc++'s trivial mutex destructor leaves. With the Engine never destroyed and the fill, the four failed
+  again.
+- **The Linux half**, which the self-review above calls unverified, ran in CI on `cdd9b37`: [run
+  41341840810](https://github.com/tomlin256/flywheel-dag/actions/runs/41341840810), GCC 15.2.0 with libstdc++
+  and glibc, 35 of 36 tests. The four failed with `std::system_error: Invalid argument` and the fifth passed.
+  The first Linux run of Step 2, on `d4e872f`, could not get that far (next paragraph).
+- **The guard's sensitivity.** With `cv_.notify_one()` removed from v0.2.6's hook,
+  `APostStillWakesARunningEngine` hung on 200 of 200 runs under a 5 s alarm, on Apple Clang. One post is
+  enough, so the test did not need rounds.
+
+**An unplanned failure: GCC 15 (flywheel-dag#44).** The Ubuntu leg had not built since the runner image moved
+to GCC 15. The two docs-only commits before Step 2, `ecfcc02` and `a5411fe`, were already red, and the last
+green run was on `7a43fd3` (2026-10-14). GCC 15.2 rejected `reg.setWakeHook([] {})` in
+`FeedRegistry.AMemberAddedTwiceIsHeldOnce` with `-Werror=maybe-uninitialized`: nothing writes the storage of a
+`std::function` that holds an empty lambda, and the copy `setWakeHook()` makes is reported as a read of it.
+`cdd9b37` passes a function instead, so no diagnostic is silenced. The repo's rule is to fix a warning where
+it can be fixed and to silence only a confirmed compiler false positive, naming the bug; the GCC bug tracker
+refused my fetch, so I had no number to name. The build had stopped at the first failed target, so nine test
+targets and the benchmark had never been compiled by GCC 15. The nine compiled clean in run 41341840810, and
+the benchmark built and matched its invariants in run 41342327936.
+
+**Step 3, the fix.**
+
+- On Apple Clang: ctest 36 of 36, no warnings with warnings as errors, and `bench_hot_path --invariants`
+  matching the committed file, which is unchanged.
+- The reproduction under "Problem": against the v0.2.6 headers it terminated on 20 of 20 runs with
+  `std::system_error: mutex lock failed: Invalid argument`, and against the fixed headers it ran to the end on
+  20 of 20.
+- Three hand-made changes, each on a fresh scratch copy of the fixed tree, each test run on its own under a
+  10 s alarm:
+
+| Change | The four gone-Engine tests | `APostStillWakesARunningEngine` |
+|---|---|---|
+| none | pass | passes |
+| the hook captures `this` again and reads the state through it | crash (SIGSEGV) | passes |
+| the hook sets the flag and never notifies | pass | hangs |
+| `run()` waits on members the hook does not signal | pass | hangs |
+
+- [CI run 41342327936](https://github.com/tomlin256/flywheel-dag/actions/runs/41342327936) on `1b398cd` is
+  green on both legs through Build, Test and Benchmark: GCC 15.2.0 on ubuntu and Apple Clang 21 on macOS, 36
+  of 36 tests.
+
+**Step 4, release.** ctest 36 of 36 with no warnings, and the installed version file reports `0.2.7`. [CI run
+41342866397](https://github.com/tomlin256/flywheel-dag/actions/runs/41342866397) on `8d4376e` is green on both
+legs. `git diff v0.2.6..v0.2.7 --stat -- include` names `dag_engine.hpp` and `dag_engine.inl` alone.
+
+**Where the work differs from the plan.**
+
+- The hand-made changes ran at Step 3, not Step 2: two of the three change code that exists only after the
+  fix. The first reads the state through the dead Engine, so it crashes on the filled bytes instead of
+  throwing `std::system_error`; any hook that reaches the Engine fails.
+- The first run of the three was discarded. The builds of the second and third changes did not recompile the
+  test, so their results were the unmutated binary's. The script now deletes the object before each build and
+  refuses to report on a build that did not recompile; the table above is from the rerun.
+- flywheel-dag#44 was not in the plan. It came one commit before the fix, because the fix's CI could not be
+  green without it.
+- Documentation went one place further than D3 named: the overview's "Wake mechanism" paragraph in
+  `dag_engine.hpp` said the flag was "the only Engine state a feed thread touches", which stopped being true.
+
+**Left open.** [flywheel-dag#43](https://github.com/tomlin256/flywheel-dag/issues/43) (`stop()` can lose its
+wake-up) and [flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45) (no sanitizer build of the
+engine's own tests).
