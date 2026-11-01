@@ -37,6 +37,11 @@ ctest --test-dir build
   - Brace an `if` whose body is a gtest `EXPECT_`/`ASSERT_`. GCC's
     `-Wdangling-else` rejects it unbraced; Apple Clang does not warn, so only
     CI's GCC leg sees it.
+  - Do not copy a `std::function` that holds an empty lambda. GCC 15's
+    `-Wmaybe-uninitialized` rejects the copy, because the lambda writes nothing
+    into the function's storage; Apple Clang does not warn, so only CI's GCC leg
+    sees it (flywheel-dag#44). Hand `setWakeHook()` and its like a function, or a
+    lambda that captures something.
   - The flags are the top level's alone. Never put one on `flywheel_dag`'s
     `INTERFACE` or in the cache; `test_warning_flags` and
     `test_consumer_subproject` check it.
