@@ -31,8 +31,11 @@
 // ──────
 // Wake mechanism
 //   Every registered source installs the engine's wake hook.  The hook does one
-//   thing: sets a boolean flag and signals a condition variable.  This is the
-//   only Engine state a feed thread touches.
+//   thing: sets a boolean flag and signals a condition variable.  That flag, its
+//   mutex and the condition variable are all a feed thread touches, and they are
+//   not the Engine's own: the Engine and every hook it hands out share them through
+//   a shared_ptr, so a source can still be posted to after its Engine is gone
+//   (flywheel-dag#42).
 //
 // Cycle
 //   On each wake: flush all sources (thread boundary), then for each output node
@@ -65,7 +68,9 @@
 //
 // Thread safety
 //   run() must be called from exactly one thread.  stop() and poke() are safe
-//   to call from any thread, including from within output callbacks.
+//   to call from any thread, including from within output callbacks.  A source
+//   may be posted to after its Engine is destroyed, and nothing else on a
+//   destroyed Engine may be used.
 
 #include "dag_async.hpp"
 #include "dag_compute_module.hpp"
@@ -350,10 +355,19 @@ private:
     std::vector<bool>                        due_;
     EvalContext                              ctx_;
 
-    std::mutex              mu_;
-    std::condition_variable cv_;
-    bool                    hasWork_ = false;
-    std::atomic<bool>       running_{false};
+    // What the wake hook touches: the flag run() waits on, with its mutex and condition variable.
+    // The Engine and every hook it has handed out each hold a reference, so the state lasts as long
+    // as a source that can still call its hook. A hook that held the Engine would lock a destroyed
+    // mutex when a post() outlives the Engine (a feed thread between its push and its call to the
+    // hook, or any other holder of the source): this one sets a flag nobody reads (flywheel-dag#42).
+    // running_ stays here: stop() and run()'s exit store it without the lock.
+    struct WakeState {
+        std::mutex              mu;
+        std::condition_variable cv;
+        bool                    hasWork = false;
+    };
+    std::shared_ptr<WakeState> wake_ = std::make_shared<WakeState>();
+    std::atomic<bool>          running_{false};
 
     std::atomic<uint64_t> cycles_{0};
     std::atomic<uint64_t> callbacks_{0};

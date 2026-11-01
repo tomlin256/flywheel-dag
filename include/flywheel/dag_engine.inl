@@ -271,10 +271,10 @@ inline void Engine::run() {
     cycle();
 
     while (running_) {
-        std::unique_lock lk(mu_);
-        cv_.wait(lk, [this] { return hasWork_ || !running_; });
+        std::unique_lock lk(wake_->mu);
+        wake_->cv.wait(lk, [this] { return wake_->hasWork || !running_; });
         if (!running_) break;
-        hasWork_ = false;
+        wake_->hasWork = false;
         lk.unlock();
 
         cycle();
@@ -283,15 +283,15 @@ inline void Engine::run() {
 
 inline void Engine::stop() {
     running_ = false;
-    cv_.notify_all();
+    wake_->cv.notify_all();
 }
 
 inline void Engine::poke() {
     {
-        std::lock_guard lk(mu_);
-        hasWork_ = true;
+        std::lock_guard lk(wake_->mu);
+        wake_->hasWork = true;
     }
-    cv_.notify_one();
+    wake_->cv.notify_one();
 }
 
 inline void Engine::step() { cycle(); }
@@ -439,16 +439,23 @@ inline void Engine::cycle() {
 // Wake hook factory
 //
 // Returns a cheap callable that sets the work flag and signals the cv. A feed
-// thread may call it: it holds mu_ only to set the flag.
+// thread may call it: it holds the wake state's mutex only to set the flag.
+//
+// The hook holds the wake state, not the Engine. A source keeps its hook, and
+// whatever else holds the source can post() after the Engine is gone, or be
+// between its push and its call to the hook when the Engine is destroyed
+// (AsyncQueue::post() calls the hook once it has released its own lock). A hook
+// that captured `this` would lock a destroyed mutex then (flywheel-dag#42). This
+// one locks a mutex that is still there, sets a flag nobody reads, and returns.
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::function<void()> Engine::makeWakeHook() {
-    return [this] {
+    return [wake = wake_] {
         {
-            std::lock_guard lk(mu_);
-            hasWork_ = true;
+            std::lock_guard lk(wake->mu);
+            wake->hasWork = true;
         }
-        cv_.notify_one();
+        wake->cv.notify_one();
     };
 }
 

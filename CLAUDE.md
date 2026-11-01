@@ -107,6 +107,9 @@ ctest --test-dir build
 
 - Eval is single-threaded with no locks during traversal. Feed threads call
   `post()` (mutex-guarded); the eval thread drains.
+- A source may be posted to after its `Engine` is destroyed, because its wake
+  hook holds the wake state the `Engine` shares with every hook, not the
+  `Engine` (flywheel-dag#42). Nothing else on a destroyed `Engine` may be used.
 - Only the engine calls `flush()` on a live source (via `IFlushable` and
   `FeedRegistry`). Do not call `AsyncQueue::flush()` directly outside a unit test
   that owns the queue: it always refreshes the cached batch, so a redundant flush
