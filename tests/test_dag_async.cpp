@@ -647,6 +647,12 @@ private:
     int hooks_   = 0;
 };
 
+// A wake hook for a test that only needs one installed, and never calls it. A function, not an empty
+// lambda: nothing writes the storage of a std::function that holds an empty class, and GCC 15 reports
+// the copy of one as a read of uninitialised memory (-Wmaybe-uninitialized, flywheel-dag#44). A
+// function's address is written there.
+void ignoreWake() {}
+
 }  // namespace
 
 TEST(FeedRegistry, PendingCountSumsTheMembers) {
@@ -734,7 +740,7 @@ TEST(FeedRegistry, IncludesItselfAndItsMembersAtAnyDepth) {
 
 TEST(FeedRegistry, AMemberAddedTwiceIsHeldOnce) {
     FeedRegistry reg;
-    reg.setWakeHook([] {});
+    reg.setWakeHook(ignoreWake);
     auto a = std::make_shared<CountedSource>();
     reg.add(a);
     reg.add(a);
