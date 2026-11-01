@@ -1,6 +1,7 @@
 # A Source's Wake Hook Must Not Hold the Engine by Raw Pointer
 
-**Status: Proposed (2026-11-01)** — awaiting approval. D1 to D3 are the places to edit.
+**Status: Approved (2026-11-01).** The plan was approved as written: D1 to D3 stand, the engine's wake state
+becomes shared, and the fix is released as v0.2.7.
 
 Closes [flywheel-dag#42](https://github.com/tomlin256/flywheel-dag/issues/42).
 
@@ -235,7 +236,7 @@ Commits: `build: release v0.2.7` and `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | |
+| 0 — Approval | Done | Approved as written on 2026-11-01. |
 | 1 — Start from green | | |
 | 2 — Tests, red first | | |
 | 3 — The fix | | |
