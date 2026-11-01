@@ -25,6 +25,8 @@
 //  CycleSeqLock    — consistent cross-thread reads over Engine::cycle(), and the warning
 //                    a read logs when it gives up, which names the read
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
+//  Engine wake hook — a source can still be posted to after its Engine is gone, and a post
+//                    still wakes a run() that is waiting
 //  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
 //                    a new output gets the value its node holds at its first cycle,
 //                    a registration made inside a cycle is refused, and so is a
@@ -44,6 +46,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -2014,6 +2017,108 @@ TEST(EngineRun, ARunCalledWhileRunningThrowsAndLeavesTheRunGoing) {
     EXPECT_EQ(runAndCatch(engine), "");
     EXPECT_EQ(nested, "Engine::run() called while already running");
     EXPECT_EQ(seen, (std::vector<double>{1.0, 2.0}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The wake hook outlives the Engine (flywheel-dag#42)
+//
+// A source keeps the wake hook the Engine gave it, and whatever else holds the source can post()
+// after the Engine is gone. The hook must then touch nothing the Engine owned.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Builds an Engine in a buffer of its own, hands it to `wire`, destroys it, and fills the buffer
+// with 0xFF: what is left of an Engine that is gone.
+//
+// The fill is what makes these tests fail the same way everywhere. A destroyed std::mutex keeps
+// its bytes unless the destructor clears them, and libstdc++'s mutex has a trivial destructor, so
+// a hook that still locks the dead Engine's mutex can find it intact and succeed: the test would
+// pass on the very bug it is for. A mutex of all ones is no valid mutex to any pthreads, so the
+// lock fails, with EINVAL, which the standard library throws as std::system_error. The fill goes
+// through a volatile pointer because a plain memset into a buffer nothing reads again is a dead
+// store the optimiser is free to delete.
+template <typename Wire>
+void wireThenDestroyTheEngine(Wire&& wire) {
+    alignas(Engine) unsigned char storage[sizeof(Engine)];
+    Engine* engine = new (storage) Engine;
+    wire(*engine);
+    engine->~Engine();
+    volatile unsigned char* bytes = storage;
+    for (std::size_t i = 0; i < sizeof storage; ++i) bytes[i] = 0xFF;
+}
+
+}  // namespace
+
+// post() pushes under the queue's lock and calls the hook once it has released it, so the value is
+// in the queue whether or not the hook throws: what a failure shows is the throw.
+TEST(EngineWakeHook, QueuePostAfterTheEngineIsGone) {
+    auto queue = AsyncQueue<int>::make("q");
+    wireThenDestroyTheEngine([&](Engine& engine) { engine.addSource(queue); });
+
+    EXPECT_NO_THROW(queue->post(1));
+    EXPECT_EQ(queue->pendingCount(), 1u);
+}
+
+TEST(EngineWakeHook, AsyncInputPostAfterTheEngineIsGone) {
+    auto input = AsyncInput<int>::make("in", 0);
+    wireThenDestroyTheEngine([&](Engine& engine) { engine.addSource(input); });
+
+    EXPECT_NO_THROW(input->post(1));
+    EXPECT_EQ(input->pendingCount(), 1u);
+}
+
+// The Engine installs its hook on the registry, which hands it to every member, so a member is as
+// exposed as a source the Engine holds itself.
+TEST(EngineWakeHook, RegistryMemberPostAfterTheEngineIsGone) {
+    auto registry = std::make_shared<FeedRegistry>();
+    auto queue = AsyncQueue<int>::make("q");
+    registry->add(queue);
+    wireThenDestroyTheEngine([&](Engine& engine) { engine.addSource(registry); });
+
+    EXPECT_NO_THROW(queue->post(1));
+    EXPECT_EQ(queue->pendingCount(), 1u);
+}
+
+// makeInput() installs the same hook on an Input<T> the application then keeps.
+TEST(EngineWakeHook, MakeInputSetAfterTheEngineIsGone) {
+    dag::InputPtr<int> input;
+    wireThenDestroyTheEngine([&](Engine& engine) { input = engine.makeInput<int>("in", 0); });
+
+    EXPECT_NO_THROW(input->set(1));
+    EXPECT_EQ(input->get(), 1);
+}
+
+// Guards the fix, not the bug: the hook must still wake a run() that is waiting. The first cycle
+// delivers the queue's empty starting batch, and its callback releases the test thread, so the post
+// comes after run() has delivered it and is about to wait. A hook that no longer sets the flag run()
+// waits on, or no longer signals it, leaves run() asleep for ever, which ctest reports as a timeout.
+TEST(EngineWakeHook, APostStillWakesARunningEngine) {
+    Engine engine;
+    auto queue = AsyncQueue<int>::make("q");
+    engine.addSource(queue);
+
+    std::promise<void> firstCycleDelivered;
+    bool released = false;
+    std::vector<int> seen;
+    engine.addOutput<std::vector<int>>(queue, [&](const std::vector<int>& batch) {
+        if (batch.empty()) {
+            if (!released) {
+                released = true;
+                firstCycleDelivered.set_value();
+            }
+            return;
+        }
+        seen = batch;
+        engine.stop();
+    });
+
+    std::thread runner([&engine] { engine.run(); });
+    firstCycleDelivered.get_future().wait();
+    queue->post(7);
+    runner.join();
+
+    EXPECT_EQ(seen, std::vector<int>{7});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
