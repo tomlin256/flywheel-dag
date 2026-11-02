@@ -17,10 +17,6 @@
 # 3.18 is a plain minimum, not a <min>...<max> range: a range flips every policy
 # up to <max> to NEW, which needs its own audit.
 cmake_minimum_required(VERSION 3.18)
-project(FLYWHEEL_DAG VERSION 0.2.7 LANGUAGES CXX)
-
-# Export compile_commands.json for clangd and other tooling.
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level or subproject.
@@ -28,13 +24,49 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Tests, examples, benchmarks, install rules and every build-wide setting below
 # apply only when this is the top-level project. A consumer's build settings are
 # its own: it never inherits the engine's test targets or googletest, and the
-# engine lands in its install prefix only if it sets FLYWHEEL_DAG_INSTALL.
+# engine lands in its install prefix only if it sets FLYWHEEL_DAG_INSTALL. It is
+# decided before project(), because the build-tree guard below applies to the top
+# level only.
 # ─────────────────────────────────────────────────────────────────────────────
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_flywheel_dag_top_level ON)
 else()
     set(_flywheel_dag_top_level OFF)
 endif()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Which platform is this build tree for?
+#
+# A build tree belongs to one OS and one architecture, and a checkout that is
+# built on macOS and in a Linux container needs a tree for each:
+# build/<kind>-<os>-<arch>, which CMakePresets.json spells out. This refuses a
+# tree whose name claims another platform, and a tree that was first configured
+# on another, before project() detects a compiler. cmake/flywheel_dag_platform.cmake
+# has the rules and the reasons.
+#
+# It runs before project() so that a refused tree is left with no compiler
+# detected, and it asks for the architecture with cmake_host_system_information():
+# CMAKE_HOST_SYSTEM_PROCESSOR is empty until project(). The top level only: a
+# consumer's tree is the consumer's, and test_tree_name holds that.
+# ─────────────────────────────────────────────────────────────────────────────
+if(_flywheel_dag_top_level)
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_platform.cmake)
+    cmake_host_system_information(RESULT _flywheel_dag_machine QUERY OS_PLATFORM)
+    flywheel_dag_platform(_flywheel_dag_platform "${CMAKE_HOST_SYSTEM_NAME}" "${_flywheel_dag_machine}")
+    get_filename_component(_flywheel_dag_tree_name "${CMAKE_BINARY_DIR}" NAME)
+    flywheel_dag_tree_problem(_flywheel_dag_tree_problem "${_flywheel_dag_tree_name}"
+        "${_flywheel_dag_platform}" "${FLYWHEEL_DAG_TREE_PLATFORM}")
+    if(NOT "${_flywheel_dag_tree_problem}" STREQUAL "")
+        message(FATAL_ERROR "${_flywheel_dag_tree_problem}")
+    endif()
+    set(FLYWHEEL_DAG_TREE_PLATFORM "${_flywheel_dag_platform}" CACHE INTERNAL
+        "The platform this build tree was first configured on")
+endif()
+
+project(FLYWHEEL_DAG VERSION 0.2.7 LANGUAGES CXX)
+
+# Export compile_commands.json for clangd and other tooling.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FLYWHEEL_DAG_BUILD_TESTS      "Build the engine's tests"                           ${_flywheel_dag_top_level})
 option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                                 ${_flywheel_dag_top_level})

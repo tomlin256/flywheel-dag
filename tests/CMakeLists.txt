@@ -51,6 +51,24 @@ add_test(NAME test_consumer_subproject
     --test-command consumer)
 set_tests_properties(test_consumer_subproject PROPERTIES TIMEOUT 600)
 
+# Which platform a build tree is for, and whether its name tells the truth. The
+# first test holds the two functions of cmake/flywheel_dag_platform.cmake to a
+# table. The second configures the real root CMakeLists.txt, which calls them
+# before project(), into trees named for the host and for the other
+# architecture; it compiles nothing of the project's and needs no network.
+add_test(NAME test_platform_name
+  COMMAND ${CMAKE_COMMAND}
+    -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/check_platform.cmake)
+add_test(NAME test_tree_name
+  COMMAND ${CMAKE_COMMAND}
+    -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+    -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/tree_name
+    -DGENERATOR=${CMAKE_GENERATOR}
+    -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+    -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/check_tree_name.cmake)
+
 # The installed package. These tests are registered wherever the root promises
 # install rules, never from anything the install block itself sets. Everything
 # they install goes into its own prefix under package/.
