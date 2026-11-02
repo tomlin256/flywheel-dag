@@ -92,6 +92,47 @@ auto CycleSeqLock::readConsistent(F&& fn, const std::string_view what,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BasicWakeState
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace detail {
+
+template<typename Mutex, typename CondVar>
+bool BasicWakeState<Mutex, CondVar>::beginRun() { return !running_.exchange(true); }
+
+template<typename Mutex, typename CondVar>
+void BasicWakeState<Mutex, CondVar>::endRun() { running_ = false; }
+
+template<typename Mutex, typename CondVar>
+bool BasicWakeState<Mutex, CondVar>::running() const { return running_; }
+
+template<typename Mutex, typename CondVar>
+void BasicWakeState<Mutex, CondVar>::signalWork() {
+    {
+        std::lock_guard<Mutex> lk(mu_);
+        hasWork_ = true;
+    }
+    cv_.notify_one();
+}
+
+template<typename Mutex, typename CondVar>
+void BasicWakeState<Mutex, CondVar>::requestStop() {
+    running_ = false;
+    cv_.notify_all();
+}
+
+template<typename Mutex, typename CondVar>
+bool BasicWakeState<Mutex, CondVar>::waitForWork() {
+    std::unique_lock<Mutex> lk(mu_);
+    cv_.wait(lk, [this] { return hasWork_ || !running_; });
+    if (!running_) return false;
+    hasWork_ = false;
+    return true;
+}
+
+} // namespace detail
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Construction
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -255,44 +296,27 @@ void Engine::addFeedback(NodePtr node, dag::InputPtr<T> input) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline void Engine::run() {
-    if (running_.exchange(true))
+    if (!wake_->beginRun())
         throw std::runtime_error("Engine::run() called while already running");
 
     // A node or callback that throws ends the run, and its exception leaves through here. Clear
-    // running_ on every exit, or no later run() could start. This comes after the check: a run()
-    // refused there must leave the flag of the run already going alone.
+    // the run flag on every exit, or no later run() could start. This comes after the check: a
+    // run() refused there must leave the flag of the run already going alone.
     struct ClearOnExit {
-        std::atomic<bool>& flag;
-        ~ClearOnExit() { flag = false; }
+        WakeState& wake;
+        ~ClearOnExit() { wake.endRun(); }
     };
-    const ClearOnExit clearRunning{running_};
+    const ClearOnExit clearRunning{*wake_};
 
     // Initial cycle: flush any already-pending data, deliver starting values.
     cycle();
 
-    while (running_) {
-        std::unique_lock lk(wake_->mu);
-        wake_->cv.wait(lk, [this] { return wake_->hasWork || !running_; });
-        if (!running_) break;
-        wake_->hasWork = false;
-        lk.unlock();
-
-        cycle();
-    }
+    while (wake_->running() && wake_->waitForWork()) cycle();
 }
 
-inline void Engine::stop() {
-    running_ = false;
-    wake_->cv.notify_all();
-}
+inline void Engine::stop() { wake_->requestStop(); }
 
-inline void Engine::poke() {
-    {
-        std::lock_guard lk(wake_->mu);
-        wake_->hasWork = true;
-    }
-    wake_->cv.notify_one();
-}
+inline void Engine::poke() { wake_->signalWork(); }
 
 inline void Engine::step() { cycle(); }
 
@@ -450,13 +474,7 @@ inline void Engine::cycle() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::function<void()> Engine::makeWakeHook() {
-    return [wake = wake_] {
-        {
-            std::lock_guard lk(wake->mu);
-            wake->hasWork = true;
-        }
-        wake->cv.notify_one();
-    };
+    return [wake = wake_] { wake->signalWork(); };
 }
 
 } // namespace dag::async

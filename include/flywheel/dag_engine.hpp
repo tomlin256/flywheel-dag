@@ -155,6 +155,49 @@ private:
 
 using CycleSeqLockPtr = std::shared_ptr<const CycleSeqLock>;
 
+namespace detail {
+
+// BasicWakeState — what Engine::run() waits on and everything that wakes it: the flag that says there
+// is work, the flag that says a run is going, and the mutex and condition variable that carry them.
+// A source's wake hook and poke() call signalWork(), stop() calls requestStop(), and run() calls
+// beginRun(), waitForWork() and endRun(). The Engine and every hook it hands out share one through a
+// shared_ptr, so a source can still be posted to after its Engine is gone (flywheel-dag#42).
+//
+// Mutex and CondVar are std::mutex and std::condition_variable in the Engine. A test gives the class a
+// mutex that reports contention and a condition variable that pauses between its predicate and its
+// block: that gap is a few instructions wide, and this is the only way to hold a waiter in it
+// (flywheel-dag#43).
+//
+// requestStop() stores running_ outside mu_, as Engine::stop() did before this class existed. That is
+// the lost wake-up of flywheel-dag#43, kept here so that moving the state into a class alters no
+// behaviour; the change after this one moves the store under mu_.
+template<typename Mutex, typename CondVar>
+class BasicWakeState {
+public:
+    /// run() claims the run flag. False, with the flag untouched, when a run already holds it.
+    bool beginRun();
+    /// run()'s exit, a throw included. It takes no lock, so it cannot throw from a destructor.
+    void endRun();
+    bool running() const;
+
+    /// A source's wake hook and poke(): there is work for run().
+    void signalWork();
+    /// stop(): ends the run in progress once its current cycle is over.
+    void requestStop();
+    /// run(): blocks until there is work or a stop. True: work, and the flag is consumed. False: stopped.
+    bool waitForWork();
+
+protected:
+    // Protected, not private, so that a test's subclass can reach the mutex and condition variable it
+    // gave the class. Nothing derives from it in the engine, and the Engine reaches none of these.
+    Mutex             mu_;
+    CondVar           cv_;
+    bool              hasWork_ = false;   // guarded by mu_
+    std::atomic<bool> running_{false};    // beginRun(), endRun() and running() use it without the lock
+};
+
+} // namespace detail
+
 class Engine {
 public:
     // ── Construction ──────────────────────────────────────────────────────────
@@ -355,19 +398,14 @@ private:
     std::vector<bool>                        due_;
     EvalContext                              ctx_;
 
-    // What the wake hook touches: the flag run() waits on, with its mutex and condition variable.
-    // The Engine and every hook it has handed out each hold a reference, so the state lasts as long
-    // as a source that can still call its hook. A hook that held the Engine would lock a destroyed
-    // mutex when a post() outlives the Engine (a feed thread between its push and its call to the
-    // hook, or any other holder of the source): this one sets a flag nobody reads (flywheel-dag#42).
-    // running_ stays here: stop() and run()'s exit store it without the lock.
-    struct WakeState {
-        std::mutex              mu;
-        std::condition_variable cv;
-        bool                    hasWork = false;
-    };
+    // What the wake hook touches, and what run() waits on and stop() and poke() set: the flags, with
+    // their mutex and condition variable (detail::BasicWakeState). The Engine and every hook it has
+    // handed out each hold a reference, so the state lasts as long as a source that can still call
+    // its hook. A hook that held the Engine would lock a destroyed mutex when a post() outlives the
+    // Engine (a feed thread between its push and its call to the hook, or any other holder of the
+    // source): this one sets a flag nobody reads (flywheel-dag#42).
+    using WakeState = detail::BasicWakeState<std::mutex, std::condition_variable>;
     std::shared_ptr<WakeState> wake_ = std::make_shared<WakeState>();
-    std::atomic<bool>          running_{false};
 
     std::atomic<uint64_t> cycles_{0};
     std::atomic<uint64_t> callbacks_{0};

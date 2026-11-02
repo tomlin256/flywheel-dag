@@ -25,6 +25,7 @@ set(FLYWHEEL_DAG_TESTS
   test_stateful_node_base
   test_timeseries
   test_value_slot
+  test_wake_state
   test_window_status
   test_window_status_integration
 )
