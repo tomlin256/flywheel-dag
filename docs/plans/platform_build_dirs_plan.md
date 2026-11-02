@@ -1,8 +1,10 @@
 # One Build Tree Per Platform
 
-**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D9 stand, so the trees are
-`build/<kind>-<os>-<arch>` with the kinds `relwithdebinfo`, `release` and `debug`, the guard refuses a name that
-claims another platform and nothing else, and the change is released as v0.3.0.
+**Status: Done (2026-11-02), released as v0.3.0.** The plan was approved as written: D1 to D9 stood, so the trees
+are `build/<kind>-<os>-<arch>` with the kinds `relwithdebinfo`, `release` and `debug`, the guard refuses a name
+that claims another platform and nothing else, and the change is in
+[v0.3.0](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.3.0). The Outcome section at the end records
+what the steps found and where they differ from this text.
 
 Closes [flywheel-dag#46](https://github.com/tomlin256/flywheel-dag/issues/46).
 
@@ -122,9 +124,12 @@ project's floor):
   until `project()`. `cmake_host_system_information(QUERY OS_PLATFORM)` answers before it (`arm64` on the Mac,
   `aarch64` in the container), so the guard can refuse before any compiler is detected. A configure that stops
   there leaves a cache with no compiler entries; a completed one has three.
-- A refused configure into an existing tree leaves its `CMakeCache.txt` byte-identical, mtime included, as long
-  as the command line adds no new `-D`. A preset re-supplying `CMAKE_BUILD_TYPE` with the value the cache holds
-  is not a new `-D` (2026-11-02, 4.2.3).
+- A refused configure into an existing tree changes no value in its `CMakeCache.txt`. In a scratch project of one
+  directory the file is byte-identical, mtime included, as long as the command line adds no new `-D`
+  (2026-11-02, 4.2.3). **In this project it is not**, which Step 4 found: CMake rewrites the file after a refusal,
+  resets the type and the help text of each variable the command line gives (`CMAKE_BUILD_TYPE` from a preset,
+  `FLYWHEEL_DAG_WARNINGS_AS_ERRORS` when passed), and changes two of the generator's own entries. The next `cmake --build`
+  of that tree regenerates it, restores the file byte for byte, and rebuilds nothing (Outcome).
 - `${presetName}` in an inherited `binaryDir` expands to the inheriting preset's name, so a preset's tree is
   `build/<its name>` and two presets cannot share one. A preset that inherits `base`, a kind and a host gets that
   tree, the kind's `CMAKE_BUILD_TYPE` and the host's condition, and the hidden presets are not listed (2026-11-02,
@@ -202,7 +207,7 @@ My defaults, each one a place to edit before approving.
   publishes the GitHub release. Approving the plan approves those pushes. Every push follows a dry run of the
   leak audit.
 - **D9. The kinds are CMake's build types, in lower case.** `relwithdebinfo` is `RelWithDebInfo` (`-O2 -g
-  -DNDEBUG`), `release` is `Release` (`-O3 -DNDEBUG`) and `debug` is `Debug` (`-O0 -g`, `assert()` on).
+  -DNDEBUG`), `release` is `Release` (`-O3 -DNDEBUG`) and `debug` is `Debug` (`-g` and no optimisation flag, `assert()` on).
   `relwithdebinfo` is the project's own default and the build CI makes, which `ci.yml` calls "the configuration
   consumers get", so CI moves onto `relwithdebinfo-…` and compiles exactly what it does now. It is also the tree
   `.clangd` reads and the benchmark commands run. A word that is a CMake build type keeps its meaning wherever a
@@ -398,9 +403,10 @@ benchmark invariants for `relwithdebinfo`. Then:
 2. **The architecture in the name, from an x86_64 host.** In a throwaway `--platform linux/amd64` container (an
    `ubuntu:24.04` image with `build-essential`, `cmake` and `git`, removed afterwards; `ubuntu-dev` is not
    touched), on the same checkout, which it sees at the same path the arm64 container does:
-   - `cmake --preset relwithdebinfo-linux-arm64` is refused by the guard, naming both platforms, and the arm64
-     tree's `CMakeCache.txt` is byte-identical afterwards. CMake's own path check cannot refuse it, because the
-     path is the same;
+   - `cmake --preset relwithdebinfo-linux-arm64` is refused by the guard, naming both platforms, and no value in
+     the arm64 tree's `CMakeCache.txt` changes (the file is rewritten, and one `cmake --build` restores it byte
+     for byte and rebuilds nothing; see the Outcome). CMake's own path check cannot refuse it, because the path
+     is the same;
    - `cmake --preset relwithdebinfo-linux-x86_64` configures (it fetches its dependencies; the throwaway
      container has network) and writes `build/relwithdebinfo-linux-x86_64` beside
      `build/relwithdebinfo-linux-arm64`;
@@ -549,7 +555,8 @@ Commit: `docs: mark the plan done`.
   `release-linuxbrew` are not examined, because `linuxbrew` is not `linux`. Running under Rosetta on an Apple
   Silicon Mac is a different platform (`x86_64`) from the native one, and the guard treats it as one.
 - **The guard runs before `project()`, so a refused configure leaves a cache and no compiler detection.** It
-  does not delete the directory it refuses. An existing tree's cache stays byte-identical (checked above).
+  does not delete the directory it refuses. An existing tree keeps every value in its cache; CMake rewrites the
+  file and the next build restores it (checked above, and in Step 4).
 - **A runner that changes architecture fails loudly.** If GitHub moves a `-latest` image to another CPU, the
   Configure step stops and names the preset to use. That is a CI edit, and the guard has made the reason plain.
 - **The two systems share the sources.** Editing a file while the other system builds, or running both builds at
@@ -577,11 +584,116 @@ Commit: `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-02. |
-| 1 — Start from green | | |
-| 2 — Platform tag and guard | | |
-| 3 — Presets and their test | | |
-| 4 — Linux, through the presets | | |
-| 5 — CI | | |
-| 6 — Documentation | | |
-| 7 — Release v0.3.0 | | |
-| 8 — Close the plan | | |
+| 1 — Start from green | Done | 36 of 36 on the Mac and in the container, for `relwithdebinfo`; `release` and `debug` too in the container. |
+| 2 — Platform tag and guard | Done | `777e43e`. ctest 38 of 38. CI green on both legs. |
+| 3 — Presets and their test | Done | `ecdd86d`. ctest 39 of 39 for each kind. CI green on both legs. |
+| 4 — Linux, through the presets | Done | No commit. 39 of 39 for each kind in the container. Three findings: flywheel-dag#47, flywheel-dag#48, flywheel-dag#49. |
+| 5 — CI | Done | `c4289b2`. 39 of 39 through the presets on both legs. |
+| 6 — Documentation | Done | `29f8597`. The leftover check returns the three README lines D7 keeps. |
+| 7 — Release v0.3.0 | Done | `6ca804a`, tag `v0.3.0`, release published. |
+| 8 — Close the plan | Done | The commit that adds the Outcome below. |
+
+## Outcome
+
+Released as [v0.3.0](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.3.0), tag `v0.3.0` on `6ca804a`.
+
+| Commit | Step | What | CI |
+|---|---|---|---|
+| `a710b09` | 0 | the approval, recorded | docs only |
+| `777e43e` | 2 | the platform module, the guard and their two tests | [41426953335](https://github.com/tomlin256/flywheel-dag/actions/runs/41426953335) |
+| `ecdd86d` | 3 | `CMakePresets.json` and `test_presets` | [41427735214](https://github.com/tomlin256/flywheel-dag/actions/runs/41427735214) |
+| `c4289b2` | 5 | CI through the presets | [41430400829](https://github.com/tomlin256/flywheel-dag/actions/runs/41430400829) |
+| `29f8597` | 6 | the documentation, `.clangd` and the benchmark comments | [41457555795](https://github.com/tomlin256/flywheel-dag/actions/runs/41457555795) |
+| `6ca804a` | 7 | release v0.3.0 | [41458568953](https://github.com/tomlin256/flywheel-dag/actions/runs/41458568953) |
+
+Every run is green on both legs: GCC 15.2.0 on `ubuntu-26.04` and Apple Clang 21 on macOS. ctest went from 36
+tests to 38 to 39. Steps 1 and 4 have no commit.
+
+**Step 1.** The baseline was green. The container is Ubuntu 24.04 on aarch64 with GCC 13.3.0, CMake 3.28.3, 12
+CPUs and 7.7 GiB of RAM; it was the suite's first run on Linux/aarch64. Every tree: 36 of 36, no CMake warning,
+no compiler warning, and for `relwithdebinfo` the invariants identical to the committed file. The old
+`build/CMakeCache.txt` was unchanged by both. Wall times, cold except for the fetch of the dependencies:
+
+| Tree | Configure | Build | ctest |
+|---|---|---|---|
+| Mac, `relwithdebinfo` | 23 s | 14 s | 30 s |
+| container, `relwithdebinfo` | 24 s | 39 s | 52 s |
+| container, `release` | 23 s | 29 s | 26 s |
+| container, `debug` | 20 s | 18 s | 23 s |
+
+The Mac's `Release` and `Debug` builds ran as probes before the approval, in trees outside the checkout: 36 of
+36 in 24 s and 20 s, and the `Release` invariants matched. The first `Debug` probe failed `test_warning_flags`,
+because I had handed it dependency sources inside the checkout, which that test counts as the project's own; the
+rerun, with the sources outside, was green.
+
+**Step 2, red first.** `test_platform_name` failed with the module missing. `test_tree_name` failed 8 of 9
+cases without the guard: the lying configures succeeded and nothing was recorded. The ninth, the consumer, passed
+and stayed the control that only a guard on a subproject can break. With the module and the wiring: 34 of 34
+cases and 9 of 9. The first green run of `test_tree_name` failed 4 of 9 for a reason in the test: CMake wraps
+the text of an error at about 80 columns, so a phrase split over two lines was not found; the test flattens
+whitespace before it searches. All eighteen hand-made changes fail the case that names them, on the Mac. ctest
+was 38 of 38 on the Mac and in the container, and `cmake --build` of the Step 1 tree reconfigured through the
+guard and rebuilt nothing.
+
+**Step 3.** `test_presets` failed with no file, then passed; all twenty hand-made changes fail the rule that
+names them. Through `ctest --preset`: 39 of 39 for each kind on the Mac. The `relwithdebinfo` preset reused the
+Step 1 tree and rebuilt nothing; `release` and `debug` configured in 24 s and 22 s and built in 13 s and 9 s,
+without a warning. R1 to R7 also hold under CMake 3.28.3 as a Linux host.
+
+**Step 4.** In the container, with the Step 1 trees removed first, through the presets: 39 of 39 for each of the
+three kinds, no warning, `relwithdebinfo`'s invariants identical (configure 22 s, 45 s and 41 s; the builds took
+3 s, 4 s and 8 s, on ccache hits).
+
+- **Side by side.** `build/` held the Mac's three trees, the container's three and the old tree. The checksums of
+  every `CMakeCache.txt` were the same before and after the other platform's run, in both directions; a build of
+  each tree after the other's run recompiled nothing; `git status` stayed clean.
+- **The x86_64 name.** In a throwaway `--platform linux/amd64` container, `cmake --preset
+  relwithdebinfo-linux-arm64` was refused by the guard (`the build directory "relwithdebinfo-linux-arm64" is for
+  linux-arm64, but this host is linux-x86_64`), and CMake's own path check could not have refused it. The x86_64
+  preset configured in 50 s, built `test_ring_buffer` in 16 s with no warning, and the test passed. `readelf`
+  reports x86-64 for that binary and AArch64 for the arm64 tree's.
+- **The sanitizer probe.** The AddressSanitizer build was killed for memory at `--parallel 8` on 7.7 GiB ("Killed
+  signal terminated program cc1plus", after 2 m 11 s) and finished at `--parallel 4` in 1 m 47 s. 36 of 39 tests
+  pass. `test_value_slot` and `test_aad_node` abort with `alloc-dealloc-mismatch`
+  ([flywheel-dag#47](https://github.com/tomlin256/flywheel-dag/issues/47)), and `test_dag_traversal` leaks a
+  `shared_ptr` cycle ([flywheel-dag#48](https://github.com/tomlin256/flywheel-dag/issues/48)). Each passes once
+  its own finding is switched off, and UndefinedBehaviorSanitizer reported nothing. ThreadSanitizer built in 52 s
+  with 68 `-Wtsan` warnings, all from `CycleSeqLock`'s standalone fences, and passed 39 of 39 with no report
+  ([flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49)). GCC 13's runtimes start in the
+  container; Clang 18's are not installed.
+
+**Step 5.** The four steps of the workflow, run through `relwithdebinfo-macos-arm64` before the push, gave 39 of
+39 and identical invariants. On CI, `cmake --preset`, `cmake --build --preset` and `ctest --preset` ran on both
+legs, 39 of 39 each, building `build/relwithdebinfo-linux-x86_64` and `build/relwithdebinfo-macos-arm64`.
+
+**Step 6.** The leftover check returned 24 lines before the commit and returns the three README lines D7 keeps
+after it. `clangd --check=include/flywheel/dag.hpp` loads
+`build/relwithdebinfo-macos-arm64/compile_commands.json`; it reports 51 errors ("Failed to resolve URI"), and so
+it does against the old database, so they are not from this change.
+
+**Step 7.** ctest 39 of 39 with no warning, the installed version file reports `0.3.0`, and
+`git diff v0.2.7..HEAD --stat -- include` is empty.
+
+**Where the work differs from the plan.**
+
+- **A refused configure does not leave the cache byte-identical.** The plan said it did, from a scratch project
+  of one directory. In this project CMake rewrites the file: the variables the command line gives
+  (`CMAKE_BUILD_TYPE` from a preset, `FLYWHEEL_DAG_WARNINGS_AS_ERRORS`) lose their type and their help text, and
+  two of the generator's own entries change (`CMAKE_NUMBER_OF_MAKEFILES`, and the `ADVANCED` flag of
+  `CMAKE_CTEST_COMMAND` goes). No value changes. One
+  `cmake --build` of that tree regenerated it, restored the file to the checksum it had before, recompiled
+  nothing, and ctest passed. "What I checked" and Step 4 say so now.
+- **The x86_64 container** was the amd64 build of ubuntu-dev's own image (GCC 13.3.0, CMake 3.28.3, git), not an
+  `ubuntu:24.04` with packages installed. It fetched its dependencies over the network; the first revision's
+  borrowed sources were dropped.
+- **`debug` compiles with `-g` and no optimisation flag**, not `-O0 -g`. The compiler's default is `-O0`; D9
+  and the README say what the flags are.
+- **The sanitizer build needed `--parallel 4`**, as the self-review warned about memory.
+- **Three issues, not in the plan**, one per finding: flywheel-dag#47, flywheel-dag#48 and flywheel-dag#49.
+- The release carries two docs-only commits from before this plan (flywheel-dag#42 marked done, and the note on
+  GCC 15's `std::function` warning in `CLAUDE.md`), and the notes say so.
+
+**Left open.** [flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45), the sanitizer CI, which
+needs flywheel-dag#47 and flywheel-dag#48 fixed and flywheel-dag#49 decided first. The old tree in `build/` (611
+MB) stays, as planned. The by-hand probe trees `build/asan-linux-arm64` (2.8 GB) and `build/tsan-linux-arm64`
+(1.4 GB) are git-ignored and can be deleted.
