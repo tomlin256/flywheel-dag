@@ -17,7 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        # The preset names the tree, build/<preset>, and the build type; the
+        # same commands build it on a laptop (CMakePresets.json). The guard in
+        # CMakeLists.txt stops a runner of another architecture at Configure.
+        include:
+          - os: ubuntu-latest
+            preset: relwithdebinfo-linux-x86_64
+          - os: macos-latest
+            preset: relwithdebinfo-macos-arm64
     runs-on: ${{ matrix.os }}
     # Far above a normal run; the bound is for a hung test, which otherwise
     # runs until GitHub's six-hour job cap.
@@ -29,18 +36,20 @@ jobs:
     # -Werror=dev -Werror=deprecated: any CMake developer or deprecation warning,
     # ours or a dependency's, fails the run. FLYWHEEL_DAG_WARNINGS_AS_ERRORS
     # makes any compiler warning in this project's own code fail it too; the
-    # dependencies' sources keep their own flags. The build type is left to the
-    # project's own default (RelWithDebInfo), the configuration consumers get.
+    # dependencies' sources keep their own flags. The build type is the preset's:
+    # relwithdebinfo is RelWithDebInfo, the project's own default, the
+    # configuration consumers get.
     - name: Configure
-      run: cmake -B build -Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+      run: cmake --preset ${{ matrix.preset }} -Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
 
     - name: Build
-      run: cmake --build build --parallel 4
+      run: cmake --build --preset ${{ matrix.preset }} --parallel 4
 
-    # --timeout bounds each test that does not set its own TIMEOUT.
+    # The test preset passes --output-on-failure and --timeout 120, which bounds
+    # each test that does not set its own TIMEOUT, and fails a run that finds no
+    # tests.
     - name: Test
-      working-directory: build
-      run: ctest --output-on-failure --timeout 120
+      run: ctest --preset ${{ matrix.preset }}
 
     # The benchmark is EXCLUDE_FROM_ALL, so this step is what keeps it
     # compiling. Its timings are printed and never compared: a shared runner's
@@ -49,7 +58,7 @@ jobs:
     # so a crash fails the step rather than feeding diff a short input.
     - name: Benchmark
       run: |
-        cmake --build build --target bench_hot_path
-        ./build/bin/bench_hot_path
-        ./build/bin/bench_hot_path --invariants > bench_invariants.txt
+        cmake --build --preset ${{ matrix.preset }} --target bench_hot_path
+        ./build/${{ matrix.preset }}/bin/bench_hot_path
+        ./build/${{ matrix.preset }}/bin/bench_hot_path --invariants > bench_invariants.txt
         diff -u benchmarks/expected_invariants.txt bench_invariants.txt
