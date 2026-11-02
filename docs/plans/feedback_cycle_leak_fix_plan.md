@@ -1,6 +1,8 @@
 # `FeedbackCycleTerminates` Must Not Leak Its Cycle
 
-**Status: Proposed (2026-11-02).** Not approved. Nothing in `tests/` changes until it is.
+**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D3 stand, so the back edge is
+held weakly, the two checks live in `FeedbackCycleTerminates`, and there is no release and no `CLAUDE.md`
+line.
 
 Closes [flywheel-dag#48](https://github.com/tomlin256/flywheel-dag/issues/48).
 
@@ -215,7 +217,7 @@ Commit: `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Pending | |
+| 0 — Approval | Done | Approved as written on 2026-11-02. |
 | 1 — Start from green | Pending | |
 | 2 — The fix, with its checks | Pending | |
 | 3 — Close | Pending | |
