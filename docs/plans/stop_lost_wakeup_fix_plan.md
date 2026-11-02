@@ -1,9 +1,10 @@
 # `Engine::stop()` Must Not Lose Its Wake-Up
 
-**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D5 stand, so the wake state is a
-class with its flags out of the `Engine`'s reach, tested through a mutex that reports contention, `running_`
-moves into it, the red run is on the extraction and is not committed, the change is released as v0.3.1, and
-the header says `stop()` is not for a signal handler.
+**Status: Done (2026-11-02), released as v0.3.1.** The plan was approved as written: D1 to D5 stood, so the wake
+state is a class with its flags out of the `Engine`'s reach, tested through a mutex that reports contention,
+`running_` moved into it, the red run was on the extraction and was not committed, the change is released as
+v0.3.1, and the header says `stop()` is not for a signal handler. The Outcome section at the end records what the
+steps found.
 
 Closes [flywheel-dag#43](https://github.com/tomlin256/flywheel-dag/issues/43).
 
@@ -351,7 +352,96 @@ Commits: `build: release v0.3.1` and `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-02. |
-| 1 — Start from green | Not started | |
-| 2 — Extract the wake state | Not started | |
-| 3 — Tests, red, then the fix | Not started | |
-| 4 — Release | Not started | |
+| 1 — Start from green | Done | ctest 39 of 39 on the Mac and in the container, no warning, invariants match. |
+| 2 — Extract the wake state | Done | `2aefd4d`. 40 of 40 on both; `bench_hot_path` within its noise. |
+| 3 — Tests, red, then the fix | Done | `054b0e1`. Red on the extraction on both platforms, green with the fix; CI's GCC 15.2 leg passed. |
+| 4 — Release | Done | `37974bc`, tag `v0.3.1`, release published. |
+
+## Outcome
+
+Released as [v0.3.1](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.3.1), tag `v0.3.1` on `37974bc`.
+
+| Commit | Step | What |
+|---|---|---|
+| `bdf9b49` | 0 | the plan, proposed |
+| `dcce5b5` | 0 | the approval, recorded |
+| `2aefd4d` | 2 | the wake state is a class, behaviour unchanged |
+| `054b0e1` | 3 | the window tests, the `EngineStop` guard and the fix |
+| `37974bc` | 4 | release v0.3.1 |
+
+**Step 1.** Green on both platforms: the Mac (Apple Clang 21) printed no warning, ctest passed 39 of 39 and
+`bench_hot_path --invariants` matched the committed file; the Linux container (GCC 13.3, libstdc++) passed 39 of
+39. Both trees had been built with the strict flags already, so the baseline builds compiled nothing: the
+evidence is that earlier strict build and a clean test run. Step 2's builds compiled the 15 targets that include
+`dag_engine.hpp`.
+
+**Step 2.** 40 of 40 on both platforms, no warning, invariants matching.
+Twelve alternating runs of `bench_hot_path` before and after differed in the median by -0.10% (`chain`), +0.04%
+(`idle-queues`) and +0.04% (`ingest`). A first comparison that showed +3.27% on `idle-queues` was discarded: the
+script's own `$a` and `$b` clobbered Perl's `sort`, so its medians were of unsorted data. CI on the commit: the
+ubuntu leg (GCC 15.2) passed Build, Test and Benchmark; the macOS leg was still queued when the next push
+cancelled the run (`cancel-in-progress`), so the Mac's evidence for this commit is the local run, and the next
+commit's CI covers both.
+
+**Step 3, red first.** Against Step 2, whose `requestStop()` stores outside the lock exactly as v0.3.0's
+`stop()` did, on the Mac and in the container: `WakeState.AStopBetweenTheWaitersTestAndItsBlockWaitsForTheMutex`
+failed with `Expected: (outcome.writerContentions) >= (1), actual: 0 vs 1` and its message, without hanging; the
+`signalWork()` window test, the flag tests, the real-primitives test, `EngineStop.*`, `EngineWakeHook.*` and
+`EngineRun.*` passed. With the fix all pass, 3,000 repetitions of `test_wake_state` and of `EngineStop` on each
+platform.
+
+**The hand-made changes**, each in a fresh scratch copy of `include/`, built from nothing, with every test of
+`test_wake_state`, `test_dag_async` and `test_dag_replay` (167) run alone under a 5 s alarm. The copy with no
+change failed none.
+
+| Change | Failed |
+|---|---|
+| `requestStop()` stores outside the lock (v0.3.0) | the `requestStop()` window test, by assertion |
+| `requestStop()` never notifies | that test, `AStopWakesAWaiterOnTheRealPrimitives` and `EngineStop.AStopFromAnotherThreadEndsAnIdleRun`, by hang |
+| `signalWork()` stores outside the lock | the `signalWork()` window test, by assertion |
+| `signalWork()` never notifies | that test and `EngineWakeHook.APostStillWakesARunningEngine`, by hang |
+| `waitForWork()` leaves the flag set | `WorkSignalledBeforeTheWaitIsConsumedOnce`, by assertion |
+| `beginRun()` ignores a run already going | `ASecondBeginRunIsRefusedAndLeavesTheFlagSet` and `EngineRun.ARunCalledWhileRunningThrowsAndLeavesTheRunGoing` |
+| `endRun()` clears nothing | `ASecondBeginRunIsRefusedAndLeavesTheFlagSet`, `EngineRun.RunsAgainAfterANodeThrows` and three more tests that start a second run (`EngineRun.RunsAgainAfterACallbackThrows`, `EngineAbortedCycle.ARestartedRunDeliversWhatTheAbortedCycleDidNot`, `EngineNestedCycle.ACallbackThatRunsTheEngineIsRefusedAndRunStaysUsable`) |
+
+**ThreadSanitizer, not in the plan.** The container's `tsan-linux-arm64` tree (GCC 13.3, reconfigured for the new
+target) ran `test_wake_state` and `EngineStop`, `EngineWakeHook` and `EngineRun` of `test_dag_async`: 15 tests
+pass and none reports a data race. The build printed the known `-Wtsan` warnings about `CycleSeqLock`'s fences (35,
+[flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49)) and nothing else.
+
+**Timing on the final tree.** `bench_hot_path` before (v0.3.0) and after, alternating: the medians differed by
++0.27% (`chain`), +0.13% (`idle-queues`) and +1.46% (`ingest`) over 12 rounds, and by -0.19%, -0.15% and -0.09% over
+a second 20. The control is Step 2's binary against Step 3's, whose machine code is identical (`otool -tV` differs
+only in the file name; the UUID and debug info differ): it read -0.35%, -0.44% and -1.21% over 12 rounds. So the
+benchmark's run-to-run noise on this machine is about 1.5% on `ingest` and under 0.5% on the other rows, and the
+comparisons with v0.3.0 sit inside it.
+
+**Step 4, release.** ctest 40 of 40 on the Mac with no warning, and the installed version file reports `0.3.1`.
+`git diff v0.3.0..v0.3.1 --stat -- include` names `dag_engine.hpp` and `dag_engine.inl` alone. The notes say the
+change, that no public signature changed, and keep flywheel-dag#50 as the open neighbour.
+
+**CI.** [Run 41511907647](https://github.com/tomlin256/flywheel-dag/actions/runs/41511907647) on the release commit
+`37974bc` is green on both legs, GCC 15.2.0 on ubuntu-26.04 and Apple Clang 21 on macOS: 40 of 40 tests, no compiler
+warning in either log, and the benchmark step, which diffs `--invariants`, passed. The two commits before it had only
+their ubuntu legs: the macOS job sat queued for 8 minutes on Step 2's run and for 7 on Step 3's, and each run was
+cancelled by the next push (`cancel-in-progress`). On the release commit the macOS job started at once. The Step 3
+ubuntu leg ([run 41510791995](https://github.com/tomlin256/flywheel-dag/actions/runs/41510791995)) is the first
+GCC 15 evidence for the tests and the fix, and it printed no warning.
+
+**Where the work differs from the plan.**
+
+- The window tests assert at least one contention from the writer's thread, not exactly one, and
+  `ContendedMutex` has no counter of its own. A `std::mutex`'s `try_lock()` may fail on a free mutex, and the
+  waiter's re-lock after a spurious wake-up could meet the writer's unlock; either would make "exactly one" fail
+  for a reason that has nothing to do with the property. The helper counts contention only on threads other than
+  the waiter's. A writer that never takes the mutex still reads zero, which is what the red run shows.
+- "Each hand-made change fails exactly the tests stated" held for six of the seven. `endRun()` clearing nothing
+  failed the stated test and four more that start a second run, as a mutant that breaks every second run should.
+- Step 1's baseline compiled nothing (above). The plan expected a build.
+- The plan's `AStopWakesABlockedWaiterOnTheRealPrimitives` is `AStopWakesAWaiterOnTheRealPrimitives` in the tree:
+  the waiter may not be blocked yet, and the test is right either way.
+- The ThreadSanitizer run was added; the plan did not ask for it.
+
+**Left open.** [flywheel-dag#50](https://github.com/tomlin256/flywheel-dag/issues/50) (a `stop()` before `run()` is
+ignored) and [flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45) (no sanitizer build of the
+engine's own tests; this plan's run is one container tree by hand).
