@@ -1,6 +1,9 @@
 # `Engine::stop()` Must Not Lose Its Wake-Up
 
-**Status: Proposed (2026-11-02), awaiting approval.** Nothing but this file has changed.
+**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D5 stand, so the wake state is a
+class with its flags out of the `Engine`'s reach, tested through a mutex that reports contention, `running_`
+moves into it, the red run is on the extraction and is not committed, the change is released as v0.3.1, and
+the header says `stop()` is not for a signal handler.
 
 Closes [flywheel-dag#43](https://github.com/tomlin256/flywheel-dag/issues/43).
 
@@ -347,7 +350,7 @@ Commits: `build: release v0.3.1` and `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | |
+| 0 — Approval | Done | Approved as written on 2026-11-02. |
 | 1 — Start from green | Not started | |
 | 2 — Extract the wake state | Not started | |
 | 3 — Tests, red, then the fix | Not started | |
