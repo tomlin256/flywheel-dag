@@ -1,8 +1,8 @@
 # `FeedbackCycleTerminates` Must Not Leak Its Cycle
 
-**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D3 stand, so the back edge is
-held weakly, the two checks live in `FeedbackCycleTerminates`, and there is no release and no `CLAUDE.md`
-line.
+**Status: Done (2026-11-02).** The plan was approved as written: D1 to D3 stood, so the back edge is held
+weakly, the two checks live in `FeedbackCycleTerminates`, and there was no release and no `CLAUDE.md` line.
+The Outcome section at the end records what the steps found.
 
 Closes [flywheel-dag#48](https://github.com/tomlin256/flywheel-dag/issues/48).
 
@@ -218,6 +218,63 @@ Commit: `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-02. |
-| 1 — Start from green | Pending | |
-| 2 — The fix, with its checks | Pending | |
-| 3 — Close | Pending | |
+| 1 — Start from green | Done | 40 of 40 on the Mac and in the container, no warning. |
+| 2 — The fix, with its checks | Done | `d231dca`. The three mutants fail as stated; the AddressSanitizer tree passes `test_dag_traversal` and 38 of 40 overall; CI is green on both legs. |
+| 3 — Close | Done | The plan is marked done, flywheel-dag#48 is closed, and flywheel-dag#45 is told. |
+
+## Outcome
+
+| Commit | Step | What |
+|---|---|---|
+| `df3a812` | 0 | the plan, proposed |
+| `f035de9` | 0 | the approval, recorded |
+| `d231dca` | 2 | the fix |
+
+**Step 1.** Green on both platforms: the Mac (Apple Clang 21) and the container (GCC 13.3) printed no warning
+with `-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and passed 40 of 40. Both trees had
+been built with the strict flags already, so the baseline builds compiled nothing: the evidence is that earlier
+strict build and a clean test run.
+
+CI shows `failure` on `0e4e9ce`, the commit the plan started from, and it is not a code failure. Its ubuntu
+leg passed. Its macOS job started 58 minutes after the run was created, recorded no step, left no log, and
+was cancelled at 20:59:02Z, 13 minutes before this plan's first push, so it was not the `concurrency` group.
+The next run, on `f035de9` (documentation only), passed both legs.
+
+**Step 2.** `tests/test_dag_traversal.cpp` is the only file the commit changes. With it:
+
+- Mac and container: the build recompiled `test_dag_traversal` alone, printed no warning, and ctest passed 40 of
+  40.
+- Container, AddressSanitizer tree: `test_dag_traversal` exits 0 with `detect_leaks=1` and no report (it exited 1
+  with 352 bytes in 7 allocations). 3,000 repetitions of `FeedbackCycleTerminates` alone pass. `ctest` passes 38
+  of 40 (37 before); the two failures are `test_aad_node` and `test_value_slot`, the aborts of
+  flywheel-dag#47, and with `ASAN_OPTIONS=detect_leaks=1:alloc_dealloc_mismatch=0` all 40 pass.
+
+**The hand-made changes**, each a scratch copy of the fixed test (or of `include/`), compiled by hand against the
+Mac tree's `libgtest.a` with `-Wall -Wextra -Wpedantic` (no warning) and run alone under a 2 s alarm. The copy
+with no change passed, as a whole binary (14 tests) and alone.
+
+| Change | Result |
+|---|---|
+| The back edge held strongly again | exit 1: `weakA.expired()` and `weakB.expired()` both false. In the container under AddressSanitizer, LeakSanitizer reports the pair as well: 400 bytes in 7 allocations |
+| `inputs()` drops the weak inputs | exit 1: the check that `a` lists `b` fails, one failure and nothing else |
+| `BfsRange` does not dedupe | hangs in `FeedbackCycleTerminates`; the alarm ends it, exit 142 |
+
+**CI.** [Run 41527056695](https://github.com/tomlin256/flywheel-dag/actions/runs/41527056695) on `d231dca` is green
+on both legs, GCC 15.2.0 on ubuntu-26.04 and Apple Clang 21.0.0 on macOS: Configure, Build (warnings as errors),
+Test (40 of 40) and the benchmark step, which diffs `--invariants`, passed, and neither log has a compiler
+warning.
+
+**Where the work differs from the plan.**
+
+- Step 1's baseline compiled nothing (above). The plan expected a build.
+- The strong-back-edge mutant leaks 400 bytes, not the 352 of the original: `weakInputs_` makes each `TestNode`
+  24 bytes larger.
+- The 3,000 repetitions under AddressSanitizer were not in the plan.
+
+**Found on the way.** [flywheel-dag#51](https://github.com/tomlin256/flywheel-dag/issues/51): clangd reports
+`<unordered_set>` unused in `test_dag_traversal.cpp`. It was unused before this change and is not part of it.
+
+**Left open.** [flywheel-dag#47](https://github.com/tomlin256/flywheel-dag/issues/47) (the two
+`alloc-dealloc-mismatch` aborts) and [flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45) (the
+job). With this fix, flywheel-dag#47 is the only thing between the suite and a green AddressSanitizer run in the
+container.
