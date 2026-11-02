@@ -37,24 +37,37 @@ public:
         return n;
     }
 
-    /// After construction, splice extra inputs in. Used by the cycle test to
-    /// create a back-edge that bypasses normal wire() lifetimes.
-    void appendInput(NodePtr extra) {
-        inputs_.push_back(std::move(extra));
+    /// Splice in an input this node does not own, to close a cycle in the
+    /// inputs() graph. inputs_ owns what it lists, so a back edge held there
+    /// would leave the two nodes keeping each other alive after the test
+    /// (flywheel-dag#48); a weak one is listed by inputs() for as long as its
+    /// target lives, which is all a walk needs.
+    void appendWeakInput(const NodePtr& extra) {
+        weakInputs_.push_back(extra);
     }
 
     ValuePtr eval(EvalContext&) override { return cached_; }
     std::string name() const override { return name_; }
-    std::vector<NodePtr> inputs() const override { return inputs_; }
+    std::vector<NodePtr> inputs() const override {
+        std::vector<NodePtr> all = inputs_;
+        for (const auto& weak : weakInputs_) {
+            NodePtr strong = weak.lock();
+            if (strong) all.push_back(std::move(strong));
+        }
+        return all;
+    }
     NodeKind kind() const override { return NodeKind::Compute; }
 
 private:
+    using WeakNodePtr = std::weak_ptr<INode>;
+
     TestNode(std::string n, std::vector<NodePtr> ins)
         : name_(std::move(n)), inputs_(std::move(ins)) {}
 
-    std::string          name_;
-    std::vector<NodePtr> inputs_;
-    ValuePtr             cached_;
+    std::string              name_;
+    std::vector<NodePtr>     inputs_;
+    std::vector<WeakNodePtr> weakInputs_;
+    ValuePtr                 cached_;
 };
 
 } // namespace
@@ -113,19 +126,37 @@ TEST(DagTraversal, DiamondDedupes) {
 // ─────────────────────────────────────────────────────────────────────────────
 // FeedbackCycleTerminates — back-edge in inputs() graph; BFS visits each
 // node once and reaches end().
+//
+// The back edge is weak, so the pair does not keep itself alive: both nodes
+// have expired once the block that owns them ends. A strong one leaks them
+// (flywheel-dag#48), which a build with no leak checker only sees here.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, FeedbackCycleTerminates) {
-    auto a = TestNode::make("a");
-    auto b = TestNode::make("b", {a});
-    a->appendInput(b);              // a now lists b as an input → cycle
+    std::weak_ptr<TestNode> weakA;
+    std::weak_ptr<TestNode> weakB;
+    {
+        auto a = TestNode::make("a");
+        auto b = TestNode::make("b", {a});
+        a->appendWeakInput(b);      // a now lists b as an input → cycle
+        weakA = a;
+        weakB = b;
 
-    std::vector<std::string> seen;
-    for (const auto& n : traversal::bfs_upstream({b})) seen.push_back(n->name());
+        // The cycle is there. The assertions on the walk below hold for the
+        // acyclic pair as well, so they cannot say so.
+        EXPECT_EQ(a->inputs(), (std::vector<NodePtr>{b}));
 
-    // BFS visits both nodes once and terminates.
-    EXPECT_EQ(seen.size(), 2u);
-    std::sort(seen.begin(), seen.end());
-    EXPECT_EQ(seen, (std::vector<std::string>{"a", "b"}));
+        std::vector<std::string> seen;
+        for (const auto& n : traversal::bfs_upstream({b})) seen.push_back(n->name());
+
+        // BFS visits both nodes once and terminates.
+        EXPECT_EQ(seen.size(), 2u);
+        std::sort(seen.begin(), seen.end());
+        EXPECT_EQ(seen, (std::vector<std::string>{"a", "b"}));
+    }
+
+    // Nothing outlives the block that owned the pair.
+    EXPECT_TRUE(weakA.expired());
+    EXPECT_TRUE(weakB.expired());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
