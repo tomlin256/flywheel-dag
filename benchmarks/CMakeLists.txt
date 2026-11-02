@@ -2,8 +2,10 @@
 # registered with ctest, because a wall-clock threshold would be a flaky test.
 # Build and run it on demand:
 #
-#   cmake --build build --target bench_hot_path
-#   ./build/bin/bench_hot_path
+#   cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path
+#   ./build/relwithdebinfo-macos-arm64/bin/bench_hot_path
+#
+# or the tree for your host (relwithdebinfo-linux-arm64, relwithdebinfo-linux-x86_64).
 add_executable(bench_hot_path EXCLUDE_FROM_ALL bench_hot_path.cpp bench_report.cpp)
 target_link_libraries(bench_hot_path PRIVATE flywheel::dag)
 

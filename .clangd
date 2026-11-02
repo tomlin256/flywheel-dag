@@ -1,5 +1,7 @@
 CompileFlags:
-  CompilationDatabase: build
+  # The editing host's tree, which is the Mac's. Another host names its own,
+  # build/<kind>-<os>-<arch>; cmake --list-presets shows them.
+  CompilationDatabase: build/relwithdebinfo-macos-arm64
 
 Diagnostics:
   ClangTidy:

@@ -13,9 +13,12 @@
 // with ctest, because a wall-clock threshold would make ctest flaky. Run it by
 // hand before and after a change, on the same machine:
 //
-//     cmake --build build --target bench_hot_path
-//     ./build/bin/bench_hot_path                # 200000 measured cycles per row
-//     ./build/bin/bench_hot_path --invariants   # the exact columns only
+//     cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path
+//     B=build/relwithdebinfo-macos-arm64/bin/bench_hot_path
+//     $B                # 200000 measured cycles per row
+//     $B --invariants   # the exact columns only
+//
+// or the tree for your host (relwithdebinfo-linux-arm64, relwithdebinfo-linux-x86_64).
 //
 // ns/cycle depends on the machine and its load. The other three columns are
 // exact, so a change that alters them is a change in what the engine did:

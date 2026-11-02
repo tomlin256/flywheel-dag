@@ -17,16 +17,32 @@ add a line here only when the code cannot carry it.
 ## Build and test
 
 ```bash
-cmake -B build && cmake --build build
-ctest --test-dir build
+cmake --preset relwithdebinfo-macos-arm64        # -linux-arm64 or -linux-x86_64 on Linux
+cmake --build --preset relwithdebinfo-macos-arm64
+ctest --preset relwithdebinfo-macos-arm64
 ```
 
-- The default build is `RelWithDebInfo` with `-DNDEBUG`, so `assert()` never
-  runs. Validation that must survive throws (see the `alpha` checks in
-  `EWMANode::make`).
+- A build tree belongs to one OS and one architecture. A checkout built on a Mac
+  and in a container that mounts it cannot share one, because a tree records
+  the absolute path of its source. Trees are `build/<kind>-<os>-<arch>`, the
+  kind being a CMake build type in lower case (`relwithdebinfo`, `release`,
+  `debug`), and `CMakePresets.json` names the nine; `cmake --list-presets` shows
+  a host's. The top-level `CMakeLists.txt` refuses a directory whose name claims
+  another platform than the host's, and a tree first configured on another
+  (`cmake/flywheel_dag_platform.cmake` has the rules and the reasons);
+  `test_platform_name`, `test_tree_name` and `test_presets` hold it
+  (flywheel-dag#46). The presets set the tree and the build type and nothing
+  else. Name a variant after the architecture
+  (`relwithdebinfo-linux-arm64-clang18`), or give it a name that claims no
+  platform (`build`, `scratch`).
+- The default build (`relwithdebinfo-…`) is `RelWithDebInfo` with `-DNDEBUG`, so
+  `assert()` never runs; `debug-…` is the build where it does. Validation that
+  must survive throws (see the `alpha` checks in `EWMANode::make`).
 - The build is warning-free and CI keeps it so (flywheel-dag#4). Tests, example
   and benchmark build with `-Wall -Wextra -Wpedantic` on GCC and Clang, and CI
-  adds `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`; use it locally.
+  adds `-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`;
+  use them locally, after the preset. The presets leave the last one off, so a
+  newer compiler's new warning does not stop a contributor's build.
   - Fix a warning, never silence it. The one exception is a confirmed compiler
     false positive: silence it at that one site, for that one compiler, with a
     comment naming the bug (the counting `operator delete` in
@@ -47,16 +63,17 @@ ctest --test-dir build
     `test_consumer_subproject` check it.
 - `benchmarks/bench_hot_path` is `EXCLUDE_FROM_ALL` and not a ctest test. Time a
   change by running it before and after, on the same machine:
-  `cmake --build build --target bench_hot_path && ./build/bin/bench_hot_path`.
+  `cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path &&
+  ./build/relwithdebinfo-macos-arm64/bin/bench_hot_path`.
   Its exact columns (`allocs/cycle`, `callbacks`, `checksum`) show a speed-up did
   not come from doing less work. CI diffs `--invariants` against
   `benchmarks/expected_invariants.txt`:
   - Non-zero `allocs/cycle` is an engine regression. Fix the engine; never
     regenerate the file to pass CI.
   - A changed `callbacks` or `checksum` means the graph did different work.
-    Regenerate (`./build/bin/bench_hot_path --invariants >
-    benchmarks/expected_invariants.txt`) only when that is the point, and say why
-    in the commit.
+    Regenerate (`./build/relwithdebinfo-macos-arm64/bin/bench_hot_path
+    --invariants > benchmarks/expected_invariants.txt`) only when that is the
+    point, and say why in the commit.
   - The checksum is platform-independent only because the target builds with
     `-ffp-contract=off` and the rows use nothing but `+ − × ÷` and `sqrt`. `exp`,
     `log` and `pow` differ between math libraries.

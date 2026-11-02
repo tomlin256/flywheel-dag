@@ -225,10 +225,42 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 Requires a C++17 compiler and CMake 3.18 or later. CI builds and tests on Linux (GCC) and macOS
 (Apple Clang).
 
+A build tree belongs to one OS and one architecture, so a checkout that is built natively on a Mac and
+in a Linux container needs a tree for each. The trees are named `build/<kind>-<os>-<arch>`, and
+`CMakePresets.json` spells out the nine in use. They need CMake 3.21 or later, and `cmake --list-presets`
+shows the ones for your host:
+
 ```bash
-cmake -B build          # RelWithDebInfo unless you ask for another build type
-cmake --build build
-cd build && ctest
+cmake --preset relwithdebinfo-macos-arm64        # relwithdebinfo-linux-arm64 or -linux-x86_64 on Linux
+cmake --build --preset relwithdebinfo-macos-arm64
+ctest --preset relwithdebinfo-macos-arm64
+```
+
+The kind says how the tree is built, and is a CMake build type in lower case:
+
+| Kind | Build type | Compiled with | |
+|---|---|---|---|
+| `relwithdebinfo` | `RelWithDebInfo` | `-O2 -g -DNDEBUG` | The project's default, and what CI builds. `assert()` never runs. |
+| `release` | `Release` | `-O3 -DNDEBUG` | |
+| `debug` | `Debug` | `-g`, no optimisation | `assert()` runs. |
+
+The OS is `macos` or `linux`, and the architecture is `arm64` or `x86_64` (`aarch64` is spelled
+`arm64`, `amd64` is spelled `x86_64`), so a Linux container on an Apple Silicon Mac builds
+`linux-arm64`. A tree cannot be shared between platforms: it records the absolute path of its source,
+the compiler and the target. CMake itself stops with "The current CMakeCache.txt directory … is
+different than the directory …" when two platforms see the checkout at different paths, as a Mac and a
+container do. It cannot see a name that lies, or two platforms at one path, so the top-level
+`CMakeLists.txt` refuses both. A directory whose name claims a platform (`release-linux-arm64`,
+`linux-x86_64`, `asan-macos-arm64-clang`) must be `[<kind>-]<os>-<arch>` for the host, with anything
+after the architecture free, and every tree remembers the platform of its first configure and refuses a
+configure from another. Other names (`build`, `scratch`) claim nothing and are yours.
+
+The presets set the tree and the build type and nothing else. CI also passes
+`-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local
+configure:
+
+```bash
+cmake --preset relwithdebinfo-macos-arm64 -Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
 ```
 
 `FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES`, `FLYWHEEL_DAG_BUILD_BENCHMARKS` and
@@ -261,10 +293,12 @@ costs on three generic workloads:
 It is built on demand and is not a ctest test:
 
 ```bash
-cmake --build build --target bench_hot_path
-./build/bin/bench_hot_path                # 200000 measured cycles per row
-./build/bin/bench_hot_path --invariants   # the exact columns only
+cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path
+./build/relwithdebinfo-macos-arm64/bin/bench_hot_path                # 200000 measured cycles per row
+./build/relwithdebinfo-macos-arm64/bin/bench_hot_path --invariants   # the exact columns only
 ```
+
+On Linux it is `relwithdebinfo-linux-arm64` or `relwithdebinfo-linux-x86_64`, the tree CI builds.
 
 `ns/cycle` depends on the machine and its load, so compare it only with another run on the same
 machine. The other columns are exact, and the same on every platform:
