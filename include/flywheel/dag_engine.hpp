@@ -35,7 +35,10 @@
 //   mutex and the condition variable are all a feed thread touches, and they are
 //   not the Engine's own: the Engine and every hook it hands out share them through
 //   a shared_ptr, so a source can still be posted to after its Engine is gone
-//   (flywheel-dag#42).
+//   (flywheel-dag#42).  stop() and poke() set the same state, and every write
+//   another thread makes to what run() waits on is made under its mutex, so a
+//   notification cannot fall between run()'s test and its block
+//   (flywheel-dag#43).
 //
 // Cycle
 //   On each wake: flush all sources (thread boundary), then for each output node
@@ -68,9 +71,11 @@
 //
 // Thread safety
 //   run() must be called from exactly one thread.  stop() and poke() are safe
-//   to call from any thread, including from within output callbacks.  A source
-//   may be posted to after its Engine is destroyed, and nothing else on a
-//   destroyed Engine may be used.
+//   to call from any thread, including from within output callbacks, but not
+//   from a signal handler: each takes the mutex run() waits under.  A stop()
+//   that arrives as run() is about to wait is not lost (flywheel-dag#43).  A
+//   source may be posted to after its Engine is destroyed, and nothing else on
+//   a destroyed Engine may be used.
 
 #include "dag_async.hpp"
 #include "dag_compute_module.hpp"
@@ -163,14 +168,28 @@ namespace detail {
 // beginRun(), waitForWork() and endRun(). The Engine and every hook it hands out share one through a
 // shared_ptr, so a source can still be posted to after its Engine is gone (flywheel-dag#42).
 //
+// What the waiter's predicate reads changes only under mu_. A condition variable drops a notification
+// that finds nobody waiting, and a waiter tests its predicate and then blocks, two steps with mu_ held
+// across both. A writer that stored without mu_ could land between them:
+//
+//     waiter:  lock mu_, test (no work, running) ........................ block
+//     writer:                     running_ = false; notify_all() ......... (nobody waiting yet: dropped)
+//
+// and the waiter would block on a predicate that is already true, with no one left to say so: run()
+// would sleep until a post or a poke() reached it, and stop() was the call meant to end it
+// (flywheel-dag#43). With the store made under mu_, the writer comes either before the waiter's test,
+// which then sees it, or after the waiter's block, which the notification then reaches.
+//
+// signalWork() and requestStop() are the only writers of hasWork_ and running_ that a waiter's
+// predicate can see while it waits, and both take mu_. The members are out of the Engine's reach, so
+// no other code can write them without it. beginRun() and endRun() store running_ without the lock:
+// they run on the run thread, outside any wait, and endRun() runs in a destructor, where a lock that
+// throws would terminate.
+//
 // Mutex and CondVar are std::mutex and std::condition_variable in the Engine. A test gives the class a
 // mutex that reports contention and a condition variable that pauses between its predicate and its
 // block: that gap is a few instructions wide, and this is the only way to hold a waiter in it
-// (flywheel-dag#43).
-//
-// requestStop() stores running_ outside mu_, as Engine::stop() did before this class existed. That is
-// the lost wake-up of flywheel-dag#43, kept here so that moving the state into a class alters no
-// behaviour; the change after this one moves the store under mu_.
+// (tests/test_wake_state.cpp).
 template<typename Mutex, typename CondVar>
 class BasicWakeState {
 public:
@@ -193,7 +212,7 @@ protected:
     Mutex             mu_;
     CondVar           cv_;
     bool              hasWork_ = false;   // guarded by mu_
-    std::atomic<bool> running_{false};    // beginRun(), endRun() and running() use it without the lock
+    std::atomic<bool> running_{false};    // stored under mu_ by requestStop(); the others use it without
 };
 
 } // namespace detail
@@ -299,7 +318,9 @@ public:
     void run();
 
     /// Signal the engine to stop after the current cycle finishes.
-    /// Safe to call from any thread, including from within output callbacks.
+    /// Safe to call from any thread, including from within output callbacks, and a stop() that
+    /// arrives as run() is about to wait is not lost (flywheel-dag#43). It takes the mutex run()
+    /// waits under, so call it from a thread, not from a signal handler.
     void stop();
 
     /// Manually trigger a cycle — useful for testing or for external events

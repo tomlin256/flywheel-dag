@@ -27,6 +27,7 @@
 //  Engine::run()   — a cycle that throws ends the run, and run() can start again
 //  Engine wake hook — a source can still be posted to after its Engine is gone, and a post
 //                    still wakes a run() that is waiting
+//  Engine::stop()  — a stop from another thread ends a run() that is idle
 //  Engine::cycle() — a cycle that throws leaves the outputs it did not reach due,
 //                    a new output gets the value its node holds at its first cycle,
 //                    a registration made inside a cycle is refused, and so is a
@@ -2125,6 +2126,41 @@ TEST(EngineWakeHook, APostStillWakesARunningEngine) {
     runner.join();
 
     EXPECT_EQ(seen, std::vector<int>{7});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine::stop() from another thread (flywheel-dag#43)
+//
+// Every other stop() in these tests comes from the thread that runs the cycles, from a callback or
+// a flush. This one comes from outside, as a thread that waits for a signal, or a watchdog, would
+// send it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// It cannot aim at the gap between run()'s test of its wait and its block, which is a few
+// instructions wide (test_wake_state.cpp holds a waiter there). It guards the wiring: a stop() that no
+// longer reaches the wait leaves run() asleep for ever, which ctest reports as a timeout, not a wrong
+// value. The first cycle delivers the queue's empty starting batch, and its callback releases the test
+// thread, so the stop comes while run() is idle or about to be.
+TEST(EngineStop, AStopFromAnotherThreadEndsAnIdleRun) {
+    Engine engine;
+    auto queue = AsyncQueue<int>::make("q");
+    engine.addSource(queue);
+
+    std::promise<void> firstCycleDelivered;
+    bool released = false;
+    engine.addOutput<std::vector<int>>(queue, [&](const std::vector<int>&) {
+        if (!released) {
+            released = true;
+            firstCycleDelivered.set_value();
+        }
+    });
+
+    std::thread runner([&engine] { engine.run(); });
+    firstCycleDelivered.get_future().wait();
+    engine.stop();
+    runner.join();
+
+    EXPECT_EQ(engine.cycleCount(), 1u);   // nothing was posted, so the first cycle was the only one
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

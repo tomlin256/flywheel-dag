@@ -117,7 +117,11 @@ void BasicWakeState<Mutex, CondVar>::signalWork() {
 
 template<typename Mutex, typename CondVar>
 void BasicWakeState<Mutex, CondVar>::requestStop() {
-    running_ = false;
+    // Under mu_, or the notification below can fall between the waiter's test and its block.
+    {
+        std::lock_guard<Mutex> lk(mu_);
+        running_ = false;
+    }
     cv_.notify_all();
 }
 
