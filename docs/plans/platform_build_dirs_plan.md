@@ -1,9 +1,8 @@
 # One Build Tree Per Platform
 
-**Status: Proposed (2026-11-01; revised 2026-11-02)** — awaiting approval. D1 to D9 are the places to edit. The
-revision names the trees `build/<kind>-<os>-<arch>` where the first version had `build-<os>-<arch>` (D2), takes
-the kinds from CMake's build types (D9), and has the guard refuse a name that claims another platform and nothing
-else (D3).
+**Status: Approved (2026-11-02).** The plan was approved as written: D1 to D9 stand, so the trees are
+`build/<kind>-<os>-<arch>` with the kinds `relwithdebinfo`, `release` and `debug`, the guard refuses a name that
+claims another platform and nothing else, and the change is released as v0.3.0.
 
 Closes [flywheel-dag#46](https://github.com/tomlin256/flywheel-dag/issues/46).
 
@@ -577,7 +576,7 @@ Commit: `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | revised 2026-11-02 for `build/<kind>-<os>-<arch>` |
+| 0 — Approval | Done | Approved as written on 2026-11-02. |
 | 1 — Start from green | | |
 | 2 — Platform tag and guard | | |
 | 3 — Presets and their test | | |
