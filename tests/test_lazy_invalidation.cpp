@@ -54,7 +54,7 @@ public:
     std::vector<NodePtr> inputs() const override { return inputs_; }
     NodeKind kind() const override { return NodeKind::Compute; }
 
-    Dirtiness state() const noexcept { return NodeBase::state(); }
+    using NodeBase::state;
     int propagations() const noexcept { return propagations_; }
     int evals() const noexcept { return evals_; }
 

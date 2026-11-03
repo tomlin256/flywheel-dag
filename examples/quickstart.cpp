@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <optional>
 
 namespace {
@@ -51,7 +52,7 @@ double noise(long i) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
     using namespace dag;
     const long cycles = argc > 1 ? std::strtol(argv[1], nullptr, 10) : 2000;
 
@@ -101,4 +102,7 @@ int main(int argc, char** argv) {
 
     std::printf("onsets=%d resolved=%d\n", onsets, resolutions);
     return 0;
+} catch (const std::exception& e) {
+    std::fprintf(stderr, "%s: %s\n", argv[0], e.what());
+    return 1;
 }

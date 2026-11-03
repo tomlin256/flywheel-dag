@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <vector>
 
 bool runBlackScholesExample() {
@@ -184,9 +185,12 @@ bool runAdjointTangentExample() {
     return agree;
 }
 
-int main() {
+int main() try {
     const bool blackScholesAgrees = runBlackScholesExample();
     const bool polynomialAgrees = runPolynomialExample();
     const bool adjointTangentAgrees = runAdjointTangentExample();
     return blackScholesAgrees && polynomialAgrees && adjointTangentAgrees ? 0 : 1;
+} catch (const std::exception& e) {
+    std::fprintf(stderr, "aad: %s\n", e.what());
+    return 1;
 }

@@ -12,6 +12,7 @@
 #include "flywheel/dag_ops.hpp"
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 using namespace dag;
@@ -434,8 +435,8 @@ TEST(DagOpsTests, SqrtOfNegativeIsNan) {
 
 namespace {
 
-// M_PI is POSIX, not standard C++.
-const double kPi = std::acos(-1.0);
+// M_PI is POSIX, not standard C++; std::numbers::pi is.
+constexpr double kPi = std::numbers::pi;
 
 } // namespace
 

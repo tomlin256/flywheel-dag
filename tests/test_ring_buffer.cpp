@@ -42,6 +42,7 @@ std::vector<T> flatten(const RingBuffer<T>& rb) {
 template <typename T>
 std::vector<T> indexed(const RingBuffer<T>& rb) {
     std::vector<T> out;
+    out.reserve(rb.size());
     for (std::size_t i = 0; i < rb.size(); ++i) out.push_back(rb[i]);
     return out;
 }

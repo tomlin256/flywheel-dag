@@ -20,6 +20,7 @@
 #include "flywheel/dag_ops.hpp"
 #include <cmath>
 #include <memory>
+#include <numbers>
 #include <type_traits>
 #include <vector>
 
@@ -29,8 +30,8 @@ using allocation_counter::allocations_during;
 
 namespace {
 
-// M_PI is POSIX, not standard C++.
-const double kPi = std::acos(-1.0);
+// M_PI is POSIX, not standard C++; std::numbers::pi is.
+constexpr double kPi = std::numbers::pi;
 
 double normPdf(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi); }
 double normCdf(double x) { return 0.5 * std::erfc(-x / std::sqrt(2.0)); }

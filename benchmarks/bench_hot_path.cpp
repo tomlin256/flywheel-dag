@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <memory>
 #include <new>
 #include <string>
@@ -266,7 +267,7 @@ bench::Row ingest(long cycles) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
     const bench::Options options = bench::parseArgs(argc, argv);
     if (!options.error.empty()) {
         std::fprintf(stderr, "%s: %s\nusage: %s [cycles] [--invariants]\n",
@@ -286,4 +287,7 @@ int main(int argc, char** argv) {
                                                : bench::table(options.cycles, rows);
     std::fputs(out.c_str(), stdout);
     return 0;
+} catch (const std::exception& e) {
+    std::fprintf(stderr, "%s: %s\n", argv[0], e.what());
+    return 1;
 }

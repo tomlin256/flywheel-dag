@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <string>
 #include <utility>
 
@@ -22,8 +23,8 @@ using dag::aad::Dual;
 
 namespace {
 
-// M_PI is POSIX, not standard C++.
-const double kPi = std::acos(-1.0);
+// M_PI is POSIX, not standard C++; std::numbers::pi is.
+constexpr double kPi = std::numbers::pi;
 
 /// Argument i of N: its value, with d = eᵢ.
 template<std::size_t N>

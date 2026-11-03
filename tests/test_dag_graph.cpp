@@ -22,8 +22,8 @@ static std::shared_ptr<Input<double>> makeInput(const std::string& name, double 
 
 static ComputeNodePtr<double, double, double> makeCompute(
     const std::string& name,
-    NodePtr a,
-    NodePtr b)
+    const NodePtr& a,
+    const NodePtr& b)
 {
     return ComputeNode<double, double, double>::make(
         name, { a, b },
@@ -32,7 +32,7 @@ static ComputeNodePtr<double, double, double> makeCompute(
 
 static ComputeNodePtr<double, double> makePassthrough(
     const std::string& name,
-    NodePtr in)
+    const NodePtr& in)
 {
     return ComputeNode<double, double>::make(
         name, { in },

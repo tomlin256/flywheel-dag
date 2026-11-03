@@ -57,8 +57,8 @@ struct EwmaModule : public IComputeModule {
 };
 
 // Warm an EWMA by feeding values into inp and evaluating ewma manually
-static void warmEwma(std::shared_ptr<Input<double>> inp,
-                     std::shared_ptr<EWMANode> ewma,
+static void warmEwma(const std::shared_ptr<Input<double>>& inp,
+                     const std::shared_ptr<EWMANode>& ewma,
                      const std::vector<double>& values)
 {
     EvalContext ctx;

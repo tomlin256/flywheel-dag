@@ -368,8 +368,9 @@ TEST(TweakExampleTest, Retweaking) {
     EXPECT_GT(sinkEvals, base); // New eval from different value
 
     // Verify tweakValue is set
-    EXPECT_TRUE(node->tweakValue().has_value());
-    EXPECT_EQ(node->tweakValue().value(), 77.0);
+    const std::optional<double> tweaked = node->tweakValue();
+    if (!tweaked.has_value()) FAIL() << "tweakValue() is empty after tweak(77.0)";
+    EXPECT_EQ(tweaked.value(), 77.0);
 
     // Clear and verify resume normal computation
     node->clearTweak();
@@ -1028,6 +1029,7 @@ TEST(ApplyInputs, SharedUpstreamUnderForceRecomputeStaysCorrect) {
         "producer", std::make_tuple(std::static_pointer_cast<INode>(seed)),
         [](const int& n) {
             std::vector<int> out;
+            out.reserve(4);
             for (int i = 0; i < 4; ++i) out.push_back(n * (i + 1));
             return out;
         });

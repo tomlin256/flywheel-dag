@@ -35,9 +35,9 @@
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_timeseries.hpp"
 #include "test_nodes.hpp"
-#include <cmath>
 #include <functional>
 #include <memory>
+#include <numbers>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -46,8 +46,8 @@ using namespace dag;
 
 namespace {
 
-const double e  = std::exp(1.0);
-const double e2 = std::exp(2.0);
+constexpr double e  = std::numbers::e;
+constexpr double e2 = 7.3890560989306502272;   // e squared, to the digits a double holds: std::exp(2.0)
 
 double sum(const double& p, const double& q) { return p + q; }
 

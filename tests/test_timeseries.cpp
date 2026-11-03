@@ -434,6 +434,17 @@ std::optional<double> evalDelay(
     EvalContext ctx;
     return get_value<std::optional<double>>(node->eval(ctx));
 }
+
+// The value, or a failure and NaN when there is none. clang-tidy's bugprone-unchecked-optional-access cannot see a
+// check in ASSERT_TRUE(opt.has_value()), because gtest hides the condition, so a bare *opt or opt.value() after it is
+// reported. A check in a function that returns is one it can see.
+double valueOrFail(const std::optional<double>& v) {
+    if (!v.has_value()) {
+        ADD_FAILURE() << "the delayed value is absent";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return *v;
+}
 } // namespace
 
 TEST(TimeDelayNode, WarmupYieldsNulloptUntilHorizonElapses) {
@@ -447,9 +458,7 @@ TEST(TimeDelayNode, WarmupYieldsNulloptUntilHorizonElapses) {
     EXPECT_FALSE(evalDelay(value, timeUs, delay, 101.0, 400'000).has_value());
     EXPECT_FALSE(evalDelay(value, timeUs, delay, 102.0, 900'000).has_value());
     // 1.2s: the as-of instant (0.2s) now has the t=0 sample (100) at or before it.
-    auto out = evalDelay(value, timeUs, delay, 103.0, 1'200'000);
-    ASSERT_TRUE(out.has_value());
-    EXPECT_DOUBLE_EQ(*out, 100.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 103.0, 1'200'000)), 100.0);
 }
 
 TEST(TimeDelayNode, TracksValueAsOfHorizonAgo) {
@@ -461,11 +470,11 @@ TEST(TimeDelayNode, TracksValueAsOfHorizonAgo) {
     EXPECT_FALSE(evalDelay(value, timeUs, delay, 100.0,  0).has_value());        // asOf −5s
     EXPECT_FALSE(evalDelay(value, timeUs, delay, 110.0,  2'000'000).has_value()); // asOf −3s
     // t=6s → asOf 1s → mid at 1s was still 100 (changed to 110 only at 2s).
-    EXPECT_DOUBLE_EQ(*evalDelay(value, timeUs, delay, 120.0, 6'000'000), 100.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 120.0, 6'000'000)), 100.0);
     // t=8s → asOf 3s → mid at 3s was 110 (changed at 2s).
-    EXPECT_DOUBLE_EQ(*evalDelay(value, timeUs, delay, 130.0, 8'000'000), 110.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 130.0, 8'000'000)), 110.0);
     // t=12s → asOf 7s → mid at 7s was 120 (changed at 6s).
-    EXPECT_DOUBLE_EQ(*evalDelay(value, timeUs, delay, 140.0, 12'000'000), 120.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 140.0, 12'000'000)), 120.0);
 }
 
 TEST(TimeDelayNode, RobustToLongUpdateGap) {
@@ -477,10 +486,10 @@ TEST(TimeDelayNode, RobustToLongUpdateGap) {
 
     EXPECT_FALSE(evalDelay(value, timeUs, delay, 100.0, 0).has_value());
     // 40s later, mid moves to 105. As of 39s the mid was still 100 (last known).
-    EXPECT_DOUBLE_EQ(*evalDelay(value, timeUs, delay, 105.0, 40'000'000), 100.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 105.0, 40'000'000)), 100.0);
     // 41s: as of 40s the mid was 105 (the update landed at 40s). No dup sample was
     // stored for the unchanged 105, but the query still resolves correctly.
-    EXPECT_DOUBLE_EQ(*evalDelay(value, timeUs, delay, 105.0, 41'000'000), 105.0);
+    EXPECT_DOUBLE_EQ(valueOrFail(evalDelay(value, timeUs, delay, 105.0, 41'000'000)), 105.0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
