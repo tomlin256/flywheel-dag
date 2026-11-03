@@ -22,13 +22,11 @@
 #include "flywheel/dag_state_store.hpp"
 #include "flywheel/dag_timeseries.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unordered_set>
 #include <vector>
 
 using namespace dag;
