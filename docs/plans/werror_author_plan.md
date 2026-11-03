@@ -1,6 +1,7 @@
 # Spell the strict CMake flag `-Werror=author`, and drop the floor job
 
-**Status: Approved (2026-11-03), with one change: the CI floor job is removed (D2).** D1, D3 and D4 stood.
+**Status: Done (2026-11-03). Approved with one change: the CI floor job is removed (D2).** D1, D3 and D4 stood. The
+Outcome section at the end records what the steps found and where they differ from this text.
 
 Closes [flywheel-dag#59](https://github.com/tomlin256/flywheel-dag/issues/59).
 
@@ -213,5 +214,26 @@ The plan's status, the progress table and an Outcome section. Commit: `docs: mar
 | 0 Approval | Done | Proposed in `9a6dc46`; approved with the floor job's removal (D2). |
 | 1 Start from green | Done | No commit. Mac, CMake 4.4.5, CI's flags: no CMake or compiler warning, ctest 44 of 44. |
 | 2 The spelling, the floor job and the test | Done | `c151318`. T1 was red on the unchanged tree and named `ci.yml`, `README.md` and `CLAUDE.md`. Eleven hand-made changes (M1 to M6, and five that isolate one claim each) failed the case they pin. ctest 45 of 45, no warning, no notice. The script passes under 4.0.7 and 4.2.3 run directly, and says it skipped the behaviour. |
-| 3 Push, and read CI | | |
-| 4 Mark the plan done | | |
+| 3 Push, and read CI | Done | `afeaa64` carried Steps 0 to 2 (four commits, one push). Run 41701796788: both jobs green, named as before, no third job. Neither Configure log has an "option is deprecated" line. ctest 45 of 45 in both, `test_cmake_diagnostics` included. |
+| 4 Mark the plan done | Done | This commit. |
+
+## Outcome
+
+- **The notice is gone.** Run 41701796788 (`afeaa64`) configures with `-Werror=author -Werror=deprecated
+  -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` on both runners and prints no "option is deprecated" line. The run before it
+  (`3725a1a`) printed one on each.
+- **The runners moved.** `ubuntu-latest` now reports CMake 4.4.5, `macos-latest` 4.4.4. The plan said 4.4.4 for both;
+  the `Tool versions` step is what shows it.
+- **`test_cmake_diagnostics` ran its behaviour cases in CI** on both runners (CMake 4.4 or later), so the gate is
+  proved there, not only spelled. Its skip path ran only by hand, under 4.0.7 and 4.2.3.
+- **Eleven hand-made changes, not six.** M1 to M6 as planned, plus five that isolate one claim each: the old spelling
+  alone in one file (M7), `-Wno-deprecated` in place of `-Werror=deprecated` (M8), the original flags in every file and
+  in the test, which reproduces the issue's notice (M9), an old spelling that is clean, which shows the first case
+  can fail (M10), and a probe that is fatal without the flags (M11). M4 changes the spelling in every file and in the
+  test at once, so the spelling check holds and only the behaviour catches it: CMake 4.4 rejects the category.
+- **A bare issue number in a tracked file is refused at push.** The plan first listed its commit subjects in the
+  `type(#N): …` form with this issue's number, and a dry run of the pre-push check refused it. The plan of
+  flywheel-dag#57 omits the scope from the subjects it lists, and `afeaa64` does the same here.
+- **The declared floor is untested.** CMake 4.0 stays in `CMakeLists.txt`, the check scripts and the README, and
+  `test_cmake_floor` keeps them to one number, but no job builds on it. That is D2. Raising it to 4.4 would drop the
+  skip path in `test_cmake_diagnostics`; it is a separate issue if wanted.
