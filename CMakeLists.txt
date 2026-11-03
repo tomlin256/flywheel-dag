@@ -4,14 +4,14 @@
 #
 #   FetchContent_Declare(flywheel_dag
 #     GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-#     GIT_TAG        v0.3.2)
+#     GIT_TAG        v1.0.0)
 #   FetchContent_MakeAvailable(flywheel_dag)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
 # or install it (cmake --install <build> --prefix <prefix>) and find it. The
 # consumer then provides spdlog and nlohmann/json itself:
 #
-#   find_package(flywheel_dag 0.3 CONFIG REQUIRED)
+#   find_package(flywheel_dag 1 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
 # 4.0 is the floor: this project is CMake 4 (flywheel-dag#57). It is a plain
@@ -68,7 +68,7 @@ if(_flywheel_dag_top_level)
         "The platform this build tree was first configured on")
 endif()
 
-project(FLYWHEEL_DAG VERSION 0.3.2 LANGUAGES CXX)
+project(FLYWHEEL_DAG VERSION 1.0.0 LANGUAGES CXX)
 
 # Export compile_commands.json for clangd and other tooling.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -185,12 +185,13 @@ if(FLYWHEEL_DAG_INSTALL)
     configure_package_config_file(cmake/flywheel_dagConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfig.cmake
         INSTALL_DESTINATION ${_flywheel_dag_config_dir})
-    # Before 1.0 a minor release may break the API, so a request for 0.3 accepts
-    # any 0.3.z and nothing else. At 1.0 this becomes SameMajorVersion.
+    # A major release may break the API, so a request for 1 accepts any 1.y.z and
+    # nothing else, and a request for 0.3 is refused: that release predates C++23
+    # and CMake 4. test_package_version holds the table.
     # ARCH_INDEPENDENT: headers do not care what pointer size the consumer has.
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfigVersion.cmake
-        COMPATIBILITY SameMinorVersion ARCH_INDEPENDENT)
+        COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfig.cmake
                   ${CMAKE_CURRENT_BINARY_DIR}/flywheel_dagConfigVersion.cmake
             DESTINATION ${_flywheel_dag_config_dir})

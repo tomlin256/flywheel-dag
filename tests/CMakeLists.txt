@@ -102,6 +102,15 @@ if(FLYWHEEL_DAG_INSTALL)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_install.cmake)
   set_tests_properties(test_install PROPERTIES FIXTURES_SETUP installed_engine)
 
+  # Which find_package version requests the installed package accepts: SameMajorVersion,
+  # so an old consumer asking for 0.3 is refused rather than handed an engine that needs
+  # C++23 and CMake 4. Reads the version file the install ships; nothing is built.
+  add_test(NAME test_package_version
+    COMMAND ${CMAKE_COMMAND}
+      -DVERSION_FILE=${PROJECT_BINARY_DIR}/flywheel_dagConfigVersion.cmake
+      -DPROJECT_VERSION=${PROJECT_VERSION}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_package_version.cmake)
+
   # spdlog and nlohmann/json in a prefix of their own, as a package manager
   # provides them. Like test_consumer_subproject, it builds spdlog, which takes
   # longer than the default timeout allows.
