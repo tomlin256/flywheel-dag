@@ -170,6 +170,20 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_warning_flags.cmake)
 endif()
 
+# Every public header refuses to compile below C++23, and says why. The suite
+# builds as C++23, so nothing else would notice a guard that stopped working:
+# this compiles each header at C++17 and at C++20 and expects the guard's message.
+# It runs the compiler itself with -std= and -fsyntax-only, so it is registered
+# for GCC and Clang, at the top level.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_test(NAME test_standard_guard
+    COMMAND ${CMAKE_COMMAND}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DINCLUDE_DIR=${PROJECT_SOURCE_DIR}/include
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/standard_guard
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_standard_guard.cmake)
+endif()
+
 # CMakePresets.json names one build tree per kind and platform and says which of
 # them a host can use. The check reads the file with string(JSON), which needs
 # CMake 3.19, and asks CMake to list the presets for this host, which needs 3.20;

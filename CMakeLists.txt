@@ -151,6 +151,8 @@ target_link_libraries(flywheel_dag INTERFACE
 # C++23 is the engine's floor (flywheel-dag#56). This usage requirement raises a
 # consumer's target to it, whether the consumer adds the engine as a subproject or
 # finds the installed package. A standard the consumer sets higher is left alone.
+# The headers refuse a lower one (dag.hpp), so tests/consumer fails to compile if
+# this line stops reaching a consumer.
 target_compile_features(flywheel_dag INTERFACE cxx_std_23)
 set_target_properties(flywheel_dag PROPERTIES EXPORT_NAME dag)
 

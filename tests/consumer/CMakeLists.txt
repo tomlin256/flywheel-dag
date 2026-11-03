@@ -78,6 +78,7 @@ if(NOT "${CMAKE_CXX_FLAGS}" STREQUAL "${cxx_flags_before}")
 endif()
 
 # No CMAKE_CXX_STANDARD here on purpose: flywheel::dag's cxx_std_23 compile
-# feature must be enough on its own.
+# feature must be enough on its own. The headers refuse a lower standard
+# (dag.hpp), so this fails to compile if it is not.
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE flywheel::dag)

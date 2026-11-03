@@ -8,6 +8,12 @@
 // =============================================================================
 
 #pragma once
+
+// The C++23 guard of dag.hpp, which this header does not reach.
+#if __cplusplus <= 202002L
+#error "flywheel-dag requires C++23: compile with -std=c++23, or link flywheel::dag from CMake, which asks for it"
+#endif
+
 // dag_ring_buffer.hpp — fixed-capacity contiguous ring buffer.
 //
 // Why this exists

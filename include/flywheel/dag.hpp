@@ -8,6 +8,16 @@
 // =============================================================================
 
 #pragma once
+
+// flywheel-dag is C++23 (flywheel-dag#56). Linking flywheel::dag from CMake asks for it
+// (cxx_std_23); a build that does not use CMake must pass -std=c++23 itself. This tests for
+// newer than C++20, not for C++23's own value: GCC 13 reports 202100L for -std=c++23. A header
+// that does not reach dag.hpp, directly or through another header, needs this guard too;
+// test_standard_guard fails until it has one.
+#if __cplusplus <= 202002L
+#error "flywheel-dag requires C++23: compile with -std=c++23, or link flywheel::dag from CMake, which asks for it"
+#endif
+
 #include <memory>
 #include <vector>
 #include <functional>
