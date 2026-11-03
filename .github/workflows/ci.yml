@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   build:
+    name: build (${{ matrix.os }}, ${{ matrix.preset }}${{ matrix.cmake && format(', CMake {0}', matrix.cmake) || '' }})
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +24,15 @@ jobs:
         include:
           - os: ubuntu-latest
             preset: relwithdebinfo-linux-x86_64
+          # The same build on the CMake floor, the oldest CMake the project asks for
+          # (CMakeLists.txt, README.md; test_cmake_floor holds them to one number). The
+          # runners' own CMake is several minor releases above it, so without this job
+          # the floor is only what someone ran by hand. 4.0.7 is the last 4.0 release;
+          # the SHA-256 is Kitware's, from the release's cmake-4.0.7-SHA-256.txt.
+          - os: ubuntu-latest
+            preset: relwithdebinfo-linux-x86_64
+            cmake: 4.0.7
+            cmake_sha256: dba36a8e7898e02c3a66dbe169dc776ffc81c2ee6d5bcab3c526d3f3976b4e91
           - os: macos-latest
             preset: relwithdebinfo-macos-arm64
     runs-on: ${{ matrix.os }}
@@ -32,6 +42,22 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+
+    # The floor job puts Kitware's release first on PATH, after checking it.
+    - name: Install the CMake floor
+      if: matrix.cmake
+      run: |
+        tarball=cmake-${{ matrix.cmake }}-linux-x86_64.tar.gz
+        curl -fsSL -o "$tarball" "https://github.com/Kitware/CMake/releases/download/v${{ matrix.cmake }}/$tarball"
+        echo "${{ matrix.cmake_sha256 }}  $tarball" | sha256sum -c -
+        mkdir "$RUNNER_TEMP/cmake"
+        tar -xzf "$tarball" -C "$RUNNER_TEMP/cmake" --strip-components=1
+        echo "$RUNNER_TEMP/cmake/bin" >> "$GITHUB_PATH"
+
+    - name: Tool versions
+      run: |
+        cmake --version | head -1
+        c++ --version | head -1
 
     # -Werror=dev -Werror=deprecated: any CMake developer or deprecation warning,
     # ours or a dependency's, fails the run. FLYWHEEL_DAG_WARNINGS_AS_ERRORS
