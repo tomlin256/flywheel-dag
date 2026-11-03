@@ -11,7 +11,9 @@
 //
 // Exercises the BFS discovery helper that walks INode::inputs() from every
 // registered output and collects every reachable IStatefulNode with
-// persistState() == true.
+// persistState() == true. The StatefulDiscoveryCache tests, at the end, pin what
+// the engine keeps of that walk between registrations and what keeping it must
+// not change.
 
 #include <gtest/gtest.h>
 
@@ -21,7 +23,9 @@
 #include "flywheel/dag_timeseries.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -326,6 +330,174 @@ TEST(StatefulDiscovery, SaveRestoreSurvivesEmptyStatefulNodesOverride) {
     ASSERT_TRUE(e2.restoreState());
 
     EXPECT_NEAR(mod2->stats->mean(), 3.0, 1e-9);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StatefulDiscoveryCache — what the engine keeps of the walk between
+// registrations, and what keeping it must not change.
+//
+// A walk calls inputs() once on each node it reaches, so a node that counts its
+// inputs() calls counts the walks that reach it. Nothing here steps an engine,
+// so no probe is evaluated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// A node whose inputs() adds one to walks(). inputs() is const, so the count is
+// mutable: the call is what the tests observe, and a const member has no other
+// way to record that it was made.
+class CountingNode : public NodeBase {
+public:
+    static std::shared_ptr<CountingNode> make(std::string name,
+                                              std::vector<NodePtr> ins = {}) {
+        return std::shared_ptr<CountingNode>(
+            new CountingNode(std::move(name), std::move(ins)));
+    }
+
+    std::size_t walks() const { return walks_.load(); }
+
+    ValuePtr eval(EvalContext&) override {
+        throw std::logic_error("CountingNode " + name_ + " is never evaluated");
+    }
+    std::string name() const override { return name_; }
+    std::vector<NodePtr> inputs() const override {
+        ++walks_;
+        return ins_;
+    }
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+protected:
+    CountingNode(std::string name, std::vector<NodePtr> ins)
+        : name_(std::move(name)), ins_(std::move(ins)) {}
+
+private:
+    std::string                      name_;
+    std::vector<NodePtr>             ins_;
+    mutable std::atomic<std::size_t> walks_{0};
+};
+
+// The same node as an IStatefulNode. It keeps one number, and persistState()
+// answers as the test last set it.
+class StatefulProbe : public CountingNode, public IStatefulNode {
+public:
+    static std::shared_ptr<StatefulProbe> make(std::string name,
+                                               std::vector<NodePtr> ins = {}) {
+        return std::shared_ptr<StatefulProbe>(
+            new StatefulProbe(std::move(name), std::move(ins)));
+    }
+
+    void   set_level(double v) { level_ = v; }
+    double level() const { return level_; }
+    void   set_persist(bool v) { persist_ = v; }
+
+    void saveState(INodeState& s) const override { s["level"] = level_; }
+    void restoreState(const INodeState& s) override {
+        level_ = s["level"].as<double>();
+        invalidate();
+    }
+    bool persistState() const override { return persist_; }
+
+private:
+    StatefulProbe(std::string name, std::vector<NodePtr> ins)
+        : CountingNode(std::move(name), std::move(ins)) {}
+
+    double level_   = 0.0;
+    bool   persist_ = true;
+};
+
+// Registers two outputs, reading the discovery after each: what a module that
+// asks the engine about its own nodes sees while it is being installed.
+class TwoOutputModule : public IComputeModule {
+public:
+    std::vector<StatefulNodePtr> after_first;
+    std::vector<StatefulNodePtr> after_second;
+
+    std::string name() const override { return "two_outputs"; }
+    void wire(Engine& engine) override {
+        engine.addOutput(CountingNode::make("out_a", {StatefulProbe::make("a")}),
+                         [](const ValuePtr&) {});
+        after_first = engine.discoverStatefulNodes();
+        engine.addOutput(CountingNode::make("out_b", {StatefulProbe::make("b")}),
+                         [](const ValuePtr&) {});
+        after_second = engine.discoverStatefulNodes();
+    }
+};
+
+// The names of the nodes, in order: the nodes in these tests have unique names.
+std::vector<std::string> names(const std::vector<StatefulNodePtr>& nodes) {
+    std::vector<std::string> result;
+    result.reserve(nodes.size());
+    for (const auto& sn : nodes)
+        result.push_back(std::dynamic_pointer_cast<INode>(sn)->name());
+    return result;
+}
+
+using Names = std::vector<std::string>;
+
+} // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AnOutputRegisteredLaterIsFoundInBreadthFirstOrder
+//
+//   out1 -> a -> b -> leaf1          out2 -> c -> leaf2
+//
+// From the roots [out1, out2] the walk visits out1, out2, a, c, b: the order
+// across all the outputs together. Depth first, or the second output's nodes
+// appended to the first result, would put b before c.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, AnOutputRegisteredLaterIsFoundInBreadthFirstOrder) {
+    auto leaf1 = Input<double>::make("leaf1", 0.0);
+    auto b     = StatefulProbe::make("b", {leaf1});
+    auto a     = StatefulProbe::make("a", {b});
+
+    Engine engine;
+    engine.addOutput(CountingNode::make("out1", {a}), [](const ValuePtr&) {});
+    EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"a", "b"}));
+
+    auto leaf2 = Input<double>::make("leaf2", 0.0);
+    auto c     = StatefulProbe::make("c", {leaf2});
+    engine.addOutput(CountingNode::make("out2", {c}), [](const ValuePtr&) {});
+    EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"a", "c", "b"}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InstallAndAddFeedbackAreFoundToo — the other routes to a registration. A
+// module's wire() reads the discovery between its own two registrations, and
+// addFeedback() registers an output as addOutput() does.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, InstallAndAddFeedbackAreFoundToo) {
+    auto x = StatefulProbe::make("x");
+
+    Engine engine;
+    engine.addOutput(CountingNode::make("out_x", {x}), [](const ValuePtr&) {});
+    ASSERT_EQ(names(engine.discoverStatefulNodes()), (Names{"x"}));
+
+    auto mod = std::make_shared<TwoOutputModule>();
+    engine.install(mod);
+    EXPECT_EQ(names(mod->after_first),  (Names{"x", "a"}));
+    EXPECT_EQ(names(mod->after_second), (Names{"x", "a", "b"}));
+
+    auto f  = StatefulProbe::make("f");
+    auto fb = engine.makeInput<double>("fb", 0.0);
+    engine.addFeedback<double>(CountingNode::make("out_f", {f}), fb);
+    EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"x", "a", "b", "f"}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PersistStateIsAskedOnEveryCall — persistState() is a virtual, and a node may
+// answer differently over time. A registration is not what changes the answer.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, PersistStateIsAskedOnEveryCall) {
+    auto p = StatefulProbe::make("p");
+
+    Engine engine;
+    engine.addOutput(CountingNode::make("out", {p}), [](const ValuePtr&) {});
+
+    EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"p"}));
+    p->set_persist(false);
+    EXPECT_TRUE(engine.discoverStatefulNodes().empty());
+    p->set_persist(true);
+    EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"p"}));
 }
 
 int main(int argc, char** argv) {
