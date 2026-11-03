@@ -266,12 +266,16 @@ after the architecture free, and every tree remembers the platform of its first 
 configure from another. Other names (`build`, `scratch`) claim nothing and are yours.
 
 The presets set the tree and the build type and nothing else. CI also passes
-`-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local
+`-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local
 configure:
 
 ```bash
-cmake --preset relwithdebinfo-macos-arm64 -Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+cmake --preset relwithdebinfo-macos-arm64 -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
 ```
+
+`-Werror=author` makes a CMake author warning an error. It is CMake 4.4's name for what earlier releases call `dev`,
+and a CMake before 4.4 ignores it without a word, so a strict configure wants CMake 4.4 or later.
+`-Werror=deprecated` makes deprecations errors on any CMake.
 
 `FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES`, `FLYWHEEL_DAG_BUILD_BENCHMARKS` and
 `FLYWHEEL_DAG_INSTALL` are on when flywheel-dag is the top-level project and off when it is a

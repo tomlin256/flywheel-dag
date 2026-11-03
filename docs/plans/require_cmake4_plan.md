@@ -5,6 +5,11 @@ image is fixed as part of this plan (D7, Step 1), because it cannot build the re
 anyway. D1 to D6 stood. The Outcome section at the end records what the steps found and where they differ from this
 text.
 
+**Amended (2026-11-03): the CI job of D3 and Step 3 was removed again by
+[flywheel-dag#59](https://github.com/tomlin256/flywheel-dag/issues/59)** ([its plan](werror_author_plan.md)): a CMake
+before 4.4 ignores `-Werror=author`, and the job was the only one on such a CMake. The floor itself, 4.0, stands, and no
+CI job runs it.
+
 Closes [flywheel-dag#57](https://github.com/tomlin256/flywheel-dag/issues/57).
 
 ## Problem

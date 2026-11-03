@@ -40,9 +40,11 @@ ctest --preset relwithdebinfo-macos-arm64
   must survive throws (see the `alpha` checks in `EWMANode::make`).
 - The build is warning-free and CI keeps it so (flywheel-dag#4). Tests, example
   and benchmark build with `-Wall -Wextra -Wpedantic` on GCC and Clang, and CI
-  adds `-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`;
-  use them locally, after the preset. The presets leave the last one off, so a
-  newer compiler's new warning does not stop a contributor's build.
+  adds `-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`
+  (`test_cmake_diagnostics` holds the first two; a CMake before 4.4 ignores
+  `-Werror=author`); use them locally, after the preset. The presets leave the
+  last one off, so a newer compiler's new warning does not stop a contributor's
+  build.
   - Fix a warning, never silence it. The one exception is a confirmed compiler
     false positive: silence it at that one site, for that one compiler, with a
     comment naming the bug (the counting `operator delete` in

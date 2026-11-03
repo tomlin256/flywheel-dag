@@ -214,3 +214,18 @@ if(_flywheel_dag_top_level)
       -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_floor.cmake)
 endif()
+
+# The strict configure flags. CI, the README and CLAUDE.md spell them -Werror=author
+# -Werror=deprecated, and the check holds the three to that spelling. On CMake 4.4 or
+# later it also configures a probe project to see that the flags make an author warning
+# and a deprecation fatal; an older CMake ignores -Werror=author without a word, so
+# there it checks the spelling only and says so. The probe compiles nothing and needs
+# no network. Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_cmake_diagnostics
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cmake_diagnostics
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
+endif()
