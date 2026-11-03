@@ -16,7 +16,6 @@
 #include <iterator>
 #include <string>
 #include <type_traits>
-#include <unordered_set>
 #include <vector>
 
 using namespace dag;
