@@ -229,3 +229,93 @@ if(_flywheel_dag_top_level)
       -DGENERATOR=${CMAKE_GENERATOR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
 endif()
+
+# clang-tidy over this project's own sources, as a gate (flywheel-dag#60). The root sets _flywheel_dag_clang_tidy when
+# FLYWHEEL_DAG_CLANG_TIDY names a tool, and has already refused a configure that asked for one it cannot run, so
+# nothing here checks again. Nothing is built: clang-tidy reads compile_commands.json and the sources the build would
+# compile, and FetchContent has put the dependencies' headers in place by now.
+#
+#   clang_tidy_<stem>    one per .cpp under tests/, examples/ and benchmarks/. The list is a glob, so a new file is
+#                        never skipped: one that no target compiles has no compile command, and fails.
+#   clang_tidy_version   the tool is LLVM 23. The Mac, the Ubuntu container and CI run one major, and this is what
+#                        stops them drifting apart unseen. Moving to another is one commit: this number, the workflow,
+#                        the Ubuntu image, and whatever the new major reports.
+#   clang_tidy_checks    .clang-tidy enables the families it should, and none of the checks .clangd used to remove.
+#   clang_tidy_canary_*  three proofs that the gate bites, on fixtures that are in no compile database.
+#
+# A lint gate that silently checks nothing passes CI, which is why the gate itself is tested.
+if(_flywheel_dag_clang_tidy)
+  set(_flywheel_dag_clang_tidy_major 23)
+
+  # The compile commands carry -Werror=deprecated-declarations (CMakeLists.txt). With it, a clang-tidy newer than the SDK's
+  # libc++ stops 21 units on nlohmann/json 3.12.0's CBOR declarations, which name std::char_traits<unsigned char>, a
+  # specialization that libc++ deprecates: the error is in the SDK's headers, from a use in a dependency's. Here a
+  # deprecation is a warning, --warnings-as-errors makes it an error where it is in this project's own files, and the
+  # header filter drops it in the SDK's and the dependencies'.
+  set(_clang_tidy_args --warnings-as-errors=* --extra-arg=-Wno-error=deprecated-declarations
+                       ${FLYWHEEL_DAG_CLANG_TIDY_ARGS})
+  if(APPLE AND NOT CMAKE_OSX_SYSROOT)
+    # /usr/bin/c++ finds the SDK itself, so the compile commands carry no -isysroot, and a clang-tidy that is not
+    # Apple's cannot find the C library's headers without one.
+    execute_process(COMMAND xcrun --show-sdk-path
+                    OUTPUT_VARIABLE _clang_tidy_sdk OUTPUT_STRIP_TRAILING_WHITESPACE
+                    RESULT_VARIABLE _clang_tidy_sdk_status)
+    if(NOT _clang_tidy_sdk_status EQUAL 0 OR NOT _clang_tidy_sdk)
+      message(FATAL_ERROR "xcrun --show-sdk-path names no SDK, and clang-tidy needs one on this host")
+    endif()
+    list(APPEND _clang_tidy_args --extra-arg=-isysroot --extra-arg=${_clang_tidy_sdk})
+  endif()
+
+  file(GLOB _clang_tidy_sources CONFIGURE_DEPENDS
+       ${PROJECT_SOURCE_DIR}/tests/*.cpp
+       ${PROJECT_SOURCE_DIR}/examples/*.cpp
+       ${PROJECT_SOURCE_DIR}/benchmarks/*.cpp)
+  foreach(source IN LISTS _clang_tidy_sources)
+    cmake_path(GET source STEM _clang_tidy_stem)
+    add_test(NAME clang_tidy_${_clang_tidy_stem}
+      COMMAND ${_flywheel_dag_clang_tidy} -p ${PROJECT_BINARY_DIR} --quiet ${_clang_tidy_args} ${source})
+  endforeach()
+
+  add_test(NAME clang_tidy_version COMMAND ${_flywheel_dag_clang_tidy} --version)
+  set_tests_properties(clang_tidy_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "LLVM version ${_flywheel_dag_clang_tidy_major}\\.")
+
+  add_test(NAME clang_tidy_checks
+    COMMAND ${_flywheel_dag_clang_tidy} --config-file=${PROJECT_SOURCE_DIR}/.clang-tidy --list-checks)
+  # The list prints sorted, so one expression asks for a check of each family in order.
+  set_tests_properties(clang_tidy_checks PROPERTIES
+    PASS_REGULAR_EXPRESSION
+      "bugprone-use-after-move.*cppcoreguidelines-pro-type-member-init.*performance-unnecessary-value-param"
+    FAIL_REGULAR_EXPRESSION "bugprone-easily-swappable-parameters|bugprone-narrowing-conversions|readability-|modernize-")
+
+  # The canary: one unit with a defect of its own, and two headers that carry the same defect at the two kinds of path
+  # the header filter must tell apart. The fixtures are copied under the build tree so that their paths are
+  # .../include/flywheel/... and .../_deps/..., not tests/..., which the filter would admit whatever else it did. All
+  # three tests run one command: the output has to show the source's error, the engine header's error, and no word of
+  # the dependency header. "error:", not "warning:", is --warnings-as-errors biting; a check's name is followed by a
+  # comma or the bracket, because the flag appends ",-warnings-as-errors".
+  set(_clang_tidy_canary ${PROJECT_BINARY_DIR}/clang_tidy_canary)
+  configure_file(clang_tidy_canary/canary.cpp
+                 ${_clang_tidy_canary}/canary.cpp COPYONLY)
+  configure_file(clang_tidy_canary/canary_engine.hpp
+                 ${_clang_tidy_canary}/include/flywheel/canary_engine.hpp COPYONLY)
+  configure_file(clang_tidy_canary/canary_dep.hpp
+                 ${_clang_tidy_canary}/_deps/canary-src/include/canary_dep.hpp COPYONLY)
+  set(_clang_tidy_canary_command
+    ${_flywheel_dag_clang_tidy} --config-file=${PROJECT_SOURCE_DIR}/.clang-tidy ${_clang_tidy_args}
+    ${_clang_tidy_canary}/canary.cpp -- -std=c++23
+    -I${_clang_tidy_canary}/include -I${_clang_tidy_canary}/_deps/canary-src/include)
+  set(_clang_tidy_canary_source_error
+    "canary\\.cpp:[0-9]+:[0-9]+: error: [^\n]*\\[bugprone-use-after-move[],]")
+  add_test(NAME clang_tidy_canary_source COMMAND ${_clang_tidy_canary_command})
+  set_tests_properties(clang_tidy_canary_source PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_clang_tidy_canary_source_error}")
+  add_test(NAME clang_tidy_canary_engine_header COMMAND ${_clang_tidy_canary_command})
+  set_tests_properties(clang_tidy_canary_engine_header PROPERTIES
+    PASS_REGULAR_EXPRESSION
+      "include/flywheel/canary_engine\\.hpp:[0-9]+:[0-9]+: error: [^\n]*\\[performance-unnecessary-value-param[],]")
+  add_test(NAME clang_tidy_canary_dependency_header COMMAND ${_clang_tidy_canary_command})
+  set_tests_properties(clang_tidy_canary_dependency_header PROPERTIES
+    PASS_REGULAR_EXPRESSION "${_clang_tidy_canary_source_error}"
+    FAIL_REGULAR_EXPRESSION "canary_dep\\.hpp")
+endif()

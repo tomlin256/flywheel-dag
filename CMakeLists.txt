@@ -78,6 +78,30 @@ option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                       
 option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand"          ${_flywheel_dag_top_level})
 option(FLYWHEEL_DAG_INSTALL          "Generate the install rules and the package config" ${_flywheel_dag_top_level})
 
+# clang-tidy as a gate (flywheel-dag#60; tests/CMakeLists.txt registers the tests). FLYWHEEL_DAG_CLANG_TIDY names the
+# tool that holds this project's own sources to .clang-tidy: a command on PATH, or a path. Empty, the default, leaves the
+# clang_tidy_ tests out. A tool that was asked for and cannot be run is an error here, never a gate that is silently
+# absent. FLYWHEEL_DAG_CLANG_TIDY_ARGS is a list of extra arguments for every run.
+set(FLYWHEEL_DAG_CLANG_TIDY "" CACHE STRING
+    "clang-tidy command that holds the project's sources to .clang-tidy; empty leaves the clang_tidy_ tests out")
+set(FLYWHEEL_DAG_CLANG_TIDY_ARGS "" CACHE STRING "Extra arguments for every clang-tidy run, a list")
+if(_flywheel_dag_top_level AND FLYWHEEL_DAG_CLANG_TIDY)
+    if(NOT FLYWHEEL_DAG_BUILD_TESTS)
+        message(FATAL_ERROR "FLYWHEEL_DAG_CLANG_TIDY is set, and the clang_tidy_ tests are registered with the "
+                            "tests: turn FLYWHEEL_DAG_BUILD_TESTS on")
+    endif()
+    # The tests read compile_commands.json, which only these generators write.
+    if(NOT CMAKE_GENERATOR MATCHES "Makefiles|Ninja")
+        message(FATAL_ERROR "FLYWHEEL_DAG_CLANG_TIDY needs a generator that writes compile_commands.json "
+                            "(Makefiles or Ninja), not ${CMAKE_GENERATOR}")
+    endif()
+    find_program(_flywheel_dag_clang_tidy NAMES ${FLYWHEEL_DAG_CLANG_TIDY} NO_CACHE)
+    if(NOT _flywheel_dag_clang_tidy)
+        message(FATAL_ERROR "FLYWHEEL_DAG_CLANG_TIDY=${FLYWHEEL_DAG_CLANG_TIDY} is not a command or a path "
+                            "this host can run")
+    endif()
+endif()
+
 if(_flywheel_dag_top_level)
     # RelWithDebInfo (-O2 -g -DNDEBUG) unless a build type was asked for: an
     # unset build type means no optimisation at all, which misrepresents every

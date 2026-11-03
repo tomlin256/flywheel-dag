@@ -1,0 +1,19 @@
+# The checks the editor's clangd shows and the clang_tidy_ tests hold the code to (flywheel-dag#60). This is the only
+# list: .clangd carries none. The tool is one LLVM major everywhere, and clang_tidy_version holds it
+# (tests/CMakeLists.txt). WarningsAsErrors is not here: clangd would report every hint as an error. The tests pass
+# --warnings-as-errors=* themselves.
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  performance-*,
+  cppcoreguidelines-pro-type-member-init
+
+# This project's own code, the engine's headers included, and not spdlog, nlohmann/json, googletest or the SDK,
+# whose findings are not ours. It is matched against the path of each header; the dependencies sit under _deps.
+HeaderFilterRegex: '/(include/flywheel|tests|examples|benchmarks)/'
+
+CheckOptions:
+  # A positive literal shift count (x >> 30) is not a signed operand. A signed variable still is one.
+  bugprone-signed-bitwise.IgnorePositiveIntegerLiterals: true

@@ -97,9 +97,9 @@ on the Mac with 8 jobs, 55 s on Ubuntu with 4 jobs (21.1.8; 12 s with 8 jobs at 
 
    | Test | Runs | Passes when |
    |---|---|---|
-   | `clang_tidy_<stem>` × 35 | `clang-tidy -p <build> --warnings-as-errors=* <file>`, one per `.cpp` under `tests/`, `examples/`, `benchmarks/` (a glob with `CONFIGURE_DEPENDS`) | exit 0. A file the build does not compile has no compile command and fails, so a new file is never skipped |
+   | `clang_tidy_<stem>` × 35 | `clang-tidy -p <build> --warnings-as-errors=* <file>`, one per `.cpp` under `tests/`, `examples/`, `benchmarks/` (a glob with `CONFIGURE_DEPENDS`) | exit 0. A file no target compiles is analysed with the flags clang-tidy infers from its neighbours in the compile database, so a new file is never skipped |
    | `clang_tidy_version` | `clang-tidy --version` | the output has `LLVM version 23.`: the Mac, the container and CI cannot drift apart unseen (D2) |
-   | `clang_tidy_checks` | `clang-tidy --list-checks` with the real `.clang-tidy` | lists `cppcoreguidelines-pro-type-member-init`; does not list `bugprone-easily-swappable-parameters`, `bugprone-narrowing-conversions`, `readability-` or `modernize-` |
+   | `clang_tidy_checks` | `clang-tidy --list-checks` with the real `.clang-tidy` | lists a check of each family (`bugprone-use-after-move`, `cppcoreguidelines-pro-type-member-init`, `performance-unnecessary-value-param`); does not list `bugprone-easily-swappable-parameters`, `bugprone-narrowing-conversions`, `readability-` or `modernize-` |
    | `clang_tidy_canary_source` | the same command on a fixture unit that moves a string and then reads it | `canary.cpp:L:C: error: … [bugprone-use-after-move]`: `.clang-tidy` is found, `bugprone` is on, and `--warnings-as-errors` bites |
    | `clang_tidy_canary_engine_header` | the same unit; it includes a fixture header at `…/include/flywheel/canary_engine.hpp` that takes a `std::string` by value | `canary_engine.hpp:L:C: error: … [performance-unnecessary-value-param]`: the filter admits the engine's path, and `performance` is on |
    | `clang_tidy_canary_dependency_header` | the same unit; it includes a fixture header at `…/_deps/canary-src/include/canary_dep.hpp` with the same defect, by `-I` as spdlog is | the source error is reported and `canary_dep.hpp` appears nowhere |
@@ -108,6 +108,14 @@ on the Mac with 8 jobs, 55 s on Ubuntu with 4 jobs (21.1.8; 12 s with 8 jobs at 
    configure time (so their paths are the ones above, not `tests/…`), and are in no compile database. The ctest
    properties `PASS_REGULAR_EXPRESSION` and `FAIL_REGULAR_EXPRESSION` carry the expectations; no script is needed.
    *A lint gate that silently checks nothing passes CI, which is why the gate itself is tested.*
+
+   Every run also passes `--extra-arg=-Wno-error=deprecated-declarations`. The compile commands carry the project's
+   `-Werror=deprecated-declarations`, and with it a clang-tidy newer than the SDK's libc++ stops 21 units with an error
+   in the SDK's headers, from nlohmann/json 3.12.0's CBOR declarations, which name `std::char_traits<unsigned char>`,
+   a specialization libc++ deprecates. Found in Step 4, on Homebrew's 23.1.4 and VS Code's 23.1.0 alike; the real
+   build, Apple clang 21 against the same headers, is silent, and Linux has no such error. As a warning the
+   deprecation is still an error where it is in this project's own files (`--warnings-as-errors`), and the header
+   filter drops it in the SDK's and the dependencies'.
 4. **LLVM 23 in each place:**
 
    | Where | Source | Command |
@@ -237,20 +245,21 @@ image; its commits are pushed; and a throwaway container from the new image, on 
 - with it set, on the Mac and in the Ubuntu container: `clang_tidy_version`, `clang_tidy_checks` and the 3 canaries
   pass, and the per-file tests are red on the unchanged code, their output naming the sites above. Remaining: Mac 70
   (the 13 signed-bitwise are gone), Ubuntu 65;
-- set and not found: the configure fails with the message; set with a generator that writes no
-  `compile_commands.json` (Xcode): the same;
+- set and not found: the configure fails with the message; so it does with tests off, and with a generator that writes
+  no `compile_commands.json` (Xcode is not installed here, so that branch was run with the check narrowed to Ninja
+  under Makefiles); a path in place of a command name is accepted;
 - each hand-made change fails exactly the case stated. Each is made on a scratch copy of the checkout and never
   restored:
 
   | Change | Fails |
   |---|---|
-  | M1 `.clang-tidy` renamed | `clang_tidy_checks` and the source canary |
+  | M1 `.clang-tidy` renamed | `clang_tidy_checks` and the three canaries, which pass `--config-file` |
   | M2 `HeaderFilterRegex` without `include/flywheel` | the engine-header canary |
   | M3 `HeaderFilterRegex: '.*'` | the dependency-header canary |
   | M4 `performance-*` left out of `Checks` | `clang_tidy_checks` and the engine-header canary |
-  | M5 `--warnings-as-errors=*` left off the canary command | all three canaries: no `error:` |
-  | M6 a by-value `std::string` parameter seeded in `dag.hpp` | the per-file tests of the units that include it, and no others |
-  | M7 a new `tests/test_new.cpp` that no target compiles | `clang_tidy_test_new`, for want of a compile command |
+  | M5 `--warnings-as-errors=*` left off the arguments | all three canaries: no `error:`. The per-file tests turn green, which is the vacuity the canaries exist to catch |
+  | M6 a by-value `std::string` parameter seeded in `dag.hpp` | the per-file tests of the units that include it, and no others. Run in Step 8, on the first tree where all 35 are green |
+  | M7 a new `tests/test_new.cpp` that no target compiles, with a by-value `std::string` parameter | `clang_tidy_test_new`; the same file without the defect passes |
   | M8 the major constant set to 22 | `clang_tidy_version`, on the Mac and in the container |
 
 Commit: `build: add .clang-tidy and the clang_tidy_ tests, off by default`.
@@ -382,6 +391,9 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
   matters to a parse only.
 - **The image is another repository.** Step 3 depends on it. If it slips, the Ubuntu runs use throwaway containers, as
   the measurements here did, and nothing in this repo's gate depends on `ubuntu-dev`.
+- **A clang newer than the SDK's libc++ meets its deprecations.** That is the `-Wno-error=deprecated-declarations`
+  above. A deprecation in this project's own files is still an error under `--warnings-as-errors`; one in a dependency
+  or the SDK is not this project's to fix, and the build, which uses the SDK's own clang, never sees it.
 - **The header filter is a path match** (`/include/flywheel/`, `/tests/`, …). A checkout inside a directory with one
   of those names would admit more than it should. The dependency canary fails if a real `_deps` path were admitted.
 - **Only instantiated templates are analysed.** All 25 headers are reached, but a template no unit instantiates is
@@ -398,10 +410,10 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 | Step | Status | Notes |
 |---|---|---|
 | 0 Approval | Done | Proposed, expanded to LLVM 23, then approved as written (D1 to D9) with leave to install LLVM on the Mac. |
-| 1 Start from green | | |
-| 2 LLVM 23 on the Mac | | |
-| 3 LLVM 23 in the `ubuntu-dev` image | | |
-| 4 The configuration and the gate, red | | |
+| 1 Start from green | Done | No commit. Mac, CMake 4.4.5, CI's flags: no CMake or compiler warning, ctest 45 of 45. |
+| 2 LLVM 23 on the Mac | Done | No commit. `brew install llvm`: 23.1.4, 1.8 GB on disk with z3 and zstd. `clangd` and `clang-tidy` are linked into `/opt/homebrew/bin`; `which -a clangd` lists them before `/usr/bin/clangd`, and `c++` is still Apple clang 21. Homebrew's clang-tidy with the SDK flag alone reports the same 83 diagnostics at 77 sites as VS Code's 23.1.0. The editor check (a 23-only hint in a new session) is yours. |
+| 3 LLVM 23 in the `ubuntu-dev` image | Done | In the image's repository: its issue is closed and its plan (005) is committed; `clang-tidy-23` 23.1.5 from apt.llvm.org, key fingerprint checked, in place of apt's 18; the suite is green twice (`test_image.sh` 53 assertions, `test_start_e2e.sh` 17, six of them new); the three hand-made changes failed as stated; commits pushed. A container from the new image reports the same 62 sites. The live `ubuntu-dev` keeps 18 until you recreate it. |
+| 4 The configuration and the gate, red | Done | `.clang-tidy`, `.clangd` trimmed, the two variables, 40 tests, the fixtures. Variable unset: configure and build clean, ctest 45 of 45, no `clang_tidy_` test. Set, on the Mac (Homebrew 23.1.4), on Ubuntu 26.04 (23.1.5) and in a container from the `ubuntu-dev` image: 9 pass (version, checks, three canaries, four files with no finding) and 31 fail on the findings. M1 to M5, M7 and M8 failed the cases stated; M1 also takes the other two canaries, and M5 turns the 31 green, which only the canaries notice. M6 waits for Step 8. **Found:** clang 23 against the macOS SDK's libc++ stops 21 units on nlohmann/json's `char_traits<unsigned char>` under the project's `-Werror=deprecated-declarations`; the tests pass `-Wno-error=deprecated-declarations` (see The change). |
 | 5 Tests, examples and the benchmark | | |
 | 6 The engine's headers, mechanically | | |
 | 7 The CRTP constructors | | |
