@@ -7,6 +7,7 @@ set(FLYWHEEL_DAG_TESTS
   test_aad_partials
   test_aad_reverse
   test_aad_tangent_node
+  test_allocation_counter
   test_clean_inputs
   test_compute_module
   test_dag
@@ -30,8 +31,18 @@ set(FLYWHEEL_DAG_TESTS
   test_window_status_integration
 )
 
+# The suites that count allocations. allocation_counter.cpp replaces the global
+# operator new and operator delete (allocation_counter.hpp), and a replacement
+# is the whole program's, so it is linked into these and no other.
+set(FLYWHEEL_DAG_COUNTING_TESTS
+  test_allocation_counter
+)
+
 foreach(test IN LISTS FLYWHEEL_DAG_TESTS)
   add_executable(${test} ${test}.cpp)
+  if(test IN_LIST FLYWHEEL_DAG_COUNTING_TESTS)
+    target_sources(${test} PRIVATE allocation_counter.cpp)
+  endif()
   target_link_libraries(${test} PRIVATE flywheel::dag GTest::gtest)
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
