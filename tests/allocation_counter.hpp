@@ -1,5 +1,5 @@
 // =============================================================================
-// flywheel-dag — A header-only C++17 reactive DAG computation engine
+// flywheel-dag — A header-only C++23 reactive DAG computation engine
 //
 // Copyright (c) 2026 Rob Tomlin
 //
@@ -10,7 +10,7 @@
 // allocation_counter.hpp — counts the allocations a piece of code makes.
 //
 // Linking allocation_counter.cpp replaces all twenty of the global allocation
-// functions the standard makes replaceable ([new.delete], C++17: eight
+// functions the standard makes replaceable ([new.delete], C++23: eight
 // operator new and twelve operator delete). Each counts and then calls malloc()
 // or free(), so every allocation in the program pairs with its release through
 // the one family, which a sanitizer still tracks.

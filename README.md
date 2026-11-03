@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml)
 
-A header-only C++17 reactive DAG computation engine.
+A header-only C++23 reactive DAG computation engine.
 
 Build a graph of typed nodes once, feed it values, and get a callback when an output changes.
 Every node caches its value and recomputes only when something it depends on moved. Feed
@@ -48,6 +48,10 @@ FetchContent_MakeAvailable(flywheel_dag)
 
 target_link_libraries(my_app PRIVATE flywheel::dag)
 ```
+
+The engine is C++23. Linking `flywheel::dag` asks CMake for `cxx_std_23`, so your target is compiled
+as C++23 (a higher standard of your own is left alone), and a header included below C++23 stops the
+build with one error. A build outside CMake must pass `-std=c++23` itself.
 
 The engine depends on [spdlog](https://github.com/gabime/spdlog) and
 [nlohmann/json](https://github.com/nlohmann/json). It fetches them itself unless your project
@@ -222,7 +226,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 
 ## Building and testing
 
-Requires a C++17 compiler and CMake 3.18 or later. CI builds and tests on Linux (GCC) and macOS
+Requires a C++23 compiler and CMake 3.20 or later. CI builds and tests on Linux (GCC) and macOS
 (Apple Clang).
 
 A build tree belongs to one OS and one architecture, so a checkout that is built natively on a Mac and

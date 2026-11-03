@@ -321,6 +321,6 @@ Commits: `build: release v1.0.0` and `docs: mark the plan done`.
 | 2 — Raise the standard | Done | 41 of 41 on the Mac and in the container with CI's flags; the only warning is googletest's (Step 4); `cycle()` and the invariants are unchanged. The 3.19 clause of `test_warning_flags`' registration was dead under the new minimum and is gone. |
 | 3 — Refuse to compile below C++23 | Done | `test_standard_guard` fails on a scratch copy without the guard, naming every header, and passes with it; 42 of 42 on the Mac and in the container; no warning; the invariants and `cycle()` are unchanged. M1 to M5 fail what the table says; M3's half on GCC 13.3 (202100L) rejects C++23 with the mutant guard and accepts it with the committed one. |
 | 4 — googletest v1.18.0 | Done | The Apple Clang build, which recompiled `gtest-all.cc` against v1.18.0, prints no warning; 42 of 42 on the Mac and in the container; the invariants and `cycle()` are unchanged. |
-| 5 — Words | Not started | |
+| 5 — Words | Done | 65 banners, `CMakeLists.txt`, `README.md` (and its consumer paragraph), `CLAUDE.md`, the allocation comment; `git diff --numstat` shows one line in each banner file. The only "C++17" left outside the older plans is in `test_standard_guard`, which compiles at C++17 on purpose. 42 of 42 on the Mac and in the container; the audit of the tree is clean. |
 | 6 — Measure | Not started | |
 | 7 — Release | Not started | |

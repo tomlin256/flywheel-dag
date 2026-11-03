@@ -1,4 +1,4 @@
-# flywheel-dag — a header-only C++17 reactive DAG computation engine.
+# flywheel-dag — a header-only C++23 reactive DAG computation engine.
 #
 # Consume it with FetchContent (or add_subdirectory) and link flywheel::dag:
 #

@@ -1,5 +1,5 @@
 // =============================================================================
-// flywheel-dag — A header-only C++17 reactive DAG computation engine
+// flywheel-dag — A header-only C++23 reactive DAG computation engine
 //
 // Copyright (c) 2026 Rob Tomlin
 //

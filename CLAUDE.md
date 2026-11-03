@@ -1,6 +1,6 @@
 # CLAUDE.md — flywheel-dag
 
-Header-only C++17 reactive DAG engine, all in `include/flywheel/` (README.md has
+Header-only C++23 reactive DAG engine, all in `include/flywheel/` (README.md has
 the header map). The contract is written beside the code, in the comment blocks
 of the header you are changing: `dag.hpp` (invalidation, equality policies, node
 classes), `dag_async.hpp`/`.inl` (staging, flushing), `dag_engine.hpp`/`.inl`
@@ -181,7 +181,7 @@ restarts (no timestamps or addresses).
 
 ## Conventions
 
-- Banner: copy it from any header (`flywheel-dag — A header-only C++17 reactive
+- Banner: copy it from any header (`flywheel-dag — A header-only C++23 reactive
   DAG computation engine`, `Copyright (c) 2026 Rob Tomlin`, MIT).
 - Every change is unit-tested, deterministically: drive the engine with
   `Engine::step()` and bounded cycle counts, never sleeps or wall-clock timeouts.
