@@ -1,6 +1,8 @@
 # Require C++23
 
-**Status: Proposed (2026-11-03), awaiting approval.** Nothing but this plan has changed.
+**Status: Approved (2026-11-03), in progress.** The plan was approved as written: D1 to D5 stood, so the release is
+v1.0.0 and ships with flywheel-dag#57, and Steps 1 to 6 land first. Step 7 waits for the plan of flywheel-dag#57 to
+finish.
 
 Closes [flywheel-dag#56](https://github.com/tomlin256/flywheel-dag/issues/56).
 
@@ -314,7 +316,7 @@ Commits: `build: release v1.0.0` and `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Not started | |
+| 0 — Approval | Done | Approved as written on 2026-11-03: D1 to D5 stood. |
 | 1 — Start from green | Not started | |
 | 2 — Raise the standard | Not started | |
 | 3 — Refuse to compile below C++23 | Not started | |
