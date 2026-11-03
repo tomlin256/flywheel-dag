@@ -1,7 +1,8 @@
 # The Allocation Counter Must Replace Every Allocation Function
 
-**Status: Proposed (2026-11-02).** Nothing below is implemented. D1 to D5 are my defaults, each a place to
-edit before approving.
+**Status: Approved (2026-11-03).** The plan was approved as written: D1 to D5 stood, so the counter replaces
+all twenty functions, lives in `tests/` as a `.hpp` and a `.cpp`, includes the aligned forms, leaves
+`bench_hot_path.cpp` alone, and there is no release. The Progress table at the end tracks the steps.
 
 Closes [flywheel-dag#47](https://github.com/tomlin256/flywheel-dag/issues/47).
 
@@ -191,8 +192,8 @@ and the pointer in the warnings rule to the one silenced site that remains, from
   Linux. Without them the set is the ten default-alignment functions, and an over-aligned allocation in a
   steady state would escape the count.
 - **D4. `bench_hot_path.cpp` keeps its own counter.** It runs clean under AddressSanitizer today, CI diffs its
-  output, and its timings carry layout noise (flywheel-dag#34); moving it is a measurement of its own. A
-  follow-up issue records the gap, opened when this plan is approved.
+  output, and its timings carry layout noise (flywheel-dag#34); moving it is a measurement of its own.
+  [flywheel-dag#52](https://github.com/tomlin256/flywheel-dag/issues/52) records the gap.
 - **D5. No release.** Nothing under `include/` changes, and the header's comment carries the rationale.
   `CLAUDE.md` gains the one line above.
 
@@ -284,7 +285,8 @@ Commit: `docs: mark the plan done`.
   I know of for the container's AddressSanitizer run and adds none of the job's machinery.
 - **The ThreadSanitizer finding** that `atomic_thread_fence` is invisible to it is
   [flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49).
-- **`bench_hot_path.cpp`'s counter** (D4).
+- **`bench_hot_path.cpp`'s counter** is [flywheel-dag#52](https://github.com/tomlin256/flywheel-dag/issues/52)
+  (D4).
 - **LeakSanitizer on the Mac.** Apple Clang's AddressSanitizer answers `detect_leaks=1` with "not supported on
   this platform", so leak evidence is the container's alone.
 
@@ -318,7 +320,7 @@ Commit: `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | |
+| 0 — Approval | Done | Approved as written on 2026-11-03. flywheel-dag#52 opened for D4. |
 | 1 — Start from green | Not started | |
 | 2 — The counter, with its tests | Not started | |
 | 3 — The two suites count through it | Not started | |
