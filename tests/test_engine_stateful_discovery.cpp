@@ -27,6 +27,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -498,6 +499,117 @@ TEST(StatefulDiscoveryCache, PersistStateIsAskedOnEveryCall) {
     EXPECT_TRUE(engine.discoverStatefulNodes().empty());
     p->set_persist(true);
     EXPECT_EQ(names(engine.discoverStatefulNodes()), (Names{"p"}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CallsBetweenRegistrationsDoNotWalk — the walk runs on the first call after a
+// registration, and a later call reuses its result.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, CallsBetweenRegistrationsDoNotWalk) {
+    auto probe = StatefulProbe::make("probe", {Input<double>::make("leaf", 0.0)});
+
+    Engine engine;
+    engine.addOutput(probe, [](const ValuePtr&) {});
+
+    const std::vector<StatefulNodePtr> first = engine.discoverStatefulNodes();
+    ASSERT_EQ(first.size(), 1u);
+    EXPECT_EQ(probe->walks(), 1u);
+
+    EXPECT_EQ(engine.discoverStatefulNodes(), first);
+    EXPECT_EQ(engine.discoverStatefulNodes(), first);
+    EXPECT_EQ(probe->walks(), 1u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ARegistrationWalksOnceMore — an output registered after a call makes the next
+// call walk again, and only that one.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, ARegistrationWalksOnceMore) {
+    auto probe = StatefulProbe::make("probe");
+
+    Engine engine;
+    engine.addOutput(probe, [](const ValuePtr&) {});
+    EXPECT_EQ(engine.discoverStatefulNodes().size(), 1u);
+    EXPECT_EQ(engine.discoverStatefulNodes().size(), 1u);
+    EXPECT_EQ(probe->walks(), 1u);
+
+    engine.addOutput(Input<double>::make("other", 0.0), [](const ValuePtr&) {});
+    EXPECT_EQ(engine.discoverStatefulNodes().size(), 1u);
+    EXPECT_EQ(engine.discoverStatefulNodes().size(), 1u);
+    EXPECT_EQ(probe->walks(), 2u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AnEmptyResultIsKept — a graph with no stateful node has an empty result, which
+// is a result like any other and is not walked for again.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, AnEmptyResultIsKept) {
+    auto plain = CountingNode::make("plain");
+
+    Engine engine;
+    engine.addOutput(plain, [](const ValuePtr&) {});
+    EXPECT_TRUE(engine.discoverStatefulNodes().empty());
+    EXPECT_TRUE(engine.discoverStatefulNodes().empty());
+    EXPECT_EQ(plain->walks(), 1u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SaveAndRestoreShareTheWalk — saveState() and restoreState() reach the stateful
+// nodes through discoverStatefulNodes(), so they share its walk.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, SaveAndRestoreShareTheWalk) {
+    auto probe = StatefulProbe::make("probe");
+
+    Engine engine;
+    engine.addOutput(probe, [](const ValuePtr&) {});
+    engine.setStateStore(std::make_shared<InMemoryStateStore>());
+
+    probe->set_level(5.0);
+    engine.saveState();
+    engine.saveState();
+    engine.saveState();
+    probe->set_level(0.0);
+    EXPECT_TRUE(engine.restoreState());
+    EXPECT_DOUBLE_EQ(probe->level(), 5.0);
+    EXPECT_EQ(probe->walks(), 1u);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ThreadsOnAColdCacheWalkOnce — eight threads reach a cold cache together, and
+// the walk runs once between them.
+//
+// The graph is wide and shallow: the walk over 20,000 leaves outlasts the start
+// of the other seven threads, so each finds the cache cold, and building and
+// releasing the graph does not recurse. With the fill locked the first thread
+// walks and the rest wait for its result; unlocked, each would walk. The
+// assertions hold in every interleaving of a correct engine, with no sleep and
+// no barrier.
+// ─────────────────────────────────────────────────────────────────────────────
+TEST(StatefulDiscoveryCache, ThreadsOnAColdCacheWalkOnce) {
+    constexpr std::size_t kLeaves  = 20'000;
+    constexpr std::size_t kThreads = 8;
+
+    std::vector<NodePtr> leaves;
+    leaves.reserve(kLeaves);
+    for (std::size_t i = 0; i < kLeaves; ++i)
+        leaves.push_back(Input<double>::make("leaf" + std::to_string(i), 0.0));
+    auto probe = StatefulProbe::make("probe", std::move(leaves));
+
+    Engine engine;
+    engine.addOutput(probe, [](const ValuePtr&) {});
+
+    std::vector<std::vector<StatefulNodePtr>> results(kThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (std::size_t i = 0; i < kThreads; ++i)
+        threads.emplace_back([&engine, &results, i] { results[i] = engine.discoverStatefulNodes(); });
+    for (auto& t : threads) t.join();
+
+    for (const auto& r : results) {
+        ASSERT_EQ(r.size(), 1u);
+        EXPECT_EQ(r[0].get(), static_cast<IStatefulNode*>(probe.get()));
+    }
+    EXPECT_EQ(probe->walks(), 1u);
 }
 
 int main(int argc, char** argv) {

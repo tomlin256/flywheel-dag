@@ -303,6 +303,12 @@ public:
     /// persistState() is true. Source of truth for save/restore — no manual
     /// per-module list is consulted. A stateful node that no registered output
     /// reaches is not persisted.
+    /// The walk runs on the first call after an output is registered, and its result is kept
+    /// until the next registration: a graph is not rewired once its nodes are built
+    /// (INode::inputs()), and addOutput() is the one call that adds a root. A later call copies
+    /// that list and asks persistState() of each node again, since a node may answer differently
+    /// over time. Two threads may call it at once, because the result is filled under a mutex.
+    /// A registration from another thread while it runs is not supported, as addOutput() says.
     std::vector<dag::StatefulNodePtr> discoverStatefulNodes() const;
 
     // ── Run control ───────────────────────────────────────────────────────────
@@ -391,6 +397,12 @@ private:
                       std::unordered_set<const IFlushable*>& seen);
     bool flushListStale() const;
 
+    // The walk behind discoverStatefulNodes(): every IStatefulNode that BFS from the outputs reaches,
+    // in that order, with persistState() not yet asked. discovered_ keeps its result.
+    using StatefulList    = std::vector<dag::StatefulNodePtr>;
+    using StatefulListPtr = std::shared_ptr<const StatefulList>;
+    StatefulList walkStatefulNodes() const;
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     struct OutputEntry {
@@ -447,6 +459,20 @@ private:
     RollingCycleWindow rollingCycles_;
 
     std::shared_ptr<CycleSeqLock> cycleSeqLock_ = std::make_shared<CycleSeqLock>();
+
+    // The walk discoverStatefulNodes() makes, kept until the next addOutput() resets it: outputs_
+    // changes nowhere else, and graphs are not rewired, so the walk gives the same list on every call
+    // in between. It is the list before the persistState() test, which is asked on every call. Null
+    // until a call walks.
+    //
+    // mutable because saveState() and discoverStatefulNodes() are const and public and fill it, and
+    // guarded by a mutex because a host may call them from a thread of its own: a walk only reads, but
+    // a fill writes, and two threads on a cold cache would race on it. The lock is held across the
+    // walk, which calls inputs() on every node, so an inputs() must not call back into the engine;
+    // persistState() is asked outside it. Declared after every other member, so that none cycle()
+    // reads changes offset.
+    mutable std::mutex      discoveryMu_;
+    mutable StatefulListPtr discovered_;
 };
 
 } // namespace dag::async

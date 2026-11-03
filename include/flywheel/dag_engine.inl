@@ -162,19 +162,35 @@ inline bool Engine::restoreState() {
     return store_->restore(discoverStatefulNodes());
 }
 
-inline std::vector<dag::StatefulNodePtr>
-Engine::discoverStatefulNodes() const {
+inline Engine::StatefulList Engine::walkStatefulNodes() const {
     std::vector<NodePtr> roots;
     roots.reserve(outputs_.size());
     for (const auto& e : outputs_)
         if (e.node) roots.push_back(e.node);
 
-    std::vector<dag::StatefulNodePtr> result;
+    StatefulList result;
     for (const auto& n : dag::traversal::bfs_upstream(std::move(roots))) {
         if (auto sn = std::dynamic_pointer_cast<IStatefulNode>(n))
-            if (sn->persistState())
-                result.push_back(std::move(sn));
+            result.push_back(std::move(sn));
     }
+    return result;
+}
+
+inline std::vector<dag::StatefulNodePtr>
+Engine::discoverStatefulNodes() const {
+    StatefulListPtr reached;
+    {
+        const std::lock_guard<std::mutex> lk(discoveryMu_);
+        if (!discovered_)
+            discovered_ = std::make_shared<const StatefulList>(walkStatefulNodes());
+        reached = discovered_;
+    }
+
+    std::vector<dag::StatefulNodePtr> result;
+    result.reserve(reached->size());
+    for (const auto& sn : *reached)
+        if (sn->persistState())   // after the lock: this is a node's own code
+            result.push_back(sn);
     return result;
 }
 
@@ -281,6 +297,12 @@ inline void Engine::addOutput(
 {
     refuseInCycle("addOutput");
     outputs_.push_back({ std::move(node), nullptr, std::move(cb) });
+    // A root the kept walk did not start from. install() and addFeedback() register through here, so
+    // this is the one place that resets it.
+    {
+        const std::lock_guard<std::mutex> lk(discoveryMu_);
+        discovered_.reset();
+    }
     // Due from the start, so the next cycle reaches the output even when its node is already
     // clean, because an earlier cycle pulled it as another output's input or a caller evaluated
     // it.

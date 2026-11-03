@@ -290,6 +290,9 @@ public:
     virtual ~INode() = default;
     virtual ValuePtr eval(EvalContext& ctx) = 0;
     virtual std::string name() const = 0;
+    /// The nodes this one depends on. They are fixed once the node is built: wire() links the
+    /// downstream edges once from them, and Engine::discoverStatefulNodes() keeps its walk over
+    /// them until the next addOutput().
     virtual std::vector<NodePtr> inputs() const = 0;
     /// "An input of yours definitely changed." One hop; the transitive part is
     /// invalidateMaybe().

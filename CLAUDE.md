@@ -157,8 +157,10 @@ ctest --preset relwithdebinfo-macos-arm64
 reachable from a registered output (`discoverStatefulNodes()`: BFS over
 `inputs()`, deduped); there is no list to maintain. A stateful node no output
 reaches is silently not persisted, so wire it. `persistState()` returning `false`
-excludes a node. Node names key the JSON, so they must be unique and stable
-across restarts (no timestamps or addresses).
+excludes a node, and the engine asks it on every call. The walk itself is kept
+until the next `addOutput()`, so a node's `inputs()` must not change once it is
+built. Node names key the JSON, so they must be unique and stable across
+restarts (no timestamps or addresses).
 
 ## Ops and derivatives
 
