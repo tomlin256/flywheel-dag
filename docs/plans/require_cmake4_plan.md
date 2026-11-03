@@ -152,7 +152,7 @@ Commit: `docs: add plan for requiring CMake 4`.
 No commit in this repo. `cmake --preset relwithdebinfo-macos-arm64`, build, `ctest --preset …` on the Mac
 (CMake 4.2.3), with CI's flags.
 
-The image is fixed in its own repository, under that repository's issue 4 and plan 004, with its own tests and
+The image is fixed in its own repository, under that repository's own issue and plan, with its own tests and
 commits: apt's `cmake` is replaced by Kitware's 4.4.5 tarball, checked against a SHA-256 for `aarch64` and for
 `x86_64`; the image's test asserts `cmake --version` begins `cmake version 4.`, that the CMake hello project says
 `cmake_minimum_required(VERSION 4.0)` and builds, and, in the end-to-end test, that the emulated amd64 image has CMake
