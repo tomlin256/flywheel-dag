@@ -1,6 +1,7 @@
 # Require CMake 4
 
-**Status: Proposed (2026-11-03), awaiting approval.** Nothing but this plan has changed.
+**Status: Approved (2026-11-03), in progress.** Approved with one addition: the `ubuntu-dev` image is fixed as part of
+this plan (D7, Step 1), because it cannot build the repo at CMake 4.0 and has to be fixed anyway. D1 to D6 stood.
 
 Closes [flywheel-dag#57](https://github.com/tomlin256/flywheel-dag/issues/57).
 
@@ -29,7 +30,8 @@ The CMake each place runs today:
   and 4.1.2 alongside. So CI should already run 4.4.4 against a floor of 3.20. I read that in the images' readme, not
   in a CI log; Step 3 makes the log say it.
 - **This Mac:** Homebrew's 4.2.3.
-- **The `ubuntu-dev` container:** apt's 3.28.3. It cannot configure the repo once the floor is 4.0.
+- **The `ubuntu-dev` container:** apt's 3.28.3. It cannot configure the repo once the floor is 4.0, so Step 1 fixes
+  its image.
 
 ### What I measured
 
@@ -122,6 +124,12 @@ My defaults, each one a place to edit before approving.
 - **D5. `CMakePresets.json` stays at version 3, `cmakeMinimumRequired` 3.21.** It says what CMake reads the file, not
   what the project needs, and a higher number turns a clear refusal into the confusing one above.
 - **D6. The release is the joint v1.0.0, as flywheel-dag#56 decided.** This plan's last step runs Step 7 of that one.
+- **D7. The `ubuntu-dev` image is fixed in this plan.** Added at approval. The image installs apt's CMake 3.28.3, so
+  the container that builds this repo on Linux stops at the floor. The image is built from another repository, which
+  gets its own issue and plan: Kitware's release tarball, pinned to 4.4.5 (what the runner images carry) and checked
+  against a SHA-256 for each architecture, replaces apt's `cmake`, and the image's test asserts CMake 4 on arm64 and
+  on the emulated amd64. The live container keeps 3.28.3 until it is recreated, which closes any shell open in it, so
+  that stays your call. Until then my runs use Kitware's 4.0.7 in `~/.local` inside it, which is also the floor.
 
 ## Steps
 
@@ -133,23 +141,33 @@ carries Step 2 goes on its own, and so does the one that carries Step 3.
 ### Step 0 — Approval
 
 The plan is committed as Proposed so it can be read and edited. Nothing else lands until it is approved. A comment on
-flywheel-dag#57 links the plan, and a commit records the approval here, with D1 to D6 as you decide them.
+flywheel-dag#57 links the plan, and a commit records the approval here, with D1 to D7 as you decide them.
 
 **Done when:** `git status` is clean on that commit and flywheel-dag#57 carries the link.
 
 Commit: `docs: add plan for requiring CMake 4`.
 
-### Step 1 — Start from green, and get CMake 4 into the container
+### Step 1 — Start from green, and CMake 4 in the `ubuntu-dev` image (D7)
 
-No commit. `cmake --preset relwithdebinfo-macos-arm64`, build, `ctest --preset …` on the Mac (CMake 4.2.3), with
-CI's flags. The `ubuntu-dev` container needs CMake 4 before Step 2: Kitware's 4.0.7 for aarch64 goes into
-`~/.local` there (the container has no `curl`, so the tarball is downloaded on the Mac, checked against the release's
-SHA-256 file and streamed in with `tar`), and the container's scripts put it first on `PATH`. The image's own CMake is
-not touched: the image is built from another repo, and a CMake 4 in it is the maintainer's change.
+No commit in this repo. `cmake --preset relwithdebinfo-macos-arm64`, build, `ctest --preset …` on the Mac
+(CMake 4.2.3), with CI's flags.
 
-**Done when:** ctest passes 42 of 42 on the Mac, the container's `relwithdebinfo-linux-arm64` tree passes 42 of 42
-under its current 3.28.3, and `cmake --version` in the container prints 4.0.7 with the tarball's checksum verified.
-Anything else: stop and ask.
+The image is fixed in its own repository, under that repository's issue 4 and plan 004, with its own tests and
+commits: apt's `cmake` is replaced by Kitware's 4.4.5 tarball, checked against a SHA-256 for `aarch64` and for
+`x86_64`; the image's test asserts `cmake --version` begins `cmake version 4.`, that the CMake hello project says
+`cmake_minimum_required(VERSION 4.0)` and builds, and, in the end-to-end test, that the emulated amd64 image has CMake
+4 as well. Two hand-made changes (apt's `cmake` back, and a wrong checksum digit) must fail. That repository's full
+suite passes, the commits are pushed and the issue is closed.
+
+The live container is not recreated. Until it is, the container needs CMake 4 for Step 2: Kitware's 4.0.7 for aarch64
+goes into `~/.local` there (the container has no `curl`, so the tarball is downloaded on the Mac, checked against the
+release's SHA-256 file and streamed in with `tar`), and the container's scripts put it first on `PATH`. It is the
+floor, so the Linux half of every later step runs on the floor.
+
+**Done when:** ctest passes 42 of 42 on the Mac; the container's `relwithdebinfo-linux-arm64` tree passes 42 of 42
+under its current 3.28.3; the image's repository has its suite green with the new assertions, its commits pushed and
+its issue closed; and `cmake --version` in the live container, through `~/.local`, prints 4.0.7 with the tarball's
+checksum verified. Anything else: stop and ask.
 
 ### Step 2 — Raise the floor, and hold it with a test (D1, D2)
 
@@ -243,8 +261,9 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
 - **CMake 4 features.** `CMAKE_COMPILE_WARNING_AS_ERROR` in place of the `-Werror` option, file sets, a newer presets
   schema and the like are candidates. Each is a design change with its own risk, so each gets its own issue after this
   lands.
-- **The `ubuntu-dev` image.** It installs apt's CMake 3.28.3 and is built from another repo. Until it ships CMake 4, a
-  build there needs the Kitware binary Step 1 puts in `~/.local`. So does the amd64 build of the same image.
+- **Recreating the live `ubuntu-dev` container.** The fixed image reaches it only when `./start.sh --detach` recreates
+  it, which closes any shell open in it, so that is left to you. Until then it keeps CMake 3.28.3, and the Kitware
+  binary Step 1 puts in `~/.local` does the job.
 - **A macOS CI leg for the floor.** The floor job is Linux only. The Mac was run by hand on 4.0.7 for this plan and
   again in Step 4.
 - **Windows.** Not built or tested.
@@ -263,8 +282,12 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
   file.
 - **A `FetchContent` consumer on CMake 3 is refused, and an installed-package consumer is not.** That is deliberate
   (D4), and the README and the release notes say so.
-- **The container.** Until its image has CMake 4, a fresh `ubuntu-dev` cannot build this repo without the Kitware
-  binary, and nothing here warns whoever tries. The README's requirement line says 4.0.
+- **The container.** The image is fixed, but the live container keeps CMake 3.28.3 until it is recreated, and nothing
+  here warns whoever builds this repo in it before then except CMake's own refusal. The README's requirement line says
+  4.0.
+- **The image's repository is private and separate.** This plan names it without linking it: its issue and plan are
+  there, and their commits are pushed there. The Kitware download it makes at image build time is the same one this
+  plan's CI job makes at run time, so a checksum slip would fail in both.
 - **Assumptions:** no CMake 4 feature is adopted; the suite keeps running under `ctest` with no sleeps; CI stays on
   GCC 15.2 and Apple Clang with the images' CMake; flywheel-dag#56's release decisions (D1 and D2 there) stand.
 
@@ -272,8 +295,8 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Not started | |
-| 1 — Start from green | Not started | |
+| 0 — Approval | Done | Approved on 2026-11-03: D1 to D6 stood, and D7, the image fix, was added at approval. |
+| 1 — Start from green, and the image | Not started | |
 | 2 — Raise the floor | Not started | |
 | 3 — CI floor leg | Not started | |
 | 4 — Check the floor and the refusal | Not started | |
