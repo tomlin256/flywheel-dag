@@ -1,8 +1,8 @@
 # Require C++23
 
-**Status: Approved (2026-11-03), in progress.** The plan was approved as written: D1 to D5 stood, so the release is
-v1.0.0 and ships with flywheel-dag#57, and Steps 1 to 6 land first. Steps 1 to 6 are done. Step 7 waits for the plan
-of flywheel-dag#57 to finish.
+**Status: Done (2026-11-03), released as v1.0.0 with flywheel-dag#57.** The plan was approved as written: D1 to D5
+stood, so the release is v1.0.0 and shipped with flywheel-dag#57 after Steps 1 to 6 and that issue's plan. The Outcome
+section at the end records what the steps found and where they differ from this text.
 
 Closes [flywheel-dag#56](https://github.com/tomlin256/flywheel-dag/issues/56).
 
@@ -318,9 +318,35 @@ Commits: `build: release v1.0.0` and `docs: mark the plan done`.
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-03: D1 to D5 stood. |
 | 1 — Start from green | Done | No commit. At C++17, `cce8729`: clean builds with CI's flags print no warning (the container prints its 22 `-Wpsabi` notes), ctest 41 of 41 on the Mac and in the container, both invariants match, the reference `cycle()` disassembly (190 lines) and the benchmark binary are saved. |
-| 2 — Raise the standard | Done | 41 of 41 on the Mac and in the container with CI's flags; the only warning is googletest's (Step 4); `cycle()` and the invariants are unchanged. The 3.19 clause of `test_warning_flags`' registration was dead under the new minimum and is gone. |
-| 3 — Refuse to compile below C++23 | Done | `test_standard_guard` fails on a scratch copy without the guard, naming every header, and passes with it; 42 of 42 on the Mac and in the container; no warning; the invariants and `cycle()` are unchanged. M1 to M5 fail what the table says; M3's half on GCC 13.3 (202100L) rejects C++23 with the mutant guard and accepts it with the committed one. |
-| 4 — googletest v1.18.0 | Done | The Apple Clang build, which recompiled `gtest-all.cc` against v1.18.0, prints no warning; 42 of 42 on the Mac and in the container; the invariants and `cycle()` are unchanged. |
-| 5 — Words | Done | 65 banners, `CMakeLists.txt`, `README.md` (and its consumer paragraph), `CLAUDE.md`, the allocation comment; `git diff --numstat` shows one line in each banner file. The only "C++17" left outside the older plans is in `test_standard_guard`, which compiles at C++17 on purpose. 42 of 42 on the Mac and in the container; the audit of the tree is clean. |
-| 6 — Measure | Done | No commit. Mac: the invariants match, and `Engine::cycle()` is identical to the C++17 build (211 symbolized lines, no difference). Three A/B sets of 30 alternating rounds, C++23 against C++17, medians: chain -0.3%, idle-queues 0.0% to +0.2%, ingest +0.6% to +0.7%. Ingest is the documented noise floor between two builds of the same code (about 0.6%, flywheel-dag#34), and the instruction stream of `main`, where the benchmark's loops are inlined, is identical up to the output formatting. Container: the invariants match, 42 of 42 in `relwithdebinfo-linux-arm64`, and the AddressSanitizer and UndefinedBehaviorSanitizer tree passes with no report. |
-| 7 — Release | Not started | |
+| 2 — Raise the standard | Done | `b6dff10`. 41 of 41 on the Mac and in the container with CI's flags; the only warning is googletest's (Step 4); `cycle()` and the invariants are unchanged. The 3.19 clause of `test_warning_flags`' registration was dead under the new minimum and is gone. |
+| 3 — Refuse to compile below C++23 | Done | `f3c8910`. `test_standard_guard` fails on a scratch copy without the guard, naming every header, and passes with it; 42 of 42 on the Mac and in the container; no warning; the invariants and `cycle()` are unchanged. M1 to M5 fail what the table says; M3's half on GCC 13.3 (202100L) rejects C++23 with the mutant guard and accepts it with the committed one. |
+| 4 — googletest v1.18.0 | Done | `69183ea`. The Apple Clang build, which recompiled `gtest-all.cc` against v1.18.0, prints no warning; 42 of 42 on the Mac and in the container; the invariants and `cycle()` are unchanged. |
+| 5 — Words | Done | `66c76fd`. 65 banners, `CMakeLists.txt`, `README.md` (and its consumer paragraph), `CLAUDE.md`, the allocation comment; `git diff --numstat` shows one line in each banner file. The only "C++17" left outside the older plans is in `test_standard_guard`, which compiles at C++17 on purpose. 42 of 42 on the Mac and in the container; the audit of the tree is clean. |
+| 6 — Measure | Done | No commit; the numbers are in `3cbe749`. Mac: the invariants match, and `Engine::cycle()` is identical to the C++17 build (211 symbolized lines, no difference). Three A/B sets of 30 alternating rounds, C++23 against C++17, medians: chain -0.3%, idle-queues 0.0% to +0.2%, ingest +0.6% to +0.7%. Ingest is the documented noise floor between two builds of the same code (about 0.6%, flywheel-dag#34), and the instruction stream of `main`, where the benchmark's loops are inlined, is identical up to the output formatting. Container: the invariants match, 42 of 42 in `relwithdebinfo-linux-arm64`, and the AddressSanitizer and UndefinedBehaviorSanitizer tree passes with no report. |
+| 7 — Release | Done | `e9be532`, tag `v1.0.0`, [release](https://github.com/tomlin256/flywheel-dag/releases/tag/v1.0.0) published, with flywheel-dag#57. `test_package_version`, whose table is derived from `PROJECT_VERSION`, failed against the 0.3.2 `SameMinorVersion` file first (0, 0.0 and 0.2 refused), passes at 1.0.0, and fails for a `SameMinorVersion` file (1 refused), an `AnyNewerVersion` file (0.3, 0.3.2 and 0.9 accepted) and an `ExactVersion` file (1 and 1.0 refused). 44 of 44 on the Mac and in the container, the installed version file reports 1.0.0, and CI passed on all three jobs (run 41691707818). |
+
+## Outcome
+
+Released as [v1.0.0](https://github.com/tomlin256/flywheel-dag/releases/tag/v1.0.0), tag `v1.0.0` on `e9be532`,
+together with flywheel-dag#57 ([its plan](require_cmake4_plan.md)).
+
+What the steps found, and where they differ from this text:
+
+- **The probes were right.** Nothing under `include/` needed an edit to compile as C++23: the diff since v0.3.2 is the
+  banner line in each of the 25 files and the two guards. Every step's measurement stood. `Engine::cycle()` is
+  identical on Apple Clang at every step, the invariants never moved, and the benchmark rows read chain -0.3%,
+  idle-queues 0.0% to +0.2% and ingest +0.6% to +0.7%.
+- **Step 2 also dropped a dead condition.** With the minimum at 3.20, the `NOT CMAKE_VERSION VERSION_LESS 3.19` clause
+  on `test_warning_flags` was always true, so it went with the version bump.
+- **Step 5's grep finds two "C++17"** outside the older plans, both in `test_standard_guard`, which compiles at C++17
+  on purpose.
+- **`test_package_version`'s table is derived from `PROJECT_VERSION`,** not written for 1.0.0, so it needs no edit at
+  1.1.0. Its first parser used `string(REGEX REPLACE "^…")`, which restarts at the end of each replacement and strips
+  every leading number. The red run showed `0.3` refused by a file that accepts it, and the parser was fixed before the
+  table was trusted.
+- **The release went out with the CI job of flywheel-dag#57,** one push for both, because GitHub cancelled the macOS
+  job of the earlier push twice, after 15 minutes without a runner (its ubuntu job passed). The pushed tip's three jobs
+  all passed.
+- **CI's CMake reads 4.4.4** in both runners' logs, as the images' readme said.
+- **A finding outside the plan:** Clang 18 on libstdc++ cannot build `test_allocation_counter`, at C++17 either:
+  [flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58), still open.

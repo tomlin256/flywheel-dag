@@ -1,7 +1,9 @@
 # Require CMake 4
 
-**Status: Approved (2026-11-03), in progress.** Approved with one addition: the `ubuntu-dev` image is fixed as part of
-this plan (D7, Step 1), because it cannot build the repo at CMake 4.0 and has to be fixed anyway. D1 to D6 stood.
+**Status: Done (2026-11-03), released as v1.0.0 with flywheel-dag#56.** Approved with one addition: the `ubuntu-dev`
+image is fixed as part of this plan (D7, Step 1), because it cannot build the repo at CMake 4.0 and has to be fixed
+anyway. D1 to D6 stood. The Outcome section at the end records what the steps found and where they differ from this
+text.
 
 Closes [flywheel-dag#57](https://github.com/tomlin256/flywheel-dag/issues/57).
 
@@ -299,7 +301,32 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
 |---|---|---|
 | 0 — Approval | Done | Approved on 2026-11-03: D1 to D6 stood, and D7, the image fix, was added at approval. |
 | 1 — Start from green, and the image | Done | The image's repository: its issue is closed and its plan is committed; Kitware's 4.4.5 tarball, checked against a SHA-256 for each architecture, replaces apt's cmake; its suite passes (compose config 14, image 48, end-to-end 16, start 101), with apt's cmake put back six image assertions fail, and a wrong checksum digit stops the build at `sha256sum`; pushed. This repo's code is unchanged since `3cbe749`, whose 42 of 42 on the Mac and in the container (3.28.3) stand. Kitware's 4.0.7 is in the live container's `~/.local`, checksum verified; the container itself is not recreated. |
-| 2 — Raise the floor | Done | `test_cmake_floor` fails on a copy with only the root at 4.0, naming the consumer project, the seven scripts and the README, and passes after; M1 to M6 fail as stated; 43 of 43 on the Mac (4.2.3) and in the container (4.0.7), no warning, invariants and `cycle()` unchanged. Of 299 generated files, the only one that differs from `3cbe749`'s is `tests/CTestTestfile.cmake`: the new test, and one backtrace line number. |
-| 3 — CI floor leg | Committed | `ci.yml` prints `cmake --version` and `c++ --version`, and a third job runs the same preset on Kitware's 4.0.7 (SHA-256 checked); the install step's shell was run against a stand-in tarball in an Ubuntu 26.04 container, and a wrong checksum fails it. 43 of 43 on the Mac and in the container. CI's result is recorded when it is pushed. |
-| 4 — Check the floor and the refusal | Not started | |
-| 5 — Release | Not started | |
+| 2 — Raise the floor | Done | `8d7762f`. `test_cmake_floor` fails on a copy with only the root at 4.0, naming the consumer project, the seven scripts and the README, and passes after; M1 to M6 fail as stated; 43 of 43 on the Mac (4.2.3) and in the container (4.0.7), no warning, invariants and `cycle()` unchanged. Of 299 generated files, the only one that differs from `3cbe749`'s is `tests/CTestTestfile.cmake`: the new test, and one backtrace line number. |
+| 3 — CI floor leg | Done | `d8ab740`. `ci.yml` prints `cmake --version` and `c++ --version`, and a third job, `build (ubuntu-latest, relwithdebinfo-linux-x86_64, CMake 4.0.7)`, runs the same preset on Kitware's 4.0.7, which the step checks against a SHA-256. The step's shell was run against a stand-in tarball in an Ubuntu 26.04 container, and a wrong checksum fails it. Pushed with the release (see the Outcome): on `e9be532` the logs print `cmake version 4.4.4` for the two runner jobs, and `cmake-4.0.7-linux-x86_64.tar.gz: OK` then `cmake version 4.0.7` for the floor, and all three jobs pass 44 of 44 (run 41691707818). |
+| 4 — Check the floor and the refusal | Done | No commit. On `d8ab740`, in scratch copies: CMake 4.0.7 and 4.4.5 on the Mac, 43 of 43 each with no CMake or compiler warning; CMake 3.31.12 refuses the engine as the top-level project, through `cmake --preset` and through a `FetchContent` consumer with `CMake 4.0 or higher is required` (at `CMakeLists.txt:24`); a consumer under 3.31.12 configures, builds and runs against the package that CMake 4.4.5 installed; and CMake 3.20.6 configures a consumer of a package that CMake 4.2.3 installed. |
+| 5 — Release | Done | `e9be532`, tag `v1.0.0`, release published; the plan of flywheel-dag#56 holds the details. Both issues are closed. |
+
+## Outcome
+
+Released as [v1.0.0](https://github.com/tomlin256/flywheel-dag/releases/tag/v1.0.0), tag `v1.0.0` on `e9be532`,
+together with flywheel-dag#56 ([its plan](require_cxx23_plan.md)).
+
+What the steps found, and where they differ from this text:
+
+- **Step 1 grew at approval (D7).** The `ubuntu-dev` image is fixed in its own repository, with its own issue, plan and
+  tests: Kitware's 4.4.5 tarball, checked against a SHA-256 for each architecture, replaces apt's 3.28.3. Its suite
+  passes, including CMake version 4 on the emulated amd64 image; with apt's `cmake` put back six assertions fail, and a
+  wrong checksum digit stops the build. The live container was not recreated: it keeps 3.28.3 until
+  `./start.sh --detach` rebuilds it from the new image, which closes any shell open in it. My runs used Kitware's 4.0.7
+  in `~/.local` there.
+- **A floor of 4.0 changes nothing that CMake generates** (Step 2). Of 299 generated files, the only one that differs
+  from the commit before is the test list, which gains `test_cmake_floor`, with one backtrace line number.
+- **The first configure of an existing tree re-fetches its dependencies.** The probes missed it, because they used
+  `FETCHCONTENT_SOURCE_DIR_*`. CMP0168 is NEW under the minimum, so FetchContent no longer uses a sub-build, and
+  spdlog, nlohmann/json and googletest are cloned again and rebuilt, once. A fresh tree and CI are not affected.
+- **`test_cmake_floor` has a sixth hand-made change,** a stale script added in a directory of its own, and its message
+  for a missing root call reads "found 0 calls that set a minimum version".
+- **Step 3's push went with the release,** one push for both, because the macOS job of Step 2's push was cancelled
+  twice, after 15 minutes without a runner. The ubuntu job of that push passed, and the pushed tip's three jobs all
+  passed.
+- **CI's CMake reads 4.4.4** in both runners' logs.
