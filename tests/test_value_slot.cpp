@@ -21,7 +21,6 @@
 //
 // Allocations are counted by allocation_counter.cpp, which this suite links.
 
-#include <deque>
 #include <string>
 #include <vector>
 
