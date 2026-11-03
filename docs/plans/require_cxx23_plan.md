@@ -1,8 +1,8 @@
 # Require C++23
 
 **Status: Approved (2026-11-03), in progress.** The plan was approved as written: D1 to D5 stood, so the release is
-v1.0.0 and ships with flywheel-dag#57, and Steps 1 to 6 land first. Step 7 waits for the plan of flywheel-dag#57 to
-finish.
+v1.0.0 and ships with flywheel-dag#57, and Steps 1 to 6 land first. Steps 1 to 6 are done. Step 7 waits for the plan
+of flywheel-dag#57 to finish.
 
 Closes [flywheel-dag#56](https://github.com/tomlin256/flywheel-dag/issues/56).
 
@@ -322,5 +322,5 @@ Commits: `build: release v1.0.0` and `docs: mark the plan done`.
 | 3 — Refuse to compile below C++23 | Done | `test_standard_guard` fails on a scratch copy without the guard, naming every header, and passes with it; 42 of 42 on the Mac and in the container; no warning; the invariants and `cycle()` are unchanged. M1 to M5 fail what the table says; M3's half on GCC 13.3 (202100L) rejects C++23 with the mutant guard and accepts it with the committed one. |
 | 4 — googletest v1.18.0 | Done | The Apple Clang build, which recompiled `gtest-all.cc` against v1.18.0, prints no warning; 42 of 42 on the Mac and in the container; the invariants and `cycle()` are unchanged. |
 | 5 — Words | Done | 65 banners, `CMakeLists.txt`, `README.md` (and its consumer paragraph), `CLAUDE.md`, the allocation comment; `git diff --numstat` shows one line in each banner file. The only "C++17" left outside the older plans is in `test_standard_guard`, which compiles at C++17 on purpose. 42 of 42 on the Mac and in the container; the audit of the tree is clean. |
-| 6 — Measure | Not started | |
+| 6 — Measure | Done | No commit. Mac: the invariants match, and `Engine::cycle()` is identical to the C++17 build (211 symbolized lines, no difference). Three A/B sets of 30 alternating rounds, C++23 against C++17, medians: chain -0.3%, idle-queues 0.0% to +0.2%, ingest +0.6% to +0.7%. Ingest is the documented noise floor between two builds of the same code (about 0.6%, flywheel-dag#34), and the instruction stream of `main`, where the benchmark's loops are inlined, is identical up to the output formatting. Container: the invariants match, 42 of 42 in `relwithdebinfo-linux-arm64`, and the AddressSanitizer and UndefinedBehaviorSanitizer tree passes with no report. |
 | 7 — Release | Not started | |
