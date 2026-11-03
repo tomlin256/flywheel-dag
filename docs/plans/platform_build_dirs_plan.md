@@ -178,10 +178,9 @@ My defaults, each one a place to edit before approving.
   checks is a gap I would be leaving, so CMake checks it. The remembered platform is the second half because a
   name the first does not examine, such as `build`, can still be configured from the wrong platform. The first
   half is deliberately loose about what is not a claim: the kind is optional and anything may follow the
-  architecture, so a hand-made `relwithdebinfo-linux-arm64-clang18` (the container has both compilers) is a
-  truthful name and passes. The stricter rule, exactly `<kind>-<os>-<arch>`, would refuse it and police style
-  for no gain. The cost is two regular expressions on a directory name at configure time. The alternative is a
-  convention and no guard.
+  architecture, so a hand-made `relwithdebinfo-linux-arm64-gcc13` is a truthful name and passes. The stricter
+  rule, exactly `<kind>-<os>-<arch>`, would refuse it and police style for no gain. The cost is two regular
+  expressions on a directory name at configure time. The alternative is a convention and no guard.
 - **D4. The presets name the tree and set the build type the kind names, and nothing else.** No warning flags.
   `FLYWHEEL_DAG_WARNINGS_AS_ERRORS` is off by default so that a newer compiler's new warning does not stop a
   contributor's build (`CMakeLists.txt` says so), and CI turns it on. A preset that set it would end that, and

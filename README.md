@@ -231,7 +231,10 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 ## Building and testing
 
 Requires a C++23 compiler and CMake 4.0 or later. CI builds and tests on Linux (GCC) and macOS
-(Apple Clang).
+(Apple Clang). Clang before 19 with libstdc++ is not a supported build: Clang leaves sized
+deallocation off until 19, so libstdc++'s `<new>` does not declare the sized `operator delete` that
+`tests/test_allocation_counter.cpp` calls, and that test does not compile
+([flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58)).
 
 A build tree belongs to one OS and one architecture, so a checkout that is built natively on a Mac and
 in a Linux container needs a tree for each. The trees are named `build/<kind>-<os>-<arch>`.

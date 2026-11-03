@@ -53,8 +53,8 @@ no header, test or example. Configured and built with CI's flags, `-Werror=dev -
 - **Clang 18 fails the same way before the change.** Clang before 19 does not enable sized deallocation, so
   libstdc++'s `<new>` does not declare `operator delete(void*, std::size_t)`, which `test_allocation_counter.cpp`
   calls by hand. I ran the unmodified C++17 source as a control and got the same eight errors. It is
-  [flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58), and this plan does not fix it. Until it is
-  fixed, Clang 18 is not a compiler this plan claims to support.
+  [flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58), and this plan does not fix it. That issue
+  closed it by stating, in the README, that Clang before 19 with libstdc++ is not a supported build.
 - **The hot path does not move on Apple Clang.** `bench_hot_path --invariants` built as C++23 matches
   `benchmarks/expected_invariants.txt` exactly, and `Engine::cycle()`'s disassembly (190 lines, addresses stripped)
   is identical to the C++17 build of the same commit.
@@ -349,4 +349,5 @@ What the steps found, and where they differ from this text:
   all passed.
 - **CI's CMake reads 4.4.4** in both runners' logs, as the images' readme said.
 - **A finding outside the plan:** Clang 18 on libstdc++ cannot build `test_allocation_counter`, at C++17 either:
-  [flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58), still open.
+  [flywheel-dag#58](https://github.com/tomlin256/flywheel-dag/issues/58), closed 2026-11-03 by stating that Clang
+  before 19 with libstdc++ is not a supported build.

@@ -33,7 +33,7 @@ ctest --preset relwithdebinfo-macos-arm64
   `test_platform_name`, `test_tree_name` and `test_presets` hold it
   (flywheel-dag#46). The presets set the tree and the build type and nothing
   else. Name a variant after the architecture
-  (`relwithdebinfo-linux-arm64-clang18`), or give it a name that claims no
+  (`relwithdebinfo-linux-arm64-gcc13`), or give it a name that claims no
   platform (`build`, `scratch`).
 - The default build (`relwithdebinfo-…`) is `RelWithDebInfo` with `-DNDEBUG`, so
   `assert()` never runs; `debug-…` is the build where it does. Validation that
