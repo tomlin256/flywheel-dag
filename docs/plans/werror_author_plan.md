@@ -103,8 +103,9 @@ Each was a place to edit before approving. Where you changed one, it says so.
 
 ## Steps
 
-Every commit subject is scoped to flywheel-dag#59 in the repo's `type(#N): …` form. A checkpoint ends with a full
-build and a full ctest run on the Mac (CMake 4.4.5, CI's flags), and nothing is pushed until it is green.
+Every commit subject is scoped to flywheel-dag#59 in the repo's `type(#N): …` form. The subjects below omit the scope.
+A checkpoint ends with a full build and a full ctest run on the Mac (CMake 4.4.5, CI's flags), and nothing is pushed
+until it is green.
 
 ### Step 0 — Approval
 
@@ -113,8 +114,8 @@ floor job's removal (D2), and this commit records both.
 
 **Done when:** `git status` is clean on that commit and flywheel-dag#59 carries the link and the change.
 
-Commits: `docs(#59): add plan for the CMake author diagnostic flag`, then `docs(#59): record the approval, and remove
-the floor job in the plan`.
+Commits: `docs: add plan for the CMake author diagnostic flag`, then `docs: record the approval, and remove the floor
+job in the plan`.
 
 ### Step 1 — Start from green
 
@@ -158,7 +159,7 @@ Each change is made on a scratch copy of the checkout and never restored:
 | M5 the test's own flags as `-Werror=deprecated` alone | behaviour: the author-warning case configured, and was expected to fail |
 | M6 `ci.yml` renamed | spelling: cannot read `.github/workflows/ci.yml` |
 
-Commit: `fix(#59): spell the strict CMake flag -Werror=author, and drop the floor job`.
+Commit: `fix: spell the strict CMake flag -Werror=author, and drop the floor job`.
 
 ### Step 3 — Push, and read CI
 
@@ -169,7 +170,7 @@ each. Then flywheel-dag#59 is closed with a comment.
 
 ### Step 4 — Mark the plan done
 
-The plan's status, the progress table and an Outcome section. Commit: `docs(#59): mark the plan done`.
+The plan's status, the progress table and an Outcome section. Commit: `docs: mark the plan done`.
 
 ## Designs I rejected
 
@@ -210,7 +211,7 @@ The plan's status, the progress table and an Outcome section. Commit: `docs(#59)
 | Step | Status | Notes |
 |---|---|---|
 | 0 Approval | Done | Proposed in `9a6dc46`; approved with the floor job's removal (D2). |
-| 1 Start from green | | |
-| 2 The spelling, the floor job and the test | | |
+| 1 Start from green | Done | No commit. Mac, CMake 4.4.5, CI's flags: no CMake or compiler warning, ctest 44 of 44. |
+| 2 The spelling, the floor job and the test | Done | `c151318`. T1 was red on the unchanged tree and named `ci.yml`, `README.md` and `CLAUDE.md`. Eleven hand-made changes (M1 to M6, and five that isolate one claim each) failed the case they pin. ctest 45 of 45, no warning, no notice. The script passes under 4.0.7 and 4.2.3 run directly, and says it skipped the behaviour. |
 | 3 Push, and read CI | | |
 | 4 Mark the plan done | | |
