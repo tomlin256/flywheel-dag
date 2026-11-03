@@ -1,8 +1,10 @@
 # The Stateful-Node Walk Must Run Once per Registration, Not Once per Call
 
-**Status: Approved as written (2026-11-03), in progress.** D1 to D5 stood: the cache holds the walk and the
-`persistState()` test runs on every call, behind a mutex; `addOutput()` alone resets it; the tests land in two
-green commits; and v0.3.2 is released at the end. The Progress table below records where the work is.
+**Status: Done (2026-11-03), released as v0.3.2.** The plan was approved as written: D1 to D5 stood, so the cache
+holds the walk and the `persistState()` test runs on every call, behind a mutex; `addOutput()` alone resets it; the
+tests landed in two green commits; and the fix is in
+[v0.3.2](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.3.2). The Outcome section at the end records what
+the steps found and where they differ from this text.
 
 Closes [flywheel-dag#29](https://github.com/tomlin256/flywheel-dag/issues/29).
 
@@ -277,8 +279,106 @@ Commits: `build: release v0.3.2` and `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-03. |
-| 1 — Start from green | Not started | |
-| 2 — Tests that pin | Not started | |
-| 3 — The cache | Not started | |
-| 4 — Measure | Not started | |
-| 5 — Release | Not started | |
+| 1 — Start from green | Done | ctest 41 of 41, no warnings with warnings as errors, invariants match; the reference disassembly saved. |
+| 2 — Tests that pin | Done | `b90252c`. T1 to T3, green on v0.3.1's engine. |
+| 3 — The cache | Done | `bb63d88`. T4 to T8 red on the old engine and green on the new; eight hand-made changes fail as stated; CI green on both legs. |
+| 4 — Measure | Done | No commit. A cached call takes a fiftieth of the old walk; `cycle()` is identical; the sanitizers are clean. |
+| 5 — Release | Done | `4b4e62e`, tag `v0.3.2`, release published. |
+
+## Outcome
+
+Released as [v0.3.2](https://github.com/tomlin256/flywheel-dag/releases/tag/v0.3.2), tag `v0.3.2` on `4b4e62e`.
+
+| Commit | Step | What |
+|---|---|---|
+| `06f23fc` | 0 | the plan, proposed |
+| `a525c90` | 0 | the approval, recorded |
+| `b90252c` | 2 | the `StatefulDiscoveryCache` tests T1 to T3, which pass on v0.3.1's engine |
+| `bb63d88` | 3 | the cache, T4 to T8, and the comments that state the rule |
+| `4b4e62e` | 5 | release v0.3.2 |
+
+The tests, by the numbers used below: T1 `AnOutputRegisteredLaterIsFoundInBreadthFirstOrder`, T2
+`InstallAndAddFeedbackAreFoundToo`, T3 `PersistStateIsAskedOnEveryCall`, T4 `CallsBetweenRegistrationsDoNotWalk`, T5
+`ARegistrationWalksOnceMore`, T6 `AnEmptyResultIsKept`, T7 `SaveAndRestoreShareTheWalk` and T8
+`ThreadsOnAColdCacheWalkOnce`.
+
+**Step 1.** The baseline was green on the Mac: no configure or build warning with `-Werror=dev -Werror=deprecated
+-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, ctest 41 of 41, and `bench_hot_path --invariants` matching the committed file.
+The disassembly of `Engine::cycle()` (185 lines once addresses are stripped) and of the destructor of its `TimeOnExit`
+guard (77) was saved as the reference.
+
+**Step 2.** T1 to T3 passed on the unchanged engine, as they must: it walks on every call, so it cannot be stale, and
+they are what a cache has to keep. Found on the way: [flywheel-dag#54](https://github.com/tomlin256/flywheel-dag/issues/54),
+two unused includes in the test file that this plan did not put there.
+
+**Step 3, red first.** T4 to T8 were written and run on the unchanged engine, before a header was edited. All five failed
+on the walk count the probe read: 3 where 1 is right (T4), 4 where 2 (T5), 2 where 1 (T6), 4 where 1 (T7) and 8 where 1
+(T8: each of the eight threads walked). T1 to T3 passed. With the cache the suite passes 18 of 18 and ctest 41 of 41.
+
+Eight hand-made changes, each built from a scratch copy of `include/` and the test, with every test run alone under a
+30 s watchdog. M0, the fixed code unchanged, passes all 18.
+
+| Change | Fails |
+|---|---|
+| M1 no cache: every call walks | T4, T5, T6, T7, T8 |
+| M2 `addOutput()` never resets | T1, T2, T5 |
+| M3 only `install()` resets | T1, T2, T5 |
+| M4 the cache holds the filtered list | T3 |
+| M5 an empty result counts as not computed | T6 |
+| M6 the fill takes no lock | T8 |
+| M7 `saveState()` walks for itself | T7 |
+| M8 `restoreState()` walks for itself | T7 |
+
+M6 fails T8 on 40 of 40 runs on the Mac, with the probe's walk count at 8 where 1 is right, and the fixed code passes
+40 of 40.
+
+**Step 4, measured.** The scratch program of "What I measured", on the fixed headers, three runs that agree within about
+4% (apart from the first row of the first run of a process). Before is the table in "Problem":
+
+| Nodes | A call between registrations | `saveState()`, `InMemoryStateStore` | `saveState()`, `JsonFileStateStore` |
+|---:|---:|---:|---:|
+| 50 | 4.7 µs → 0.1 µs | 10.3 µs → 5.7 µs | 124 µs → 123 µs |
+| 500 | 43 µs → 0.7 to 1.0 µs | 102 µs → 60 µs | 340 µs → 292 µs |
+| 5,000 | 460 µs → 9.4 µs | 1.08 ms → 0.63 ms | 2.32 ms → 1.90 ms |
+| 50,000 | 5.0 ms → 0.10 ms | 11.2 ms → 6.4 ms | 23.4 ms → 18.4 ms |
+
+- The bar was a fifth of the baseline. A call takes a forty-third to a sixty-first of it at 500 nodes and a fiftieth at
+  5,000 and 50,000. What is left is the copy and the `persistState()` test, about 3 ns for each stateful node.
+- The first call after a registration costs 5% to 10% more than before (5,000 nodes: 513 to 554 µs against 464 to 501;
+  50,000: 5.5 to 5.6 ms against 5.0 to 5.4), since it makes the list and then copies and filters it.
+- `bench_hot_path --invariants` matches the committed file, which is unchanged.
+- The disassembly of `Engine::cycle()` is identical to Step 1's once addresses are stripped: the same SHA-1 over the 185
+  lines. The `TimeOnExit` destructor is identical but for one instruction pair, the address of the string literal that
+  the empty-buffer branch of `RingBuffer::front()` passes to `throwEmpty()`, which moved by 176 bytes in the constant pool.
+- In `ubuntu-dev` (GCC 13.3, aarch64): `relwithdebinfo-linux-arm64` with the CI warning flags builds with no warning and
+  passes 41 of 41; the AddressSanitizer and UndefinedBehaviorSanitizer tree passes 41 of 41 with default options and no
+  report; the ThreadSanitizer tree runs the discovery suite 18 of 18 with no report. M6 built there with ThreadSanitizer
+  fails T8 on 30 of 30 runs, and ThreadSanitizer reports a data race in 13 of them.
+- **CI.** [Run 41628014858](https://github.com/tomlin256/flywheel-dag/actions/runs/41628014858) on `bb63d88` and
+  [run 41629104701](https://github.com/tomlin256/flywheel-dag/actions/runs/41629104701) on `4b4e62e` are green on both
+  legs, GCC 15.2.0 on ubuntu-latest and Apple Clang 21.0.0 on macOS: 41 of 41 each, no compiler warning, and the
+  benchmark step passing.
+
+**Step 5, release.** ctest 41 of 41 with no warning, and the installed version file reports `0.3.2`. `git diff
+v0.3.1..v0.3.2 --stat -- include` names `dag.hpp` (a comment), `dag_engine.hpp` and `dag_engine.inl` alone. The commits
+since v0.3.1 were read first: this plan, and the test-only work of flywheel-dag#47, flywheel-dag#48 and flywheel-dag#53.
+
+**Where the work differs from the plan.**
+
+- **The local checks of Step 4 ran before Step 3's push.** The plan had CI under Step 3 and the measurements after. Running
+  the cheap ones first meant a failure would not cost a CI run. Steps 2 and 3 and the two plan commits went in one
+  push, and nothing else was pushed until its CI had finished.
+- **ThreadSanitizer is not what makes M6 certain,** as the self-review had it. It reported the unlocked fill in 13 of 30
+  runs, and why it misses the others is not established: the probe's atomic walk counter gives the threads
+  happens-before edges, which may hide some of the accesses, and the detector keeps only a few past accesses for each
+  word. T8's walk count is the guard, and it fails on every run. ThreadSanitizer is a second signal, and silent on the
+  fixed engine.
+- **One more hand-made change than planned:** M8, `restoreState()` walking for itself, which T7 also catches.
+- **The red run was on the unchanged tree,** not on a scratch copy of the old headers, since no header had been edited
+  yet: it is the same engine.
+- **The `TimeOnExit` destructor is not byte-identical** to Step 1's; the plan asked that of `cycle()`, which is.
+- **flywheel-dag#54** was not in the plan.
+
+**Left open.** [flywheel-dag#28](https://github.com/tomlin256/flywheel-dag/issues/28) (the orphan detector),
+[flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45) (no sanitizer build of the engine's own tests in
+CI; the thread test is one more reason for it) and flywheel-dag#54 (two unused includes).
