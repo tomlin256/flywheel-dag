@@ -17,7 +17,7 @@
 # reported. The prefix is emptied first, so a file from an earlier run can
 # satisfy neither this check nor a consumer test that finds the package there.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS BINARY_DIR SOURCE_DIR PREFIX INCLUDEDIR DATADIR)
     if(NOT ${var})

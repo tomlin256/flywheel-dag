@@ -18,7 +18,7 @@
 # architecture where CMake knows it, and that the first half and the second both
 # stop a configure.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS SOURCE_DIR SCRATCH_DIR GENERATOR SPDLOG_SOURCE_DIR NLOHMANN_JSON_SOURCE_DIR)
     if(NOT ${var})

@@ -13,7 +13,7 @@
 # emptied first; the build directories under BINARY_DIR are kept, so a later
 # run rebuilds only what changed.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS SPDLOG_SOURCE_DIR NLOHMANN_JSON_SOURCE_DIR BINARY_DIR PREFIX GENERATOR)
     if(NOT ${var})

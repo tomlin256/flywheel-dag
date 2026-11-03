@@ -19,7 +19,7 @@
 # this build fetches sets -Wpedantic for itself, so finding it on one means the
 # flags leaked.
 
-cmake_minimum_required(VERSION 3.19)   # string(JSON)
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS COMPILE_COMMANDS SOURCE_DIR BINARY_DIR)
     if(NOT ${var})

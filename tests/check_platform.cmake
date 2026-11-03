@@ -11,7 +11,7 @@
 # of its path. A hand-made change to a copy of the module is passed here, and
 # must fail the row that names it (docs/plans/platform_build_dirs_plan.md).
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 4.0)
 
 if(NOT SOURCE_DIR)
     message(FATAL_ERROR "usage: cmake -DSOURCE_DIR=<dir> -P check_platform.cmake")

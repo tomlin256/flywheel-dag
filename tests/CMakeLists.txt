@@ -185,14 +185,23 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # CMakePresets.json names one build tree per kind and platform and says which of
-# them a host can use. The check reads the file with string(JSON), which needs
-# CMake 3.19, and asks CMake to list the presets for this host, which needs 3.20;
-# a version 3 presets file needs 3.21. Registered at the top level, where the file
+# them a host can use. The check reads the file with string(JSON) and asks CMake
+# to list the presets for this host. Registered at the top level, where the file
 # means something, and never from anything the file itself decides.
-if(_flywheel_dag_top_level AND NOT CMAKE_VERSION VERSION_LESS 3.21)
+if(_flywheel_dag_top_level)
   add_test(NAME test_presets
     COMMAND ${CMAKE_COMMAND}
       -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
       -DHOST_SYSTEM_NAME=${CMAKE_HOST_SYSTEM_NAME}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_presets.cmake)
+endif()
+
+# One CMake floor. The root CMakeLists.txt states it, and every other minimum in
+# the checkout and the README say the same. Registered at the top level, where the
+# checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_cmake_floor
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_floor.cmake)
 endif()

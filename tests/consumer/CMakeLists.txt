@@ -11,7 +11,7 @@
 #
 # With -DCONSUMER_FETCHES_DEPENDENCIES=ON, a package consumer first fetches
 # spdlog and nlohmann/json itself (test_consumer_package_own_dependencies).
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 4.0)
 project(flywheel_dag_consumer LANGUAGES CXX)
 
 include(FetchContent)

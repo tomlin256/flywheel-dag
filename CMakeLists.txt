@@ -14,10 +14,14 @@
 #   find_package(flywheel_dag 0.3 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
-# 3.20 is the first CMake with the cxx_std_23 compile feature that flywheel::dag
-# asks for below. It is a plain minimum, not a <min>...<max> range: a range flips
-# every policy up to <max> to NEW, which needs its own audit.
-cmake_minimum_required(VERSION 3.20)
+# 4.0 is the floor: this project is CMake 4 (flywheel-dag#57). It is a plain
+# minimum, not a <min>...<max> range: a range flips every policy up to <max> to
+# NEW, which needs its own audit. Every policy up to 4.0 is NEW here, including
+# CMP0156 (a static library is listed once on a link line where the linker allows
+# it, so Apple's ld stops warning "ignoring duplicate libraries" on every relink)
+# and CMP0179 (the first occurrence is the one kept). test_cmake_floor holds every
+# other minimum in the tree, and the README, to this one.
+cmake_minimum_required(VERSION 4.0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level or subproject.
@@ -218,17 +222,6 @@ if(_flywheel_dag_top_level)
         if(FLYWHEEL_DAG_WARNINGS_AS_ERRORS)
             add_compile_options(-Werror)
         endif()
-    endif()
-
-    # List each static library once on a link line where the linker allows it.
-    # Unset, CMP0156 repeats them the way a single-pass linker needs, and Apple's
-    # ld warns "ignoring duplicate libraries" on every relink. NEW de-duplicates
-    # on Apple and Windows only; CMP0179 NEW keeps the first occurrence.
-    if(POLICY CMP0156)
-        cmake_policy(SET CMP0156 NEW)
-    endif()
-    if(POLICY CMP0179)
-        cmake_policy(SET CMP0179 NEW)
     endif()
 endif()
 

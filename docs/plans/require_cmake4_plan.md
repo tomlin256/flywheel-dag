@@ -197,7 +197,8 @@ Each change is made on a scratch copy and never restored (Make 3.81 compares mti
 | M2 the consumer project at `4.0...4.4` | T1, naming it as a range |
 | M3 the README back at "CMake 3.20 or later" | T1, naming the README |
 | M4 the root at 4.2 and everything else at 4.0 | T1, naming every other file |
-| M5 the root's call deleted | T1, "found no cmake_minimum_required" |
+| M5 the root's call deleted | T1, "found 0 calls that set a minimum version" |
+| M6 a script added later, in a directory of its own, with a stale minimum | T1, naming it |
 
 Commit: `build: require CMake 4`.
 
@@ -280,6 +281,7 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
 - **The floor job downloads at run time.** A GitHub outage fails that job and nothing else, and the checksum stops a
   changed file. I did not verify Kitware's GPG signature of the SHA-256 file, only the hash against the release's own
   file.
+- **An existing tree re-fetches its dependencies once.** Seen at Step 2: under the 4.0 minimum CMP0168 is NEW, so FetchContent populates without a sub-build, and the first configure of a tree made before it clones spdlog, nlohmann/json and googletest again (about 20 s, with the network) and rebuilds them. A fresh tree, and CI, are not affected.
 - **A `FetchContent` consumer on CMake 3 is refused, and an installed-package consumer is not.** That is deliberate
   (D4), and the README and the release notes say so.
 - **The container.** The image is fixed, but the live container keeps CMake 3.28.3 until it is recreated, and nothing
@@ -296,8 +298,8 @@ Commits: `build: release v1.0.0` and `docs: mark the plans done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved on 2026-11-03: D1 to D6 stood, and D7, the image fix, was added at approval. |
-| 1 — Start from green, and the image | Not started | |
-| 2 — Raise the floor | Not started | |
+| 1 — Start from green, and the image | Done | The image's repository: its issue is closed and its plan is committed; Kitware's 4.4.5 tarball, checked against a SHA-256 for each architecture, replaces apt's cmake; its suite passes (compose config 14, image 48, end-to-end 16, start 101), with apt's cmake put back six image assertions fail, and a wrong checksum digit stops the build at `sha256sum`; pushed. This repo's code is unchanged since `3cbe749`, whose 42 of 42 on the Mac and in the container (3.28.3) stand. Kitware's 4.0.7 is in the live container's `~/.local`, checksum verified; the container itself is not recreated. |
+| 2 — Raise the floor | Done | `test_cmake_floor` fails on a copy with only the root at 4.0, naming the consumer project, the seven scripts and the README, and passes after; M1 to M6 fail as stated; 43 of 43 on the Mac (4.2.3) and in the container (4.0.7), no warning, invariants and `cycle()` unchanged. Of 299 generated files, the only one that differs from `3cbe749`'s is `tests/CTestTestfile.cmake`: the new test, and one backtrace line number. |
 | 3 — CI floor leg | Not started | |
 | 4 — Check the floor and the refusal | Not started | |
 | 5 — Release | Not started | |

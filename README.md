@@ -53,6 +53,9 @@ The engine is C++23. Linking `flywheel::dag` asks CMake for `cxx_std_23`, so you
 as C++23 (a higher standard of your own is left alone), and a header included below C++23 stops the
 build with one error. A build outside CMake must pass `-std=c++23` itself.
 
+Adding the engine with `FetchContent` needs CMake 4.0 or later in your project too, because the engine's own
+`CMakeLists.txt` asks for it. The installed package below asks for 3.20, which `cxx_std_23` needs, and no more.
+
 The engine depends on [spdlog](https://github.com/gabime/spdlog) and
 [nlohmann/json](https://github.com/nlohmann/json). It fetches them itself unless your project
 already provides `spdlog::spdlog` and `nlohmann_json::nlohmann_json`. Its tests and examples build
@@ -226,13 +229,12 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 
 ## Building and testing
 
-Requires a C++23 compiler and CMake 3.20 or later. CI builds and tests on Linux (GCC) and macOS
+Requires a C++23 compiler and CMake 4.0 or later. CI builds and tests on Linux (GCC) and macOS
 (Apple Clang).
 
 A build tree belongs to one OS and one architecture, so a checkout that is built natively on a Mac and
-in a Linux container needs a tree for each. The trees are named `build/<kind>-<os>-<arch>`, and
-`CMakePresets.json` spells out the nine in use. They need CMake 3.21 or later, and `cmake --list-presets`
-shows the ones for your host:
+in a Linux container needs a tree for each. The trees are named `build/<kind>-<os>-<arch>`.
+`CMakePresets.json` spells out the nine in use, and `cmake --list-presets` shows the ones for your host:
 
 ```bash
 cmake --preset relwithdebinfo-macos-arm64        # relwithdebinfo-linux-arm64 or -linux-x86_64 on Linux

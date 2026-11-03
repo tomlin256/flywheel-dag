@@ -26,6 +26,11 @@
 # test preset that finds no tests, which ctest otherwise reports as success. No
 # preset sets a warning flag (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is the caller's).
 #
+# The file's cmakeMinimumRequired is 3.21, the CMake that can read a version 3 file,
+# and not the project's floor, which is CMake 4.0 (test_cmake_floor). Raised to the
+# floor it would make CMake 3 stop on `cmake --preset` with "major version 4 must be
+# less than 3" before CMakeLists.txt could say "CMake 4.0 or higher is required".
+#
 # A new kind is a deliberate edit to the table of kinds below as well as to the
 # file. The rules:
 #
@@ -42,7 +47,7 @@
 #   R7  cmake --list-presets=all lists, for the configure, build and test presets,
 #       exactly the presets for HOST_SYSTEM_NAME's OS: CMake agrees with R3
 
-cmake_minimum_required(VERSION 3.21)   # string(JSON) 3.19, --list-presets=all 3.20
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS SOURCE_DIR HOST_SYSTEM_NAME)
     if(NOT ${var})

@@ -17,7 +17,7 @@
 # added later is covered, and finding none is an error, so a wrong path cannot pass
 # by checking nothing.
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS CXX INCLUDE_DIR WORK_DIR)
     if(NOT ${var})
