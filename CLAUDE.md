@@ -46,7 +46,7 @@ ctest --preset relwithdebinfo-macos-arm64
   - Fix a warning, never silence it. The one exception is a confirmed compiler
     false positive: silence it at that one site, for that one compiler, with a
     comment naming the bug (the counting `operator delete` in
-    `test_value_slot.cpp`).
+    `benchmarks/bench_hot_path.cpp`).
   - Hold an evaluated `ValuePtr` in a local before binding a reference into it:
     `const ValuePtr v = node->eval(ctx); const T& x = get_value<T>(v);`. GCC's
     `-Wdangling-reference` rejects a reference into the temporary.
@@ -185,6 +185,12 @@ across restarts (no timestamps or addresses).
   `Engine::step()` and bounded cycle counts, never sleeps or wall-clock timeouts.
   `tests/test_nodes.hpp` has always-dirty stand-ins for an application's
   clock-driven node (`AlwaysFiring`, `Tripwire`).
+- A test that counts allocations links `tests/allocation_counter.cpp` and calls
+  `allocation_counter::allocations_during()`; it never defines a global
+  `operator new` or `operator delete` of its own. A sanitizer supplies its own
+  for every form a program leaves out, and the suite then aborts under
+  AddressSanitizer (flywheel-dag#47). `benchmarks/bench_hot_path.cpp` keeps a
+  counter of its own (flywheel-dag#52).
 - A non-trivial change gets a GitHub issue and a plan in `docs/plans/`, linked
   both ways.
 - Cite issues as `flywheel-dag#N` or by full URL in code and docs, never a bare

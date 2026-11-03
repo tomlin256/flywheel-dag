@@ -19,42 +19,15 @@
 //      equality check and the engine's pointer-identity change detection both
 //      rely on.
 //
-// The allocation counter must be defined before the flywheel headers.
+// Allocations are counted by allocation_counter.cpp, which this suite links.
 
-#include <atomic>
-#include <cstdlib>
 #include <deque>
-#include <new>
 #include <string>
 #include <vector>
 
-namespace {
-std::atomic<long> g_allocs{0};
-bool              g_counting = false;
-}  // namespace
-
-void* operator new(std::size_t n) {
-    if (g_counting) g_allocs.fetch_add(1, std::memory_order_relaxed);
-    void* p = std::malloc(n);
-    if (!p) throw std::bad_alloc();
-    return p;
-}
-// GCC bug 103993 (https://gcc.gnu.org/PR103993): inlined into a caller, these
-// show GCC free() given memory from operator new, and -Wmismatched-new-delete
-// fires. It does not look through the replacement above to its malloc(). The
-// pairing is correct, so the warning is off here, for GCC (11 on) only.
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
-#endif
-void operator delete(void* p) noexcept              { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic pop
-#endif
-
 #include <gtest/gtest.h>
 
+#include "allocation_counter.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_async.hpp"
 #include "flywheel/dag_engine.hpp"
@@ -62,21 +35,7 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 #include "flywheel/dag_timeseries.hpp"
 
 using namespace dag;
-
-namespace {
-
-/// Counts allocations across fn(), which must not itself allocate for reasons
-/// unrelated to the graph (no string building, no EXPECT inside).
-template <typename Fn>
-long allocationsDuring(Fn&& fn) {
-    g_allocs   = 0;
-    g_counting = true;
-    fn();
-    g_counting = false;
-    return g_allocs.load();
-}
-
-}  // namespace
+using allocation_counter::allocations_during;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Steady state allocates nothing.
@@ -107,7 +66,7 @@ TEST(ValueSlot, SteadyStateEvalAllocatesNothing) {
         engine.step();
     }
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 500; ++i) {
             src->post(1.0 + (i % 17) * 0.5);
             engine.step();
@@ -144,7 +103,7 @@ TEST(ValueSlot, WindowedNodesAllocateNothingInSteadyState) {
         engine.step();
     }
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 2000; ++i) {   // long enough to cross deque blocks
             src->post(1.0 + (i % 17) * 0.5);
             engine.step();
@@ -172,7 +131,7 @@ TEST(ValueSlot, InputSetStillAllocatesByDesign) {
     engine.addOutput<double>(square, [&](const double& v) { sink += v; });
     for (int i = 0; i < 20; ++i) { in->set(i); engine.step(); }
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) { in->set(100 + i); engine.step(); }
     });
 
@@ -490,7 +449,7 @@ TEST(ValueSlot, EmitFromLvalueReusesBufferCapacity) {
     held = slot.emit(v);
     held = slot.emit(v);
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) held = slot.emit(v);
     });
 
@@ -573,7 +532,7 @@ TEST(ValueSlot, AsyncInputPostAndFlushAllocateNothingInSteadyState) {
         inp->flush();
     }
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) {
             inp->post((i % 2) ? a : b);
             inp->flush();
@@ -637,7 +596,7 @@ TEST(ValueSlot, InPlaceComputeNodeSteadyStateAllocatesNothing) {
     };
     for (int i = 0; i < 20; ++i) drive(i);          // warm scratch_ and both buffers
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) drive(i);
     });
     EXPECT_EQ(allocs, 0);
@@ -679,7 +638,7 @@ TEST(ValueSlot, ComputeNodeAllocatesOncePerHeapMemberPerEval) {
     };
     for (int i = 0; i < 20; ++i) drive(i);
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) drive(i);
     });
     EXPECT_EQ(allocs, 100);   // 100 evals, one vector each
@@ -698,7 +657,7 @@ TEST(ValueSlot, IdleAsyncQueuesAllocateNothing) {
 
     for (int i = 0; i < 8; ++i) engine.step();   // warm
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) engine.step();
     });
 
@@ -721,7 +680,7 @@ TEST(ValueSlot, QueueArrivalAllocatesOnlyItsBatch) {
 
     for (int i = 0; i < 8; ++i) { q->post(1.0); q->flush(); }   // warm both deques
 
-    const long allocs = allocationsDuring([&] {
+    const long allocs = allocations_during([&] {
         for (int i = 0; i < 100; ++i) { q->post(1.0); q->flush(); }
     });
 

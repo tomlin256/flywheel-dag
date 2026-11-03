@@ -10,39 +10,11 @@
 // DifferentiableNode<N>: a compute node whose functor a tape can differentiate,
 // through dual numbers.
 //
-// The allocation counter must be defined before the flywheel headers.
-
-#include <atomic>
-#include <cstdlib>
-#include <new>
-
-namespace {
-std::atomic<long> g_allocs{0};
-bool              g_counting = false;
-}  // namespace
-
-void* operator new(std::size_t n) {
-    if (g_counting) g_allocs.fetch_add(1, std::memory_order_relaxed);
-    void* p = std::malloc(n);
-    if (!p) throw std::bad_alloc();
-    return p;
-}
-// GCC bug 103993 (https://gcc.gnu.org/PR103993): inlined into a caller, these
-// show GCC free() given memory from operator new, and -Wmismatched-new-delete
-// fires. It does not look through the replacement above to its malloc(). The
-// pairing is correct, so the warning is off here, for GCC (11 on) only.
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
-#endif
-void operator delete(void* p) noexcept              { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic pop
-#endif
+// Allocations are counted by allocation_counter.cpp, which this suite links.
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
+#include "allocation_counter.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
 #include "flywheel/dag_ops.hpp"
@@ -53,19 +25,9 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 using namespace dag;
 using aad_test::expectClose;
+using allocation_counter::allocations_during;
 
 namespace {
-
-/// Counts allocations across fn(), which must not itself allocate for reasons
-/// unrelated to the graph (no string building, no EXPECT inside).
-template <typename Fn>
-long allocationsDuring(Fn&& fn) {
-    g_allocs   = 0;
-    g_counting = true;
-    fn();
-    g_counting = false;
-    return g_allocs.load();
-}
 
 // M_PI is POSIX, not standard C++.
 const double kPi = std::acos(-1.0);
@@ -217,7 +179,7 @@ TEST(AadNode, SteadyStateAllocatesNothing) {
     long allocs = 0;
     for (int i = 0; i < 100; ++i) {
         x->set(1.0 + 0.25 * i);   // Input::set allocates, by design, so it is not counted
-        allocs += allocationsDuring([&] { f->eval(ctx); });
+        allocs += allocations_during([&] { f->eval(ctx); });
     }
     EXPECT_EQ(allocs, 0);
 }

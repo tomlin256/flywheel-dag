@@ -35,7 +35,9 @@ set(FLYWHEEL_DAG_TESTS
 # operator new and operator delete (allocation_counter.hpp), and a replacement
 # is the whole program's, so it is linked into these and no other.
 set(FLYWHEEL_DAG_COUNTING_TESTS
+  test_aad_node
   test_allocation_counter
+  test_value_slot
 )
 
 foreach(test IN LISTS FLYWHEEL_DAG_TESTS)
