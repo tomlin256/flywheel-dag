@@ -1,7 +1,8 @@
 # Run clang-tidy in CI, at LLVM 23 on the Mac, in Ubuntu and in CI
 
-**Status: Proposed (2026-11-03).** Expanded the same day, from a Linux-only gate on the distro's tool to one LLVM
-major, 23, in all three places (D1, D2 and D7 to D9).
+**Status: Approved (2026-11-03), in progress.** Expanded the same day, from a Linux-only gate on the distro's tool to
+one LLVM major, 23, in all three places (D1, D2 and D7 to D9). Approved as written: D1 to D9 stood, with leave to
+install LLVM on the Mac and link it (Step 2).
 
 Closes [flywheel-dag#60](https://github.com/tomlin256/flywheel-dag/issues/60), and
 [flywheel-dag#40](https://github.com/tomlin256/flywheel-dag/issues/40), which is one of its findings.
@@ -191,9 +192,10 @@ them, so the per-file tests go green only when Step 8 is done.
 
 ### Step 0 — Approval
 
-The plan is committed as Proposed and linked from flywheel-dag#60; the next commit expands it to LLVM 23 everywhere.
-**Done when:** `git status` is clean on that commit and the issue carries the path. Commits: `docs: add plan for running
-clang-tidy in CI`, then `docs: expand the plan to LLVM 23 on the Mac, in Ubuntu and in CI`.
+The plan was committed as Proposed and linked from flywheel-dag#60; the next commit expanded it to LLVM 23 everywhere,
+and a third records the approval. **Done when:** `git status` is clean on that commit and the issue carries the path.
+Commits: `docs: add plan for running clang-tidy in CI`, `docs: expand the plan to LLVM 23 on the Mac, in Ubuntu and in
+CI`, then `docs: record the approval`.
 
 ### Step 1 — Start from green
 
@@ -395,7 +397,7 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 Approval | Proposed | |
+| 0 Approval | Done | Proposed, expanded to LLVM 23, then approved as written (D1 to D9) with leave to install LLVM on the Mac. |
 | 1 Start from green | | |
 | 2 LLVM 23 on the Mac | | |
 | 3 LLVM 23 in the `ubuntu-dev` image | | |
