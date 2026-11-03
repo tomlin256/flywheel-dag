@@ -43,6 +43,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <future>
 #include <limits>
@@ -1657,7 +1658,7 @@ TEST(EngineCycleStats, MeanReadWhileAnotherThreadStepsIsTheMeanOfSomePrefixOfThe
     std::vector<double> prefixMean{0.0};   // none ended
     uint64_t totalNs = 0;
     for (std::size_t k = 0; k < duration.size(); ++k) {
-        totalNs += static_cast<uint64_t>(duration[k] * 1'000.0 + 0.5);   // whole nanoseconds
+        totalNs += static_cast<uint64_t>(std::llround(duration[k] * 1'000.0));   // whole nanoseconds
         prefixMean.push_back(static_cast<double>(totalNs) / static_cast<double>(k + 1) / 1'000.0);
     }
     EXPECT_NEAR(sample.back(), prefixMean.back(), 1e-9);
