@@ -1,7 +1,8 @@
 # The Stateful-Node Walk Must Run Once per Registration, Not Once per Call
 
-**Status: Proposed (2026-11-03).** Nothing is implemented. "Decisions to confirm" holds my defaults; edit any of
-them before approving.
+**Status: Approved as written (2026-11-03), in progress.** D1 to D5 stood: the cache holds the walk and the
+`persistState()` test runs on every call, behind a mutex; `addOutput()` alone resets it; the tests land in two
+green commits; and v0.3.2 is released at the end. The Progress table below records where the work is.
 
 Closes [flywheel-dag#29](https://github.com/tomlin256/flywheel-dag/issues/29).
 
@@ -275,7 +276,7 @@ Commits: `build: release v0.3.2` and `docs: mark the plan done`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | |
+| 0 — Approval | Done | Approved as written on 2026-11-03. |
 | 1 — Start from green | Not started | |
 | 2 — Tests that pin | Not started | |
 | 3 — The cache | Not started | |
