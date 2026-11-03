@@ -14,9 +14,10 @@
 #   find_package(flywheel_dag 0.3 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
-# 3.18 is a plain minimum, not a <min>...<max> range: a range flips every policy
-# up to <max> to NEW, which needs its own audit.
-cmake_minimum_required(VERSION 3.18)
+# 3.20 is the first CMake with the cxx_std_23 compile feature that flywheel::dag
+# asks for below. It is a plain minimum, not a <min>...<max> range: a range flips
+# every policy up to <max> to NEW, which needs its own audit.
+cmake_minimum_required(VERSION 3.20)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level or subproject.
@@ -85,7 +86,7 @@ if(_flywheel_dag_top_level)
         message(STATUS "flywheel-dag: CMAKE_BUILD_TYPE not set — defaulting to RelWithDebInfo")
     endif()
 
-    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD 23)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 endif()
@@ -147,7 +148,10 @@ target_include_directories(flywheel_dag INTERFACE
 target_link_libraries(flywheel_dag INTERFACE
     $<BUILD_INTERFACE:spdlog::spdlog>
     $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
-target_compile_features(flywheel_dag INTERFACE cxx_std_17)
+# C++23 is the engine's floor (flywheel-dag#56). This usage requirement raises a
+# consumer's target to it, whether the consumer adds the engine as a subproject or
+# finds the installed package. A standard the consumer sets higher is left alone.
+target_compile_features(flywheel_dag INTERFACE cxx_std_23)
 set_target_properties(flywheel_dag PROPERTIES EXPORT_NAME dag)
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
 #
 # With -DCONSUMER_FETCHES_DEPENDENCIES=ON, a package consumer first fetches
 # spdlog and nlohmann/json itself (test_consumer_package_own_dependencies).
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 project(flywheel_dag_consumer LANGUAGES CXX)
 
 include(FetchContent)
@@ -77,7 +77,7 @@ if(NOT "${CMAKE_CXX_FLAGS}" STREQUAL "${cxx_flags_before}")
                       "'${cxx_flags_before}' to '${CMAKE_CXX_FLAGS}'")
 endif()
 
-# No CMAKE_CXX_STANDARD here on purpose: flywheel::dag's cxx_std_17 compile
+# No CMAKE_CXX_STANDARD here on purpose: flywheel::dag's cxx_std_23 compile
 # feature must be enough on its own.
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE flywheel::dag)

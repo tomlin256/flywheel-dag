@@ -317,8 +317,8 @@ Commits: `build: release v1.0.0` and `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-03: D1 to D5 stood. |
-| 1 — Start from green | Not started | |
-| 2 — Raise the standard | Not started | |
+| 1 — Start from green | Done | No commit. At C++17, `cce8729`: clean builds with CI's flags print no warning (the container prints its 22 `-Wpsabi` notes), ctest 41 of 41 on the Mac and in the container, both invariants match, the reference `cycle()` disassembly (190 lines) and the benchmark binary are saved. |
+| 2 — Raise the standard | Done | 41 of 41 on the Mac and in the container with CI's flags; the only warning is googletest's (Step 4); `cycle()` and the invariants are unchanged. The 3.19 clause of `test_warning_flags`' registration was dead under the new minimum and is gone. |
 | 3 — Refuse to compile below C++23 | Not started | |
 | 4 — googletest v1.18.0 | Not started | |
 | 5 — Words | Not started | |

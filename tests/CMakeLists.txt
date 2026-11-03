@@ -158,10 +158,9 @@ endif()
 # flags (the top level, GCC or Clang), never from anything the code that sets
 # them decides: a slip there must fail this test, not unregister it. The check
 # reads compile_commands.json, which only the Makefile and Ninja generators
-# write, using string(JSON), which needs CMake 3.19.
+# write.
 if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
-   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja")
-   AND NOT CMAKE_VERSION VERSION_LESS 3.19)
+   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja"))
   add_test(NAME test_warning_flags
     COMMAND ${CMAKE_COMMAND}
       -DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
