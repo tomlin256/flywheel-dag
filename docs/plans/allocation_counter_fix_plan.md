@@ -1,8 +1,9 @@
 # The Allocation Counter Must Replace Every Allocation Function
 
-**Status: Approved (2026-11-03).** The plan was approved as written: D1 to D5 stood, so the counter replaces
+**Status: Done (2026-11-03).** The plan was approved as written: D1 to D5 stood, so the counter replaces
 all twenty functions, lives in `tests/` as a `.hpp` and a `.cpp`, includes the aligned forms, leaves
-`bench_hot_path.cpp` alone, and there is no release. The Progress table at the end tracks the steps.
+`bench_hot_path.cpp` alone, and there is no release. The Outcome section at the end records what the steps
+found and where they differ from this text.
 
 Closes [flywheel-dag#47](https://github.com/tomlin256/flywheel-dag/issues/47).
 
@@ -321,7 +322,82 @@ Commit: `docs: mark the plan done`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved as written on 2026-11-03. flywheel-dag#52 opened for D4. |
-| 1 — Start from green | Not started | |
-| 2 — The counter, with its tests | Not started | |
-| 3 — The two suites count through it | Not started | |
-| 4 — Close | Not started | |
+| 1 — Start from green | Done | 40 of 40 on the Mac and in the container, no warning; the AddressSanitizer tree passed 38 of 40. |
+| 2 — The counter, with its tests | Done | `b565f30`. The nine hand-made changes fail as stated; 41 of 41 on both; CI is green on both legs. |
+| 3 — The two suites count through it | Done | `7478e67`. The AddressSanitizer tree passes 41 of 41 with default options; the `ValueSlot` change fails the same 7 and 1 tests; CI is green on both legs. |
+| 4 — Close | Done | The plan is marked done, flywheel-dag#47 is closed, and flywheel-dag#45 is told. |
+
+## Outcome
+
+| Commit | Step | What |
+|---|---|---|
+| `1c09450` | 0 | the plan, proposed |
+| `1af86d7` | 0 | the approval |
+| `b565f30` | 2 | the counter and its tests |
+| `7478e67` | 3 | the two suites count through it, and `CLAUDE.md` |
+
+**Step 1.** Green on both platforms: the Mac (Apple Clang 21) and the container (GCC 13.3) printed no warning
+with `-Werror=dev -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and passed 40 of 40. The
+AddressSanitizer baseline was the one measured before the plan: 38 of 40, the two failures being
+`test_aad_node` and `test_value_slot`.
+
+**Step 2.** Four files: `tests/allocation_counter.hpp`, `tests/allocation_counter.cpp`,
+`tests/test_allocation_counter.cpp` and `tests/CMakeLists.txt`. Mac and container: no warning, 41 of 41,
+`test_warning_flags` included. The container's AddressSanitizer tree did not know the new test until it was
+reconfigured (`cmake -S . -B build/asan-linux-arm64`); `test_allocation_counter` then exits 0 with default
+options.
+
+**The hand-made changes**, each a scratch copy of the committed files, compiled by hand with
+`-Wall -Wextra -Wpedantic -Werror` and run alone under a 20 s alarm (the first nine on the Mac, the
+AddressSanitizer results in the container). The copy with no change passed.
+
+| Change | Result |
+|---|---|
+| The nothrow `operator new` left out | `EveryReplaceableFunctionIsTheCounters` fails. Under GCC AddressSanitizer in the container `test_allocation_counter` aborts with flywheel-dag#47's `alloc-dealloc-mismatch`, and so do `test_value_slot` and `test_aad_node` once they link the counter (Step 3) |
+| The sized `operator delete(void*, size_t)` left out | `EveryReplaceableFunctionIsTheCounters` fails |
+| `operator new[](size_t, align_val_t, nothrow_t)` left out | `EveryReplaceableFunctionIsTheCounters` fails |
+| `operator new[]` counts twice | `EachAllocatingFormCountsOnce` and `NewExpressionsAreCounted` fail |
+| A release counts | `NoReleaseCounts` and `NewExpressionsAreCounted` fail |
+| The aligned forms ignore their alignment | `AlignedFormsReturnAlignedMemory` fails |
+| `stop()` keeps counting | `CountsOnlyBetweenStartAndStop` fails |
+| `start()` does not zero the count | `CountsOnlyBetweenStartAndStop`, `EachAllocatingFormCountsOnce`, `NoReleaseCounts` and `NewExpressionsAreCounted` fail |
+| `operator delete(void*)` does not free | passes in a plain build; LeakSanitizer in the container reports 38,355 bytes in 135 allocations |
+| `ValueSlot` never recycles (a scratch copy of `include/`, Step 3) | `test_value_slot` fails 7 tests and `test_aad_node` 1, the sets the unchanged suites failed before the move; the unchanged tree passes |
+
+**Step 3.** `CLAUDE.md`, `tests/CMakeLists.txt`, `tests/test_aad_node.cpp` and `tests/test_value_slot.cpp`. Mac
+and container: no warning, 41 of 41. In the container's AddressSanitizer tree `ctest` passes **41 of 41 with
+default options** (38 of 40 before), and its verbose log has no sanitizer report and no
+UndefinedBehaviorSanitizer `runtime error`. The prototype's other rows were re-run from the committed files and
+pass: Apple Clang 21 with AddressSanitizer and UndefinedBehaviorSanitizer (7, 21 and 7 tests), and GCC 13.3
+with ThreadSanitizer (the same, no report).
+
+**CI.** [Run 41597789643](https://github.com/tomlin256/flywheel-dag/actions/runs/41597789643) on `b565f30` and
+[run 41598545834](https://github.com/tomlin256/flywheel-dag/actions/runs/41598545834) on `7478e67` are green on
+both legs, GCC 15.2.0 on ubuntu-latest and Apple Clang 21.0.0 on macOS: Configure, Build (warnings as errors),
+Test (41 of 41) and the Benchmark step, which diffs `--invariants`, passed. The logs of the second run have no
+`warning:` and no `error:` line.
+
+**Where the work differs from the plan.**
+
+- The count and the record of which function ran live in one helper, `note_allocation()`, which `take()` and
+  `take_aligned()` both call. The plan's excerpt had them inline in `take()`.
+- `Function` has the underlying type `std::uint8_t`, because clangd's `performance-enum-size` hint asked for
+  it, so the header includes `<cstdint>`.
+- `allocation_counter.cpp` includes `<stdlib.h>` as well as `<cstdlib>`: `posix_memalign()` is POSIX, and
+  `<cstdlib>` need not declare it.
+- LeakSanitizer reports 38,355 bytes in 135 allocations for the leaking `operator delete`, not the
+  prototype's 38,377 in 135: the committed file differs from the prototype by the helper.
+- The `CLAUDE.md` line ends with a sentence pointing at flywheel-dag#52, which the plan's text did not have.
+- Step 3 also re-ran the Apple Clang AddressSanitizer and GCC ThreadSanitizer rows of the prototype's table
+  from the committed files, which the steps did not require.
+
+**Found on the way.** [flywheel-dag#53](https://github.com/tomlin256/flywheel-dag/issues/53): clangd reports
+`<deque>` unused in `tests/test_value_slot.cpp`. It was unused before this change and is not part of it.
+
+**Left open.** [flywheel-dag#45](https://github.com/tomlin256/flywheel-dag/issues/45), the job: with this fix the
+container's AddressSanitizer run passes in full, 41 of 41, so nothing I know of stands between the suite and a
+green job there (the Mac's AddressSanitizer cannot check for leaks).
+[flywheel-dag#52](https://github.com/tomlin256/flywheel-dag/issues/52), the benchmark's own counter.
+[flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49), the fences ThreadSanitizer cannot see.
+[flywheel-dag#53](https://github.com/tomlin256/flywheel-dag/issues/53) and
+[flywheel-dag#51](https://github.com/tomlin256/flywheel-dag/issues/51), two unused includes.
