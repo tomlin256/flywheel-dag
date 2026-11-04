@@ -1,6 +1,7 @@
 # Run `dot` Without a Shell in `GraphExporter::toSvg`
 
-**Status: Approved (2026-11-04).** Approved as written, D3 included: off POSIX, `toSvg()` is not declared.
+**Status: Done (2026-11-04).** Approved as written, D3 included: `toSvg()` spawns `dot` with `posix_spawnp`,
+and off POSIX it is not declared. Only `dag_graph.hpp` changed; the engine did not.
 
 Closes [flywheel-dag#62](https://github.com/tomlin256/flywheel-dag/issues/62).
 
@@ -143,6 +144,54 @@ Commit: `fix: run dot without a shell in GraphExporter::toSvg`.
 
 Status Done, the Outcome, and the issue closed once the run of Step 2's push is green. A docs commit; later runs
 of docs commits are not waited for. The release is not part of this plan.
+
+## Outcome
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `dd9a4ff`; the approval is recorded in `5755c58`, and the step list loses the scope of its commit subjects in `a4088b3` |
+| 2 — The change and its tests | Done | `84c7015` |
+| 3 — Close out | Done | the commit that adds this section |
+
+Every item of Step 2's "done when" held, on the files as committed:
+
+- The build prints no warning, and `ctest` passes 46 of 46 on the Mac (the nine tests are in `test_dag_graph`).
+- The hand-made changes, run test by test under a watchdog on scratch copies of `include/`, with a control copy
+  that has no change (nothing fails in it). Each fails the tests the plan names, and M4 fails one more:
+
+  | Change | Fails |
+  |---|---|
+  | M1 | `PassesAnyNameAsOneArgument`, `PassesAnyDirectoryNameAsOneArgument`, `HandsDotAPathThatStartsWithADashAsAPath` |
+  | M2 | `HandsDotAPathThatStartsWithADashAsAPath` |
+  | M3 | `KeepsTheDotFileWhenDotFails` |
+  | M4 | `KeepsTheDotFileWhenDotFails`, `KeepsTheDotFileWhenThereIsNoDot`, `ReturnsFalseWhenTheExitStatusCannotBeRead` |
+  | M5 | `RunsDotWithThePathsAsArguments`, `PassesAnyNameAsOneArgument`, `PassesAnyDirectoryNameAsOneArgument`, `HandsDotAPathThatStartsWithADashAsAPath` |
+  | M6 | `HandsDotTheCallersEnvironment` |
+  | M7 | `RunsNothingWhenTheDirectoryIsMissing` |
+  | M8 | `ReturnsFalseWhenTheExitStatusCannotBeRead` |
+
+- The `clang_tidy_` tests pass 40 of 40 on the Mac (clang-tidy 23.1.4) and in `ubuntu-dev` (23.1.5), and neither
+  `dag_graph.hpp` nor the test file has a `NOLINT`.
+- In `ubuntu-dev` (GCC 13.3.0, glibc) the Linux tree builds without a warning and `ctest` passes 46 of 46.
+- In a throwaway `ubuntu:26.04` (GCC 15.2.0, CMake 4.2.3) with CI's flags, `test_dag_graph` builds without a
+  warning and passes, the nine new tests included.
+- CI run 41836650421 on `84c7015` is green: `build` and `clang-tidy`, each on macOS and on Ubuntu (x86_64).
+
+Where the work differs from the plan:
+
+- M4 fails `ReturnsFalseWhenTheExitStatusCannotBeRead` as well as the two tests the plan named. That test asserts
+  the `.dot` file is kept, so a `toSvg()` that removes it on failure breaks it too. The extra failure pins the
+  property it claims to.
+- The first Linux build was not a pass. At `--parallel 8` `cc1plus` was killed for memory on two suites (the
+  known limit of `ubuntu-dev`), and the tree's Makefile still named the CMake that the container's recreation
+  removed, so `ctest` ran the earlier binaries of those two suites. The Linux result above is from the tree
+  reconfigured with its preset and built at `--parallel 4`, after which every binary `ctest` runs had been linked
+  after the header changed (`bench_hot_path` is outside the default build, and older).
+- The leak audit's dry run found two bare issue numbers in this plan's step list: the commit subjects were spelled
+  with their scope. They are listed without it, as earlier plans list theirs.
+
+Left open: [flywheel-dag#63](https://github.com/tomlin256/flywheel-dag/issues/63). The release notes owe two
+lines: `toSvg()` is not declared where `<spawn.h>` is absent (D3), and the shell no longer expands `outPath`.
 
 ## Self-review — risks and assumptions
 
