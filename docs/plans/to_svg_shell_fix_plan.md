@@ -86,7 +86,7 @@ row for `dag_graph.hpp` change with it.
 
 ### Step 1 — The plan
 
-Commit: `docs(#62): add plan for running dot without a shell in toSvg`. **Tests: none.** **Done when:** the plan
+Commit: `docs: add plan for running dot without a shell in toSvg`. **Tests: none.** **Done when:** the plan
 is committed and a comment on the issue gives its path.
 
 ### Step 2 — The change and its tests
@@ -137,7 +137,7 @@ below, which is the unchanged code. **Done when:**
   the Linux tree's flags under GCC 15.2.0 (a throwaway `ubuntu:26.04`, CI's compiler);
 - CI is green on both legs after the push.
 
-Commit: `fix(#62): run dot without a shell in GraphExporter::toSvg`.
+Commit: `fix: run dot without a shell in GraphExporter::toSvg`.
 
 ### Step 3 — Close out
 
