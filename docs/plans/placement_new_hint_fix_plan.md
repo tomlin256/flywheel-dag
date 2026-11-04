@@ -1,6 +1,6 @@
 # Build the Wake-Hook Test's Engine Without Placement New
 
-**Status: Proposed.** Awaiting approval.
+**Status: Approved (2026-11-04), in progress.** The plan was approved as written.
 
 Closes [flywheel-dag#61](https://github.com/tomlin256/flywheel-dag/issues/61).
 
