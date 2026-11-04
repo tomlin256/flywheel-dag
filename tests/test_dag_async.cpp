@@ -1349,6 +1349,24 @@ TEST(RollingCycleWindow, ZeroWindowThrows) {
     EXPECT_THROW(RollingCycleWindow{0}, std::invalid_argument);
 }
 
+// Engine::cycle() calls record() from a destructor, where a throw would terminate, and the NOLINT over that
+// destructor says record() cannot throw: it evicts only when the window is full, so the buffer is not empty, and the
+// buffer holds a slot more than the window, so the push that follows never finds it full. RingBuffer throws on an
+// empty and on a full buffer; this records well past a full window, for the smallest windows and a larger one, and
+// reads the mean of the window it ends with.
+TEST(RollingCycleWindow, RecordNeverThrowsHoweverManyAreRecorded) {
+    for (const std::size_t window : {std::size_t{1}, std::size_t{2}, std::size_t{5}}) {
+        RollingCycleWindow w(window);
+        const std::size_t n = 3 * window + 2;
+        for (std::size_t i = 1; i <= n; ++i) {
+            EXPECT_NO_THROW(w.record(static_cast<uint64_t>(i) * 1000)) << "window " << window << ", sample " << i;
+        }
+        // The last `window` samples are n - window + 1 to n microseconds, a mean of (2n - window + 1) / 2.
+        EXPECT_DOUBLE_EQ(w.meanUs(), (2.0 * static_cast<double>(n) - static_cast<double>(window) + 1.0) / 2.0)
+            << "window " << window;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine cycle stats
 // ─────────────────────────────────────────────────────────────────────────────

@@ -316,11 +316,11 @@ paths (label `bug`), named in the comment and reported to you.
 
 | Test | Asserts |
 |---|---|
-| `RollingCycleWindow.RecordNeverThrows…` (new, `test_dag_async`) | `record()` called 3 × window times does not throw, for windows 1, 2 and 5 |
+| `RollingCycleWindow.RecordNeverThrowsHoweverManyAreRecorded` (new, `test_dag_async`) | `record()` called 3 × window + 2 times does not throw, for windows 1, 2 and 5, and the mean it ends with is that of the last `window` samples |
 | the 45 existing + the new one | pass |
 
 **Done when:** remaining 0 on both; all 35 per-file tests, `clang_tidy_version`, `clang_tidy_checks` and the canaries
-green on the Mac and on Ubuntu; M10 (`buf_(window)` in place of `window + 1`) fails the new test; the disassembly diff
+green on the Mac and on Ubuntu; M10 (`record()` without its eviction) fails the new test (and the existing eviction test); the disassembly diff
 is empty. Commit: `fix: name the two findings clang-tidy cannot be satisfied on, and say why`.
 
 ### Step 9 — The CI job (D1, D9)
@@ -367,7 +367,7 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
   flywheel-dag#53, flywheel-dag#54) are clangd's, not a tidy check; `misc-include-cleaner` is its twin, and
   flywheel-dag#61 records a false positive.
 - **`tests/consumer/`**, which is a separate project built by a test and in no compile database.
-- **`toSvg`'s unquoted paths**, tracked by the issue Step 8 opens.
+- **`toSvg`'s unquoted paths**, tracked by flywheel-dag#62, which Step 8 opened.
 - **Updating VS Code's cpptools**, and the `ubuntu-dev` container's recreation (D8): yours.
 - **A release** (D6).
 
@@ -418,7 +418,7 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 | 5 Tests, examples and the benchmark | Done | `test: round the nanosecond conversion with std::llround` (flywheel-dag#40), then `fix: clear clang-tidy's findings in the tests, the examples and the benchmark`. The 24 diagnostics are gone: remaining 46 at 43 sites on the Mac (Homebrew 23.1.4) and on Ubuntu 26.04 (23.1.5), the same kinds and counts, and no error from the SDK or a dependency. Build clean with CI's flags, ctest 45 of 45, both examples exit 0, `bench_hot_path --invariants` matches the committed file. **Found:** the plan's `opt.value()` was wrong; the check reports it as it does `*opt` (probe file), so the optional sites use a check the analysis can see. |
 | 6 The engine's headers, mechanically | Done | `refactor: move or borrow the NodePtr parameters, narrow two enums, merge two cases`. The 41 diagnostics are gone: 30 `NodePtr` parameters are moved at their one copy, 7 parameters of 5 functions are `const` references, `NodeKind` and `Direction` are `std::uint8_t`, and `shapeFor` merges its labels. Remaining 5 at 5 sites on the Mac and on Ubuntu 26.04 (3 CRTP, `~TimeOnExit`, `std::system`). Mac: build clean with CI's flags, ctest 45 of 45. Ubuntu 26.04 (GCC 15.2) and the `ubuntu-dev` image (GCC 13.3): configure and build clean, ctest 45 of 45. The disassembly of `Engine::cycle()` is identical before and after (190 lines, addresses stripped), and `bench_hot_path --invariants` matches the committed file. |
 | 7 The CRTP constructors | Done | `fix: make the CRTP bases' constructors private to their derived class`. `test_crtp_access` was red on the unchanged headers, for the three misuse cases and nothing else (the control compiled), and is green after. M9a to M9c, each constructor back to `protected`, fail their own case and no other. Remaining 2 at 2 sites on the Mac and on Ubuntu (`~TimeOnExit`, `std::system`). Mac: build clean, ctest 46 of 46. Ubuntu 26.04 (GCC 15.2) and the `ubuntu-dev` image (GCC 13.3): configure and build clean, ctest 46 of 46. The disassembly of `Engine::cycle()` is identical to the pre-Step-6 binary, and the invariants match. |
-| 8 The two suppressions | | |
+| 8 The two suppressions | Done | `fix: name the two findings clang-tidy cannot be satisfied on, and say why`. `NOLINTNEXTLINE(bugprone-exception-escape)` on `~TimeOnExit`, with the invariant stated, and `NOLINT(cert-env33-c, bugprone-command-processor)` on the `std::system` call, with a comment that points at **flywheel-dag#62** (opened: `toSvg` builds a shell command from two unquoted paths; label `bug`). Remaining 0 on the Mac (Homebrew 23.1.4), on Ubuntu 26.04 (23.1.5) and in a container from the `ubuntu-dev` image (23.1.5): all 40 `clang_tidy_` tests pass on each. Mac: build clean, ctest 46 of 46; the disassembly of `Engine::cycle()` is identical to the pre-Step-6 binary and the invariants match. M10 (no eviction in `record()`) fails the new test. **M6** (a by-value `std::string` parameter in `dag.hpp`): of 35 units 30 include it, and exactly those 30 per-file tests failed; the 5 that do not (`allocation_counter`, `bench_report`, `test_allocation_counter`, `test_bench_report`, `test_ring_buffer`) passed. |
 | 9 The CI job | | |
 | 10 Push, and read CI | | |
 | 11 Docs, and the plan done | | |

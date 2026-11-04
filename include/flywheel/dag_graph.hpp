@@ -200,8 +200,10 @@ inline bool GraphExporter::toSvg(const std::vector<ConstNodePtr>& roots,
         f << dot;
     }
 
+    // The two paths go into the command line unquoted, so a space breaks it and a shell metacharacter runs. The call
+    // stays, and the finding is suppressed by both names of the check, until flywheel-dag#62 replaces the shell.
     const std::string cmd = "dot -Tsvg " + dotPath + " -o " + outPath;
-    const int rc = std::system(cmd.c_str());  // NOLINT(cert-env33-c)
+    const int rc = std::system(cmd.c_str());  // NOLINT(cert-env33-c, bugprone-command-processor)
     if (rc == 0) {
         std::remove(dotPath.c_str());
         return true;
