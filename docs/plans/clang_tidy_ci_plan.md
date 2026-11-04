@@ -218,9 +218,9 @@ No commit. `brew install llvm`, then the two links. **Done when:**
   first and `/usr/bin` after, and `c++ --version` is still Apple clang 21;
 - Homebrew's clang-tidy, run by hand on the unchanged tree with the `.clangd` checks and the SDK flag, reports the same
   83 diagnostics at 77 sites as VS Code's 23.1.0. If it differs, or needs more than the SDK flag: stop and report;
-- the editor agrees: in a new session a hint that only 23 gives, such as `bugprone-throwing-static-initialization` at
-  `tests/test_aad_dual.cpp:26`, appears, and Apple's 21.0.0 never showed it. That is your check; I cannot see the
-  plugin's process from here.
+- the editor agrees: the `clangd-lsp` plugin starts `clangd` from `PATH`, which is now Homebrew's. I cannot see the
+  plugin's process from here, so an LSP probe stands in (see the first bullet of the self-review): it speaks to
+  `/opt/homebrew/bin/clangd` as an editor does and reads what that server publishes.
 
 ### Step 3 — LLVM 23 in the `ubuntu-dev` image (D8)
 
@@ -373,10 +373,14 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 
 ## Self-review — risks and assumptions
 
-- **clangd reads `.clang-tidy`.** It documents that it does, and merges `.clangd`'s `Diagnostics.ClangTidy` on top.
-  I cannot show it from here: Apple's `clangd --check` prints no tidy finding even with `-log=verbose` (checked on
-  `test_ring_buffer.cpp`, which has one). The check is yours, with clangd 23 after Step 2: after Step 4 a hint you
-  see today (for example `test_ring_buffer.cpp:45`) must still appear, and after Step 5 it must go.
+- **clangd reads `.clang-tidy`.** Shown, after the plan assumed it: `clangd --check` prints no tidy finding with
+  either server, so a short script speaks LSP to clangd over stdio, as an editor does, opens a scratch file with one
+  defect per check family, and prints the diagnostics published. With `.clangd` carrying no tidy list, Apple's clangd
+  21.0.0 and Homebrew's 23.1.4 both report `performance-unnecessary-value-param`, `bugprone-incorrect-roundings`,
+  `performance-inefficient-vector-operation`, `cppcoreguidelines-pro-type-member-init` and `performance-enum-size`,
+  which only `.clang-tidy` enables. Neither reports `bugprone-unchecked-optional-access` or `bugprone-use-after-move`:
+  clangd's default filter leaves out the checks it knows to be slow, so the editor never showed them, and CI does.
+  23 adds one `performance-` check to the editor, `performance-use-std-move`; the project has no finding for it.
 - **Same major, not same build.** Homebrew's 23.1.4 is a tagged release and apt.llvm.org's 23.1.5 a snapshot of the
   release branch; `clang_tidy_version` holds the major only. Step 2 compares Homebrew's with VS Code's 23.1.0 on this
   code, and the Mac and the two Ubuntus already agree up to the 5 macOS sites.
@@ -412,7 +416,7 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 |---|---|---|
 | 0 Approval | Done | Proposed, expanded to LLVM 23, then approved as written (D1 to D9) with leave to install LLVM on the Mac. |
 | 1 Start from green | Done | No commit. Mac, CMake 4.4.5, CI's flags: no CMake or compiler warning, ctest 45 of 45. |
-| 2 LLVM 23 on the Mac | Done | No commit. `brew install llvm`: 23.1.4, 1.8 GB on disk with z3 and zstd. `clangd` and `clang-tidy` are linked into `/opt/homebrew/bin`; `which -a clangd` lists them before `/usr/bin/clangd`, and `c++` is still Apple clang 21. Homebrew's clang-tidy with the SDK flag alone reports the same 83 diagnostics at 77 sites as VS Code's 23.1.0. The editor check (a 23-only hint in a new session) is yours. |
+| 2 LLVM 23 on the Mac | Done | No commit. `brew install llvm`: 23.1.4, 1.8 GB on disk with z3 and zstd. `clangd` and `clang-tidy` are linked into `/opt/homebrew/bin`; `which -a clangd` lists them before `/usr/bin/clangd`, and `c++` is still Apple clang 21. Homebrew's clang-tidy with the SDK flag alone reports the same 83 diagnostics at 77 sites as VS Code's 23.1.0. The editor: a new session's `clangd-lsp` plugin starts Homebrew's clangd, since `/opt/homebrew/bin` comes first; an LSP probe of that binary shows it reads `.clang-tidy` (see the self-review). Your session's running clangd is still the Apple one, until it restarts. |
 | 3 LLVM 23 in the `ubuntu-dev` image | Done | In the image's repository: its issue is closed and its plan (005) is committed; `clang-tidy-23` 23.1.5 from apt.llvm.org, key fingerprint checked, in place of apt's 18; the suite is green twice (`test_image.sh` 53 assertions, `test_start_e2e.sh` 17, six of them new); the three hand-made changes failed as stated; commits pushed. A container from the new image reports the same 62 sites. The live `ubuntu-dev` keeps 18 until you recreate it. |
 | 4 The configuration and the gate, red | Done | `.clang-tidy`, `.clangd` trimmed, the two variables, 40 tests, the fixtures. Variable unset: configure and build clean, ctest 45 of 45, no `clang_tidy_` test. Set, on the Mac (Homebrew 23.1.4), on Ubuntu 26.04 (23.1.5) and in a container from the `ubuntu-dev` image: 9 pass (version, checks, three canaries, four files with no finding) and 31 fail on the findings. M1 to M5, M7 and M8 failed the cases stated; M1 also takes the other two canaries, and M5 turns the 31 green, which only the canaries notice. M6 waits for Step 8. **Found:** clang 23 against the macOS SDK's libc++ stops 21 units on nlohmann/json's `char_traits<unsigned char>` under the project's `-Werror=deprecated-declarations`; the tests pass `-Wno-error=deprecated-declarations` (see The change). |
 | 5 Tests, examples and the benchmark | Done | `test: round the nanosecond conversion with std::llround` (flywheel-dag#40), then `fix: clear clang-tidy's findings in the tests, the examples and the benchmark`. The 24 diagnostics are gone: remaining 46 at 43 sites on the Mac (Homebrew 23.1.4) and on Ubuntu 26.04 (23.1.5), the same kinds and counts, and no error from the SDK or a dependency. Build clean with CI's flags, ctest 45 of 45, both examples exit 0, `bench_hot_path --invariants` matches the committed file. **Found:** the plan's `opt.value()` was wrong; the check reports it as it does `*opt` (probe file), so the optional sites use a check the analysis can see. |
