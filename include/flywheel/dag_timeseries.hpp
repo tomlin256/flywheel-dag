@@ -59,6 +59,15 @@ class NodeImpl : public NodeBase, public std::enable_shared_from_this<Derived> {
 public:
     NodeKind kind() const override { return NodeKind::TimeSeries; }
 
+private:
+    // Private, so `class Wrong : public NodeImpl<Other>` does not compile
+    // (test_crtp_access). Derived is a friend, as the pattern asks, and so is
+    // StatefulNodeBase, the one class that derives this and constructs it.
+    NodeImpl() = default;
+    friend Derived;
+    template<typename D, typename Out, typename In, typename State>
+    friend class StatefulNodeBase;
+
 protected:
     /// Publish this evaluation's value: rebind cached_ and invalidate downstream
     /// if the policy says it changed, then endEval(). The no-argument
@@ -79,6 +88,9 @@ protected:
 //   Out  doCompute(const In& input, State& state)
 //   void doSaveState(INodeState& s, const State& state) const
 //   void doRestoreState(const INodeState& s, State& state)
+//
+// The constructor is private and Derived is its friend, so `class Wrong :
+// public StatefulNodeBase<Other, ...>` does not compile (test_crtp_access).
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Derived, typename Out, typename In, typename State>
 class StatefulNodeBase : public NodeImpl<Derived>, public IStatefulNode {
@@ -89,10 +101,12 @@ public:
     void saveState(INodeState& s)        const override;
     void restoreState(const INodeState& s)     override;
 
-protected:
+private:
     StatefulNodeBase(std::string name, NodePtr upstream,
                      EqualityPolicyPtr eq = nullptr);
+    friend Derived;
 
+protected:
     State   state_{};
     NodePtr upstream_;
     EqualityPolicyPtr eq_;

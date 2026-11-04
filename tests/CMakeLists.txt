@@ -193,6 +193,22 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_standard_guard.cmake)
 endif()
 
+# The CRTP bases (OpNodeImpl, NodeImpl, StatefulNodeBase) keep their constructors private to the class they are the
+# base of, so that `class Wrong : public OpNodeImpl<Other>` does not compile (flywheel-dag#60). The suite derives them
+# correctly, so nothing else would notice a constructor that went back to public or protected: this compiles a wrong
+# derivation of each, with -std=c++23 and -fsyntax-only, and expects an access error. Registered for GCC and Clang,
+# at the top level, like test_standard_guard.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_test(NAME test_crtp_access
+    COMMAND ${CMAKE_COMMAND}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DINCLUDE_DIR=${PROJECT_SOURCE_DIR}/include
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/crtp_access
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_crtp_access.cmake)
+endif()
+
 # CMakePresets.json names one build tree per kind and platform and says which of
 # them a host can use. The check reads the file with string(JSON) and asks CMake
 # to list the presets for this host. Registered at the top level, where the file

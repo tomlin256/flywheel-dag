@@ -73,7 +73,7 @@ class OpNodeImpl
 public:
     NodeKind kind() const override { return NodeKind::Compute; }
 
-protected:
+private:
     // ── Why every op node is Lazy, and why that is not a per-node question ────
     //
     // These nodes are STRUCTURALLY PURE. eval() computes Op{}(...) — the functor
@@ -81,8 +81,13 @@ protected:
     // one call to the next even if its author wanted it to. That is a property
     // of the arity templates, not of any one op, so the mode is fixed here
     // rather than offered at each make() where a caller could get it wrong.
+    //
+    // The constructor is private and Derived is its friend, so `class Wrong :
+    // public OpNodeImpl<Other>` does not compile (test_crtp_access).
     OpNodeImpl() noexcept : NodeBase(InvalidationMode::Lazy) {}
+    friend Derived;
 
+protected:
     /// Publish this evaluation's value: rebind cached_ and invalidate downstream
     /// if the policy says it changed, then endEval(). The no-argument
     /// NodeBase::notifyDownstream() it builds on stays reachable by that name.
