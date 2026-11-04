@@ -48,7 +48,6 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -2064,12 +2063,16 @@ namespace {
 // lock fails, with EINVAL, which the standard library throws as std::system_error. The fill goes
 // through a volatile pointer because a plain memset into a buffer nothing reads again is a dead
 // store the optimiser is free to delete.
+//
+// The Engine is made with std::construct_at and unmade with std::destroy_at, not with a placement
+// new-expression and a destructor call: clangd's Include Cleaner does not count a placement new as
+// a use of <new>, and hints that the include a placement new needs is unused (flywheel-dag#61).
 template <typename Wire>
 void wireThenDestroyTheEngine(Wire&& wire) {
     alignas(Engine) unsigned char storage[sizeof(Engine)];
-    Engine* engine = new (storage) Engine;
+    Engine* const engine = std::construct_at(reinterpret_cast<Engine*>(storage));
     wire(*engine);
-    engine->~Engine();
+    std::destroy_at(engine);
     volatile unsigned char* bytes = storage;
     for (std::size_t i = 0; i < sizeof storage; ++i) bytes[i] = 0xFF;
 }
