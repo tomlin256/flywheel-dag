@@ -1,7 +1,6 @@
 # Run `dot` Without a Shell in `GraphExporter::toSvg`
 
-**Status: Proposed (2026-11-04).** Awaiting approval. One decision is the maintainer's: D3, what `toSvg()` does
-off POSIX.
+**Status: Approved (2026-11-04).** Approved as written, D3 included: off POSIX, `toSvg()` is not declared.
 
 Closes [flywheel-dag#62](https://github.com/tomlin256/flywheel-dag/issues/62).
 
