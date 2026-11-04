@@ -71,3 +71,61 @@ jobs:
         ./build/${{ matrix.preset }}/bin/bench_hot_path
         ./build/${{ matrix.preset }}/bin/bench_hot_path --invariants > bench_invariants.txt
         diff -u benchmarks/expected_invariants.txt bench_invariants.txt
+
+  # clang-tidy over this project's own sources, at LLVM 23 on both runners (flywheel-dag#60). The tests are the
+  # clang_tidy_* ones that FLYWHEEL_DAG_CLANG_TIDY registers (tests/CMakeLists.txt): one per translation unit, and the
+  # ones that prove the gate bites. Nothing is built: clang-tidy reads compile_commands.json, so the job configures
+  # and tests. clang_tidy_version holds the major to the number beside the registration, and the install steps name
+  # it too, so moving to another major is one commit. The macOS leg is the only gate on what the macOS SDK adds, and
+  # it installs Homebrew's llvm, a bottle of about 460 MB.
+  clang-tidy:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: relwithdebinfo-linux-x86_64
+          - os: macos-latest
+            preset: relwithdebinfo-macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v6
+
+    # apt.llvm.org is the LLVM project's own apt repository, one per major and Ubuntu codename. Its signing key is
+    # checked against the fingerprint LLVM publishes before apt is told to trust it. If the repository has no
+    # source for a new codename, apt-get update fails here, and there is no fallback to another major.
+    - name: Install clang-tidy 23 (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        . /etc/os-release
+        curl -fsSL -o llvm.asc https://apt.llvm.org/llvm-snapshot.gpg.key
+        found=$(gpg --show-keys --with-colons llvm.asc | awk -F: '/^fpr/ { print $10; exit }')
+        test "$found" = 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 || { echo "apt.llvm.org's key is $found" >&2; exit 1; }
+        sudo install -D -m 0644 llvm.asc /etc/apt/keyrings/apt.llvm.org.asc
+        echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends clang-tidy-23
+        echo "CLANG_TIDY=clang-tidy-23" >> "$GITHUB_ENV"
+
+    # Homebrew's llvm is the latest major, keg-only. When it moves past 23, clang_tidy_version fails this leg on
+    # purpose, and the commit that moves the major moves this line with it.
+    - name: Install clang-tidy 23 (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install llvm
+        echo "CLANG_TIDY=$(brew --prefix llvm)/bin/clang-tidy" >> "$GITHUB_ENV"
+
+    - name: Tool versions
+      run: |
+        cmake --version | head -1
+        "$CLANG_TIDY" --version | head -1
+
+    - name: Configure
+      run: cmake --preset ${{ matrix.preset }} -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_CLANG_TIDY="$CLANG_TIDY"
+
+    # The test preset passes --output-on-failure, so a failing unit prints clang-tidy's findings, and
+    # noTestsAction: error fails a run that selects no test.
+    - name: clang-tidy
+      run: ctest --preset ${{ matrix.preset }} -R '^clang_tidy_' -j4
