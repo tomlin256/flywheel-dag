@@ -1,6 +1,8 @@
 # Build the Wake-Hook Test's Engine Without Placement New
 
-**Status: Approved (2026-11-04), in progress.** The plan was approved as written.
+**Status: Done (2026-11-04).** Approved as written. The helper builds its Engine with `std::construct_at`
+and `std::destroy_at`, `<new>` is no longer included, and clangd publishes no diagnostic for the file.
+Test code only: the engine did not change.
 
 Closes [flywheel-dag#61](https://github.com/tomlin256/flywheel-dag/issues/61).
 
@@ -102,15 +104,41 @@ Commit: `test: build the wake-hook test's Engine with construct_at, not placemen
 Status Done, the Outcome, and the issue closed once the push's run is green. A docs commit; no file the
 build reads changes.
 
+## Outcome
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `d93fcd6`; the approval is recorded in `a771d09` |
+| 2 — The change | Done | `48d9c83` |
+| 3 — Close out | Done | the commit that adds this section |
+
+Every item of Step 2's "done when" held, on the file as committed:
+
+- The build prints no warning, and `ctest` passes 46 of 46 on the Mac.
+- clangd 23.1.4 publishes 0 diagnostics for `tests/test_dag_async.cpp`, where it published 1.
+- clang-tidy, run as the `clang_tidy_` tests run it, reports nothing for the file.
+- The file compiles clean with `-O2 -Wall -Wextra -Wpedantic -Werror` under GCC 13.3.0 (`ubuntu-dev`) and
+  GCC 15.2.0 (a throwaway `ubuntu:26.04`).
+- The hand-made change, on a scratch copy of `include/`. With the copy unchanged all five `EngineWakeHook`
+  tests pass. With `makeWakeHook()` capturing `this`, the first four crash with `SIGSEGV` (exit 139) and
+  `APostStillWakesARunningEngine` passes. That held on Apple Clang 21 on the Mac and on GCC 13.3.0 with
+  glibc in `ubuntu-dev`.
+- CI run 41814776253 on `48d9c83` is green: `build` and `clang-tidy`, each on macOS and on Ubuntu.
+
+Where the work differs from the plan: the four tests crash under the hand-made change where the plan said
+they fail. The change is not v0.2.6's hook, which locked a dead mutex and threw `std::system_error`; it
+reads a pointer out of the bytes the helper filled, so it dies instead of throwing. Either way the tests
+are red on the bug, and green without it.
+
 ## Self-review — risks and assumptions
 
 - **The engine is not touched.** Only a test helper changes, so the benchmark's invariants and
   `Engine::cycle()` cannot move, and I do not run them.
 - **The tests could lose their teeth silently.** Nothing asserts the helper still constructs, destroys
-  and fills. The hand-made change is the check: its hook reads the Engine's `wake_` through `this`, which
-  is a live pointer if the Engine was never destroyed, and a freed `WakeState` that still reads fine if
-  its bytes were never overwritten. Lose either step and the four tests pass on the bug. The fill loop
-  itself is unchanged.
+  and fills. The hand-made change is the check: its hook reads the Engine's `wake_` through `this`, and
+  the four tests crash on that read because the helper left a pointer of all ones there. A pointer that
+  was still good would let them pass on the bug, so the crash is the evidence that the helper still
+  destroys the Engine and fills its bytes. The fill loop itself is unchanged.
 - **GCC reads the new code differently.** A cast pointer into a stack array, then a write after
   `destroy_at`, is the shape GCC's `-Wmaybe-uninitialized`, `-Wdangling-pointer` and `-Wuse-after-free`
   look at. The prototype is clean under 13.3 and 15.2, and the final file is compiled again.
