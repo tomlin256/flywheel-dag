@@ -150,7 +150,7 @@ public:
     /// Records the nodes the roots depend on at the values they hold now.
     /// Throws std::invalid_argument unless every root is non-null, clean and
     /// holds a double.
-    explicit Tape(std::vector<NodePtr> roots);
+    explicit Tape(const std::vector<NodePtr>& roots);
 
     /// Reverse sweep: ∂root/∂w for each w in wrt, in wrt's order, in one sweep
     /// however many there are. root must be one of the tape's roots.

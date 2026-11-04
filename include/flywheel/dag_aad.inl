@@ -20,7 +20,7 @@ namespace dag::aad {
 
 // Recording evaluates nothing, so checking each root as add() reaches it is
 // checking all of them at once.
-inline Tape::Tape(std::vector<NodePtr> roots) {
+inline Tape::Tape(const std::vector<NodePtr>& roots) {
     roots_.reserve(roots.size());
     for (const auto& root : roots) add(root);
 }

@@ -52,10 +52,10 @@ private:
 
     static std::string_view shapeFor(NodeKind k) {
         switch (k) {
-            case NodeKind::Input:      return "ellipse";
+            case NodeKind::Input:
             case NodeKind::AsyncInput: return "ellipse";
             case NodeKind::AsyncQueue: return "cylinder";
-            case NodeKind::Compute:    return "box";
+            case NodeKind::Compute:
             case NodeKind::TimeSeries: return "box";
         }
         return "box";

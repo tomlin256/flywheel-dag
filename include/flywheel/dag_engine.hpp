@@ -232,7 +232,7 @@ public:
     /// Call it between cycles, as addOutput(): an output that wire() registers
     /// fires on the next cycle, with the value its node holds then. Inside a cycle it throws
     /// std::runtime_error, before the module is kept or wired.
-    void install(std::shared_ptr<IComputeModule> module);
+    void install(const std::shared_ptr<IComputeModule>& module);
 
     // ── Source registration ───────────────────────────────────────────────────
 

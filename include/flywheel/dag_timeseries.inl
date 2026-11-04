@@ -98,7 +98,7 @@ std::shared_ptr<WindowNode<T>> WindowNode<T>::make(
     std::string name, NodePtr upstream, std::size_t capacity)
 {
     auto self = std::shared_ptr<WindowNode<T>>(
-        new WindowNode<T>(std::move(name), upstream, capacity));
+        new WindowNode<T>(std::move(name), std::move(upstream), capacity));
     wire(self, self->inputs());
     return self;
 }
@@ -106,7 +106,7 @@ std::shared_ptr<WindowNode<T>> WindowNode<T>::make(
 template<typename T>
 WindowNode<T>::WindowNode(std::string n, NodePtr up, std::size_t cap)
     : StatefulNodeBase<WindowNode<T>, std::deque<T>, T, WindowNodeState<T>>(
-        std::move(n), up, std::make_shared<AlwaysChangedPolicy>())
+        std::move(n), std::move(up), std::make_shared<AlwaysChangedPolicy>())
     , cap_(cap)
 {}
 
@@ -144,7 +144,7 @@ inline std::shared_ptr<RollingStats> RollingStats::make(
     EqualityPolicyPtr eq)
 {
     auto self = std::shared_ptr<RollingStats>(
-        new RollingStats(std::move(name), upstream, window, std::move(eq)));
+        new RollingStats(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
     return self;
 }
@@ -152,7 +152,7 @@ inline std::shared_ptr<RollingStats> RollingStats::make(
 inline RollingStats::RollingStats(std::string n, NodePtr up, std::size_t w,
                                    EqualityPolicyPtr eq)
     : StatefulNodeBase<RollingStats, double, double, RollingStatsState>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , window_(w)
 {
     // One spare slot above the window, so no push can ever hit a full buffer.
@@ -239,7 +239,7 @@ inline std::shared_ptr<RollingSumNode> RollingSumNode::make(
     EqualityPolicyPtr eq)
 {
     auto self = std::shared_ptr<RollingSumNode>(
-        new RollingSumNode(std::move(name), upstream, window, std::move(eq)));
+        new RollingSumNode(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
     return self;
 }
@@ -247,7 +247,7 @@ inline std::shared_ptr<RollingSumNode> RollingSumNode::make(
 inline RollingSumNode::RollingSumNode(std::string n, NodePtr up, std::size_t w,
                                        EqualityPolicyPtr eq)
     : StatefulNodeBase<RollingSumNode, double, double, RollingSumNodeState>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , window_(w)
 {
     state_.buf.setCapacity(w + 1);
@@ -302,14 +302,14 @@ inline std::shared_ptr<RollingMinMaxNode> RollingMinMaxNode::make(
     std::string name, NodePtr upstream, std::size_t window)
 {
     auto self = std::shared_ptr<RollingMinMaxNode>(
-        new RollingMinMaxNode(std::move(name), upstream, window));
+        new RollingMinMaxNode(std::move(name), std::move(upstream), window));
     wire(self, self->inputs());
     return self;
 }
 
 inline RollingMinMaxNode::RollingMinMaxNode(std::string n, NodePtr up, std::size_t w)
     : StatefulNodeBase<RollingMinMaxNode, std::pair<double,double>, double,
-                       RollingMinMaxNodeState>(std::move(n), up)
+                       RollingMinMaxNodeState>(std::move(n), std::move(up))
     , window_(w)
 {
     // A monotonic deque holds at most `window_` entries after eviction plus the
@@ -384,7 +384,7 @@ inline std::shared_ptr<EWMANode> EWMANode::make(
         throw std::invalid_argument(
             "EWMANode '" + name + "': alpha must be in (0, 1]");
     auto self = std::shared_ptr<EWMANode>(
-        new EWMANode(std::move(name), upstream, alpha, std::move(eq)));
+        new EWMANode(std::move(name), std::move(upstream), alpha, std::move(eq)));
     wire(self, self->inputs());
     return self;
 }
@@ -392,7 +392,7 @@ inline std::shared_ptr<EWMANode> EWMANode::make(
 inline EWMANode::EWMANode(std::string n, NodePtr up, double a,
                            EqualityPolicyPtr eq)
     : StatefulNodeBase<EWMANode, double, double, EWMANodeState>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , alpha_(a)
 {}
 
@@ -425,7 +425,7 @@ inline std::shared_ptr<EWMATickRateNode> EWMATickRateNode::make(
         throw std::invalid_argument(
             "EWMATickRateNode '" + name + "': alpha must be in (0, 1]");
     auto self = std::shared_ptr<EWMATickRateNode>(
-        new EWMATickRateNode(std::move(name), trigger, alpha, std::move(eq)));
+        new EWMATickRateNode(std::move(name), std::move(trigger), alpha, std::move(eq)));
     wire(self, self->inputs());
     return self;
 }
@@ -433,7 +433,7 @@ inline std::shared_ptr<EWMATickRateNode> EWMATickRateNode::make(
 inline EWMATickRateNode::EWMATickRateNode(std::string n, NodePtr trigger, double alpha,
                                            EqualityPolicyPtr eq)
     : StatefulNodeBase<EWMATickRateNode, double, double, EWMATickRateNodeState>(
-        std::move(n), trigger, std::move(eq))
+        std::move(n), std::move(trigger), std::move(eq))
     , alpha_(alpha)
 {}
 
@@ -456,14 +456,14 @@ inline void EWMATickRateNode::doRestoreState(const INodeState& s, State& st) {
 
 template<typename T>
 std::shared_ptr<DeltaNode<T>> DeltaNode<T>::make(std::string name, NodePtr upstream) {
-    auto self = std::shared_ptr<DeltaNode<T>>(new DeltaNode<T>(std::move(name), upstream));
+    auto self = std::shared_ptr<DeltaNode<T>>(new DeltaNode<T>(std::move(name), std::move(upstream)));
     wire(self, self->inputs());
     return self;
 }
 
 template<typename T>
 DeltaNode<T>::DeltaNode(std::string n, NodePtr up)
-    : StatefulNodeBase<DeltaNode<T>, T, T, DeltaNodeState<T>>(std::move(n), up)
+    : StatefulNodeBase<DeltaNode<T>, T, T, DeltaNodeState<T>>(std::move(n), std::move(up))
 {}
 
 template<typename T>
@@ -496,7 +496,7 @@ std::shared_ptr<ThresholdNode<T>> ThresholdNode<T>::make(
     T level, Direction dir, T hysteresis)
 {
     auto self = std::shared_ptr<ThresholdNode<T>>(
-        new ThresholdNode<T>(std::move(name), upstream, level, dir, hysteresis));
+        new ThresholdNode<T>(std::move(name), std::move(upstream), level, dir, hysteresis));
     wire(self, self->inputs());
     return self;
 }
@@ -504,7 +504,7 @@ std::shared_ptr<ThresholdNode<T>> ThresholdNode<T>::make(
 template<typename T>
 ThresholdNode<T>::ThresholdNode(std::string n, NodePtr up, T l, Direction d, T h)
     : StatefulNodeBase<ThresholdNode<T>, bool, T, ThresholdNodeState<T>>(
-        std::move(n), up, std::make_shared<TypedEqualityPolicy<bool>>())
+        std::move(n), std::move(up), std::make_shared<TypedEqualityPolicy<bool>>())
     , level_(l), hys_(h), dir_(d)
 {}
 
@@ -543,13 +543,13 @@ inline std::shared_ptr<ZScoreNode> ZScoreNode::make(
     EqualityPolicyPtr eq)
 {
     auto self = std::shared_ptr<ZScoreNode>(
-        new ZScoreNode(std::move(name), upstream, std::move(stats), std::move(eq)));
+        new ZScoreNode(std::move(name), std::move(upstream), std::move(stats), std::move(eq)));
     wire(self, self->inputs());
     return self;
 }
 
 inline std::shared_ptr<ZScoreNode> ZScoreNode::make(
-    std::string name, NodePtr upstream, std::size_t window,
+    std::string name, const NodePtr& upstream, std::size_t window,
     EqualityPolicyPtr eq)
 {
     auto stats = RollingStats::make(name + ".stats", upstream, window);
@@ -563,7 +563,7 @@ inline ZScoreNode::ZScoreNode(std::string n, NodePtr up,
                                RollingStatsPtr stats,
                                EqualityPolicyPtr eq)
     : StatefulNodeBase<ZScoreNode, double, double, ZScoreNodeState>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , stats_(std::move(stats))
 {}
 
@@ -595,7 +595,7 @@ inline void ZScoreNode::doRestoreState(const INodeState& s, State&) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::shared_ptr<OutlierGateNode> OutlierGateNode::make(
-    std::string name, NodePtr upstream, std::size_t window, double zThreshold,
+    std::string name, const NodePtr& upstream, std::size_t window, double zThreshold,
     EqualityPolicyPtr eq)
 {
     // One shared RollingStats feeds both ZScore and mean access
@@ -611,7 +611,7 @@ inline OutlierGateNode::OutlierGateNode(std::string n, NodePtr up,
                                          std::shared_ptr<ZScoreNode> z, double thr,
                                          EqualityPolicyPtr eq)
     : StatefulNodeBase<OutlierGateNode, double, double, OutlierGateNodeState>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , zNode_(std::move(z))
     , threshold_(thr)
 {}
@@ -650,14 +650,14 @@ std::shared_ptr<RateLimiterNode<T>> RateLimiterNode<T>::make(
     std::string name, NodePtr upstream, T minDelta)
 {
     auto self = std::shared_ptr<RateLimiterNode<T>>(
-        new RateLimiterNode<T>(std::move(name), upstream, minDelta));
+        new RateLimiterNode<T>(std::move(name), std::move(upstream), minDelta));
     wire(self, self->inputs());
     return self;
 }
 
 template<typename T>
 RateLimiterNode<T>::RateLimiterNode(std::string n, NodePtr up, T d)
-    : StatefulNodeBase<RateLimiterNode<T>, T, T, RateLimiterNodeState<T>>(std::move(n), up)
+    : StatefulNodeBase<RateLimiterNode<T>, T, T, RateLimiterNodeState<T>>(std::move(n), std::move(up))
     , minDelta_(d)
 {}
 
@@ -693,14 +693,14 @@ inline std::shared_ptr<DebounceCountNode> DebounceCountNode::make(
     std::string name, NodePtr upstream, std::size_t required)
 {
     auto self = std::shared_ptr<DebounceCountNode>(
-        new DebounceCountNode(std::move(name), upstream, required));
+        new DebounceCountNode(std::move(name), std::move(upstream), required));
     wire(self, self->inputs());
     return self;
 }
 
 inline DebounceCountNode::DebounceCountNode(std::string n, NodePtr up, std::size_t req)
     : StatefulNodeBase<DebounceCountNode, bool, bool, DebounceCountNodeState>(
-        std::move(n), up, std::make_shared<TypedEqualityPolicy<bool>>())
+        std::move(n), std::move(up), std::make_shared<TypedEqualityPolicy<bool>>())
     , required_(req)
 {}
 
@@ -725,7 +725,7 @@ inline std::shared_ptr<LatchedDebounceNode> LatchedDebounceNode::make(
     std::string name, NodePtr upstream, std::size_t required)
 {
     auto self = std::shared_ptr<LatchedDebounceNode>(
-        new LatchedDebounceNode(std::move(name), upstream, required));
+        new LatchedDebounceNode(std::move(name), std::move(upstream), required));
     wire(self, self->inputs());
     return self;
 }
@@ -734,7 +734,7 @@ inline LatchedDebounceNode::LatchedDebounceNode(
     std::string n, NodePtr up, std::size_t req)
     : StatefulNodeBase<LatchedDebounceNode,
                        std::optional<bool>, bool,
-                       LatchedDebounceNodeState>(std::move(n), up)
+                       LatchedDebounceNodeState>(std::move(n), std::move(up))
     , required_(req)
 {}
 
@@ -777,7 +777,7 @@ std::shared_ptr<DelayNode<T>> DelayNode<T>::make(
     EqualityPolicyPtr eq)
 {
     auto self = std::shared_ptr<DelayNode<T>>(
-        new DelayNode<T>(std::move(name), upstream, delay,
+        new DelayNode<T>(std::move(name), std::move(upstream), delay,
                          std::move(initialValue), std::move(eq)));
     wire(self, self->inputs());
     return self;
@@ -787,7 +787,7 @@ template<typename T>
 DelayNode<T>::DelayNode(std::string n, NodePtr up, std::size_t delay,
                          T initial, EqualityPolicyPtr eq)
     : StatefulNodeBase<DelayNode<T>, T, T, DelayNodeState<T>>(
-        std::move(n), up, std::move(eq))
+        std::move(n), std::move(up), std::move(eq))
     , delay_(delay)
     , initial_(std::move(initial))
 {

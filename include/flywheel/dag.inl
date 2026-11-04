@@ -533,7 +533,7 @@ std::vector<NodePtr> TweakableComputeNode<Out, Ins...>::collectInputs(
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::shared_ptr<ConditionNode> ConditionNode::make(
-    std::string name, NodePtr condition, NodePtr trueBranch, NodePtr falseBranch,
+    std::string name, const NodePtr& condition, const NodePtr& trueBranch, const NodePtr& falseBranch,
     EqualityPolicyPtr eq)
 {
     if (!eq) eq = std::make_shared<AlwaysChangedPolicy>();
@@ -595,8 +595,8 @@ inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
 inline ConditionNode::ConditionNode(
     std::string name, NodePtr cond, NodePtr tb, NodePtr fb,
     EqualityPolicyPtr eq)
-    : NodeBase(InvalidationMode::Lazy), name_(std::move(name)), condition_(cond)
-    , trueBranch_(tb), falseBranch_(fb), eq_(std::move(eq)) {}
+    : NodeBase(InvalidationMode::Lazy), name_(std::move(name)), condition_(std::move(cond))
+    , trueBranch_(std::move(tb)), falseBranch_(std::move(fb)), eq_(std::move(eq)) {}
 
 inline ConditionNode::BranchListener::BranchListener(
     std::weak_ptr<ConditionNode> owner, bool branch)

@@ -253,7 +253,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 // NodeKind — discriminator for graph export and visualisation.
 // ─────────────────────────────────────────────────────────────────────────────
-enum class NodeKind { Input, AsyncInput, AsyncQueue, Compute, TimeSeries };
+enum class NodeKind : std::uint8_t { Input, AsyncInput, AsyncQueue, Compute, TimeSeries };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dirtiness — what a node knows about its own freshness.
@@ -878,7 +878,7 @@ class ConditionNode
 {
 public:
     static std::shared_ptr<ConditionNode> make(
-        std::string name, NodePtr condition, NodePtr trueBranch, NodePtr falseBranch,
+        std::string name, const NodePtr& condition, const NodePtr& trueBranch, const NodePtr& falseBranch,
         EqualityPolicyPtr eq = nullptr);
 
     ValuePtr eval(EvalContext& ctx) override;

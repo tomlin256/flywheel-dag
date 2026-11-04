@@ -423,7 +423,7 @@ class ThresholdNode
     : public StatefulNodeBase<ThresholdNode<T>, bool, T, ThresholdNodeState<T>> {
 public:
     using State = ThresholdNodeState<T>;
-    enum class Direction { Above, Below };
+    enum class Direction : std::uint8_t { Above, Below };
 
     static std::shared_ptr<ThresholdNode<T>> make(
         std::string name, NodePtr upstream,
@@ -459,7 +459,7 @@ public:
 
     /// Convenience: creates its own RollingStats internally.
     static std::shared_ptr<ZScoreNode> make(
-        std::string name, NodePtr upstream, std::size_t window,
+        std::string name, const NodePtr& upstream, std::size_t window,
         EqualityPolicyPtr eq = nullptr);
 
     ValuePtr eval(EvalContext& ctx) override;
@@ -491,7 +491,7 @@ public:
     using State = OutlierGateNodeState;
 
     static std::shared_ptr<OutlierGateNode> make(
-        std::string name, NodePtr upstream, std::size_t window, double zThreshold = 3.0,
+        std::string name, const NodePtr& upstream, std::size_t window, double zThreshold = 3.0,
         EqualityPolicyPtr eq = nullptr);
 
     ValuePtr eval(EvalContext& ctx) override;

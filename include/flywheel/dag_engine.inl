@@ -198,7 +198,7 @@ Engine::discoverStatefulNodes() const {
 // Module installation
 // ─────────────────────────────────────────────────────────────────────────────
 
-inline void Engine::install(std::shared_ptr<IComputeModule> m) {
+inline void Engine::install(const std::shared_ptr<IComputeModule>& m) {
     refuseInCycle("install");
     modules_.push_back(m);
     m->wire(*this);
