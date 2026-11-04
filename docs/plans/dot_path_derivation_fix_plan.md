@@ -1,6 +1,7 @@
 # Name `toSvg()`'s `.dot` File From the File Name Alone
 
-**Status: Approved (2026-11-04).** Approved as written.
+**Status: Done (2026-11-04).** Approved as written. `toSvg()` names its `.dot` file from the file name alone,
+and refuses a path with a NUL.
 
 Closes [flywheel-dag#63](https://github.com/tomlin256/flywheel-dag/issues/63).
 
@@ -90,6 +91,37 @@ Commit: `fix: name toSvg's .dot file from the file name alone`.
 
 Status Done, the Outcome, and the issue closed once the run of Step 2's push is green. A docs commit; later runs
 of docs commits are not waited for. The release is not part of this plan.
+
+## Outcome
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `e8e2db5`; the approval is recorded in `1e9e07f` |
+| 2 — The change and its tests | Done | `90e6c4d` |
+| 3 — Close out | Done | the commit that adds this section |
+
+Every item of Step 2's "done when" held, on the files as committed:
+
+- The build prints no warning, and `ctest` passes 46 of 46 on the Mac (the four tests are in `test_dag_graph`).
+- The hand-made changes, run test by test under a watchdog on scratch copies of `include/`, with a control copy
+  that has no change (nothing fails in it; 30 tests). Each fails exactly the tests the plan names:
+
+  | Change | Fails |
+  |---|---|
+  | M1 | `NamesTheDotFileAfterTheLastExtensionOfTheFileName`, `LeavesAFileBesideADottedDirectoryAlone`, `DoesNotReadTheFileItWrites` |
+  | M2 | `DoesNotReadTheFileItWrites` |
+  | M3 | `DoesNotReadTheFileItWrites` |
+  | M4 | `RefusesAPathWithANul` |
+  | M5 | the four success tests, `KeepsTheDotFileWhenDotFails`, `KeepsTheDotFileWhenThereIsNoDot`, `ReturnsFalseWhenTheExitStatusCannotBeRead`, `NamesTheDotFileAfterTheLastExtensionOfTheFileName` |
+
+- The `clang_tidy_` tests pass 40 of 40 on the Mac and in `ubuntu-dev`, and neither file has a `NOLINT`.
+- In `ubuntu-dev` (GCC 13.3.0, glibc) the Linux tree builds at `--parallel 4` without a warning, `ctest` passes 46
+  of 46, and the 13 `DagGraphToSvg` tests pass. Only `test_dag_graph` includes `dag_graph.hpp`, so it is the one
+  binary that needed relinking.
+- CI run 41843319933 on `90e6c4d` is green: `build` and `clang-tidy`, each on macOS and on Ubuntu (x86_64).
+
+Where the work differs from the plan: it does not. No throwaway `ubuntu:26.04` container was run, as the plan
+said; CI's Ubuntu leg is the GCC 15.2.0 check.
 
 ## Self-review — risks and assumptions
 
