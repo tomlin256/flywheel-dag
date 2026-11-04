@@ -11,8 +11,15 @@
 // dag_graph.hpp — DOT/SVG export for the reactive DAG
 //
 // GraphExporter traverses the DAG backward from a set of root (output) nodes
-// and produces a Graphviz DOT description. toSvg() also shells out to
-// `dot -Tsvg` to render it; if that fails, the .dot file is kept.
+// and produces a Graphviz DOT description. toSvg() also runs `dot -Tsvg` to
+// render it; if that fails, the .dot file is kept.
+//
+// toSvg() starts `dot` itself with posix_spawnp and hands it the two paths as
+// arguments, so no shell reads them and a path is only ever a path
+// (flywheel-dag#62). That ties it to POSIX: where <spawn.h> does not exist
+// (Windows) the class has toDot() and no toSvg(), and the header still
+// compiles. FLYWHEEL_DAG_HAS_TO_SVG is defined where toSvg() exists. No other
+// header of the engine needs POSIX.
 //
 // Never include this file directly from nodes — it is an opt-in utility.
 
@@ -29,6 +36,18 @@
 #include <utility>
 #include <vector>
 
+#if __has_include(<spawn.h>) && __has_include(<sys/wait.h>)
+#define FLYWHEEL_DAG_HAS_TO_SVG 1
+#include <cerrno>
+#include <spawn.h>
+#include <sys/wait.h>
+#if defined(__APPLE__)
+#include <crt_externs.h>  // a shared library cannot name environ on macOS: _NSGetEnviron() finds it
+#else
+extern "C" char** environ;
+#endif
+#endif
+
 namespace dag {
 
 class GraphExporter {
@@ -39,15 +58,33 @@ public:
     static std::string toDot(const std::vector<ConstNodePtr>& roots,
                              const std::string& graphName = "flywheel");
 
-    /// Write DOT to a .dot file, call `dot -Tsvg`, write SVG to outPath.
-    /// Returns true on success, and removes the .dot file. On failure (graphviz
-    /// absent or non-zero exit) the .dot file is kept alongside outPath and false
-    /// is returned.
+#ifdef FLYWHEEL_DAG_HAS_TO_SVG
+    /// Write DOT to a .dot file, run `dot -Tsvg` on it without a shell, write SVG
+    /// to outPath. Returns true on success, and removes the .dot file. On failure
+    /// (no `dot` on PATH or non-zero exit) the .dot file is kept alongside outPath
+    /// and false is returned. outPath may hold any character, a space, ';' or '$'
+    /// included, and may start with '-'.
     static bool toSvg(const std::vector<ConstNodePtr>& roots,
                       const std::string& outPath,
                       const std::string& graphName = "flywheel");
+#endif
 
 private:
+#ifdef FLYWHEEL_DAG_HAS_TO_SVG
+    // ── Running dot ──────────────────────────────────────────────────────────
+
+    /// `path` as one argument for `dot` that it cannot take for an option: a
+    /// leading '-' becomes "./-", which names the same file.
+    static std::string asArgument(const std::string& path) {
+        return (!path.empty() && path.front() == '-') ? "./" + path : path;
+    }
+
+    /// Run `dot -Tsvg dotPath -o outPath` and wait for it. True when it started
+    /// and exited 0. posix_spawnp, unlike fork and exec, is safe from a process
+    /// with other threads, which an engine with feed threads is.
+    static bool runDot(const std::string& dotPath, const std::string& outPath);
+#endif
+
     // ── DOT attribute helpers ────────────────────────────────────────────────
 
     static std::string_view shapeFor(NodeKind k) {
@@ -182,6 +219,38 @@ inline std::string GraphExporter::toDot(const std::vector<ConstNodePtr>& roots,
     return out.str();
 }
 
+#ifdef FLYWHEEL_DAG_HAS_TO_SVG
+inline bool GraphExporter::runDot(const std::string& dotPath, const std::string& outPath)
+{
+    // One string per argument, kept in a vector that outlives the call: posix_spawnp takes char*, not const char*.
+    std::vector<std::string> args{ "dot", "-Tsvg", asArgument(dotPath), "-o", asArgument(outPath) };
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (std::string& arg : args) argv.push_back(arg.data());
+    argv.push_back(nullptr);
+
+#if defined(__APPLE__)
+    char* const* const env = *_NSGetEnviron();
+#else
+    char* const* const env = environ;
+#endif
+
+    // The caller's PATH finds dot, and the child gets the caller's environment and standard streams, as it did under
+    // std::system. A non-zero return is the spawn failing, no dot on PATH included; a libc that reports a failed exec
+    // as exit status 127 instead is caught by the status check below.
+    pid_t pid = 0;
+    if (posix_spawnp(&pid, "dot", nullptr, nullptr, argv.data(), env) != 0) return false;
+
+    int status = 0;
+    pid_t reaped = 0;
+    do {
+        reaped = waitpid(pid, &status, 0);
+    } while (reaped == -1 && errno == EINTR);
+    // Any other waitpid failure leaves the status unknown, and status starts at 0, which reads as success, so the
+    // child's pid is checked first. A process that ignores SIGCHLD gets ECHILD here, as it did from std::system.
+    return reaped == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 inline bool GraphExporter::toSvg(const std::vector<ConstNodePtr>& roots,
                                  const std::string& outPath,
                                  const std::string& graphName)
@@ -200,15 +269,12 @@ inline bool GraphExporter::toSvg(const std::vector<ConstNodePtr>& roots,
         f << dot;
     }
 
-    // The two paths go into the command line unquoted, so a space breaks it and a shell metacharacter runs. The call
-    // stays, and the finding is suppressed by both names of the check, until flywheel-dag#62 replaces the shell.
-    const std::string cmd = "dot -Tsvg " + dotPath + " -o " + outPath;
-    const int rc = std::system(cmd.c_str());  // NOLINT(cert-env33-c, bugprone-command-processor)
-    if (rc == 0) {
+    if (runDot(dotPath, outPath)) {
         std::remove(dotPath.c_str());
         return true;
     }
     return false;  // .dot file kept; caller prints fallback message
 }
+#endif
 
 } // namespace dag

@@ -70,8 +70,8 @@ ctest --preset relwithdebinfo-macos-arm64
   `clang-tidy` linked into `/opt/homebrew/bin`), in the `ubuntu-dev` image and in CI, and `clang_tidy_version` fails
   on any other. Moving to another is one commit: the number in `tests/CMakeLists.txt`, the install steps in
   `ci.yml`, the image, and what the new major reports. Fix a finding. `NOLINT(<check>)` is for a tool that is wrong or
-  cannot see an invariant, by name and with a comment that says which (`~TimeOnExit` in `dag_engine.inl`, and
-  `toSvg` until flywheel-dag#62). `tests/clang_tidy_canary/` holds deliberate defects; it is in no compile database.
+  cannot see an invariant, by name and with a comment that says which (`~TimeOnExit` in `dag_engine.inl`).
+  `tests/clang_tidy_canary/` holds deliberate defects; it is in no compile database.
 - `benchmarks/bench_hot_path` is `EXCLUDE_FROM_ALL` and not a ctest test. Time a
   change by running it before and after, on the same machine:
   `cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path &&

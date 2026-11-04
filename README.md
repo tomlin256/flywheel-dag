@@ -224,7 +224,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
 | `dag_traversal.hpp` | `dag::traversal` | `bfs_upstream`, `BfsRange` |
-| `dag_graph.hpp` | `dag` | `GraphExporter` — DOT and SVG |
+| `dag_graph.hpp` | `dag` | `GraphExporter` — DOT, and SVG through Graphviz's `dot` on a POSIX host (`toSvg()`; `FLYWHEEL_DAG_HAS_TO_SVG` says whether it exists) |
 | `dag_window_status.hpp` | `dag::ts` | `WindowStatus`, `IWindowed` |
 | `dag_ring_buffer.hpp` | `dag` | `RingBuffer` |
 

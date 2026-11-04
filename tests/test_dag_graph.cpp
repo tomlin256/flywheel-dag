@@ -12,6 +12,16 @@
 #include "flywheel/dag_async.hpp"
 #include "flywheel/dag_timeseries.hpp"
 
+#ifdef FLYWHEEL_DAG_HAS_TO_SVG
+#include <csignal>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#endif
+
 using namespace dag;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -290,6 +300,278 @@ TEST(DagGraph, AKindWithNoEntryIsDrawnAsAWhiteBox) {
     EXPECT_NE(dot.find(R"("unknown" [shape=box fillcolor="#FFFFFF" style="filled"];)"),
               std::string::npos) << dot;
 }
+
+// ── toSvg() ───────────────────────────────────────────────────────────────────
+// toSvg() starts `dot` without a shell, so the paths it is given are arguments
+// and nothing else (flywheel-dag#62). Each test builds a scratch directory of
+// its own and puts a stand-in `dot` first on PATH: a /bin/sh script that
+// records the arguments it receives, NUL-separated so that a newline in a path
+// survives, and the variable FLYWHEEL_DAG_TEST_ENV; writes "<svg/>" to the file
+// after -o; and exits with the code in the file `exit` beside it, 0 when there
+// is none. A stand-in `pwn` sits beside it and leaves a marker file: a path
+// that reached a shell would run it. No Graphviz, no sleep. The stand-ins are
+// shell scripts, so these tests exist where toSvg() does, which is POSIX.
+
+#ifdef FLYWHEEL_DAG_HAS_TO_SVG
+
+namespace {
+
+namespace fs = std::filesystem;
+
+// Ignores SIGCHLD for as long as it lives. A process that does has its
+// children reaped for it, and waitpid() then fails with ECHILD.
+class SigchldIgnored {
+public:
+    SigchldIgnored() {
+        struct sigaction ignore {};
+        ignore.sa_handler = SIG_IGN;
+        sigemptyset(&ignore.sa_mask);
+        sigaction(SIGCHLD, &ignore, &previous_);
+    }
+    ~SigchldIgnored() { sigaction(SIGCHLD, &previous_, nullptr); }
+    SigchldIgnored(const SigchldIgnored&) = delete;
+    SigchldIgnored& operator=(const SigchldIgnored&) = delete;
+
+private:
+    struct sigaction previous_ {};
+};
+
+class DagGraphToSvg : public ::testing::Test {
+protected:
+    void SetUp() override {
+        std::string pattern = (fs::temp_directory_path() / "flywheel_dag_graph_XXXXXX").string();
+        ASSERT_NE(mkdtemp(pattern.data()), nullptr);
+        root_ = pattern;
+        bin_  = root_ / "bin";
+        work_ = root_ / "work";
+        fs::create_directories(bin_);
+        fs::create_directories(work_);
+        fs::create_directories(root_ / "empty");
+
+        writeScript(bin_ / "dot",
+            "here=${0%/*}\n"
+            "printf '%s\\0' \"$FLYWHEEL_DAG_TEST_ENV\" > \"$here/env\"\n"
+            ": > \"$here/args\"\n"
+            "out=\n"
+            "while [ $# -gt 0 ]; do\n"
+            "    printf '%s\\0' \"$1\" >> \"$here/args\"\n"
+            "    if [ \"$1\" = -o ]; then out=$2; fi\n"
+            "    shift\n"
+            "done\n"
+            "if [ -n \"$out\" ]; then printf '<svg/>' > \"$out\"; fi\n"
+            "code=0\n"
+            "if [ -r \"$here/exit\" ]; then read code < \"$here/exit\"; fi\n"
+            "exit \"$code\"\n");
+        writeScript(bin_ / "pwn", ": > \"${0%/*}/pwned\"\n");
+
+        // What TearDown() puts back: PATH, the working directory, and the variable the tests set.
+        const char* const path = std::getenv("PATH");
+        hadPath_ = path != nullptr;
+        if (hadPath_) path_ = path;
+        pathSaved_ = true;
+        setenv("PATH", (hadPath_ ? bin_.string() + ":" + path_ : bin_.string()).c_str(), 1);
+
+        std::error_code error;
+        cwd_ = fs::current_path(error);
+        ASSERT_FALSE(error) << error.message();
+        fs::current_path(work_, error);  // so that a relative path lands in the scratch directory
+        ASSERT_FALSE(error) << error.message();
+    }
+
+    void TearDown() override {
+        std::error_code error;
+        if (!cwd_.empty()) fs::current_path(cwd_, error);
+        if (pathSaved_) {
+            if (hadPath_) setenv("PATH", path_.c_str(), 1);
+            else          unsetenv("PATH");
+        }
+        unsetenv("FLYWHEEL_DAG_TEST_ENV");
+        if (!root_.empty()) fs::remove_all(root_, error);
+    }
+
+    static void writeScript(const fs::path& file, const std::string& body) {
+        {
+            std::ofstream script(file);
+            script << "#!/bin/sh\n" << body;
+        }
+        fs::permissions(file, fs::perms::owner_all);
+    }
+
+    static std::string readAll(const fs::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        std::ostringstream all;
+        all << in.rdbuf();
+        return all.str();
+    }
+
+    /// What the stand-in dot was given, one string per argument.
+    std::vector<std::string> recordedArguments() const {
+        std::vector<std::string> arguments;
+        std::string current;
+        for (const char c : readAll(bin_ / "args")) {
+            if (c == '\0') {
+                arguments.push_back(current);
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+        return arguments;
+    }
+
+    bool dotRan() const { return fs::exists(bin_ / "args"); }
+    bool pwnRan() const { return fs::exists(bin_ / "pwned"); }
+
+    /// Forget what an earlier call left, so that one test can render several paths.
+    void forgetRuns() const {
+        std::error_code error;
+        fs::remove(bin_ / "args", error);
+        fs::remove(bin_ / "pwned", error);
+    }
+
+    /// Where toSvg() writes the DOT text for an output path that ends in ".svg".
+    static std::string dotPathOf(const std::string& svgPath) {
+        return svgPath.substr(0, svgPath.size() - 4) + ".dot";
+    }
+
+    /// toSvg(outPath) renders: it returns true; dot was given exactly -Tsvg,
+    /// dotArgument, -o and outArgument; the SVG is there and the .dot file is
+    /// not; pwn did not run. outPath ends in ".svg".
+    void expectRendered(const std::string& outPath, const std::string& dotArgument,
+                        const std::string& outArgument) const {
+        forgetRuns();
+        EXPECT_TRUE(GraphExporter::toSvg({ node_ }, outPath));
+        const std::vector<std::string> expected{ "-Tsvg", dotArgument, "-o", outArgument };
+        EXPECT_EQ(recordedArguments(), expected);
+        EXPECT_TRUE(fs::exists(outPath)) << outPath;
+        EXPECT_FALSE(fs::exists(dotPathOf(outPath))) << dotPathOf(outPath);
+        EXPECT_FALSE(pwnRan());
+    }
+
+    std::shared_ptr<Input<double>> node_ = makeInput("a");
+    fs::path    root_;  // the scratch directory, with bin/ (the stand-ins), work/ (the working directory) and empty/
+    fs::path    bin_;
+    fs::path    work_;
+    fs::path    cwd_;   // the working directory to go back to
+    std::string path_;  // PATH to go back to, when there was one
+    bool        hadPath_   = false;
+    bool        pathSaved_ = false;
+};
+
+}  // namespace
+
+// ── Test 18: dot is given the two paths as its arguments ─────────────────────
+
+TEST_F(DagGraphToSvg, RunsDotWithThePathsAsArguments) {
+    const std::string out = (work_ / "graph.svg").string();
+
+    expectRendered(out, dotPathOf(out), out);
+}
+
+// ── Test 19: whatever a file name holds stays inside one argument ────────────
+// Names a shell would split, expand or run. pwn is on PATH, so a name that
+// reached a shell as a command would leave its marker.
+
+TEST_F(DagGraphToSvg, PassesAnyNameAsOneArgument) {
+    const std::vector<std::string> names = {
+        "with space.svg", "semi;pwn;x.svg",  "sub$(pwn)x.svg", "tick`pwn`x.svg",
+        "pipe|pwn|x.svg", "amp&pwn&x.svg",   "quote'x.svg",    "dquote\"x.svg",
+        "new\npwn\nline.svg", "glob*?[x].svg",
+    };
+    for (const std::string& name : names) {
+        SCOPED_TRACE(name);
+        const std::string out = (work_ / name).string();
+        expectRendered(out, dotPathOf(out), out);
+    }
+}
+
+// ── Test 20: so does a directory name ────────────────────────────────────────
+
+TEST_F(DagGraphToSvg, PassesAnyDirectoryNameAsOneArgument) {
+    const fs::path dir = work_ / "dir with space;pwn";
+    fs::create_directory(dir);
+    const std::string out = (dir / "graph.svg").string();
+
+    expectRendered(out, dotPathOf(out), out);
+}
+
+// ── Test 21: a path that starts with '-' is not an option ────────────────────
+// dot reads `-x.dot` as the option -x, exits 0 and writes nothing, so such a
+// path reaches it as ./-x.dot. The test runs in the scratch directory, which is
+// where the relative paths land.
+
+TEST_F(DagGraphToSvg, HandsDotAPathThatStartsWithADashAsAPath) {
+    expectRendered("-graph.svg", "./-graph.dot", "./-graph.svg");
+}
+
+// ── Test 22: dot exits non-zero ──────────────────────────────────────────────
+
+TEST_F(DagGraphToSvg, KeepsTheDotFileWhenDotFails) {
+    {
+        std::ofstream exitCode(bin_ / "exit");
+        exitCode << "3\n";
+    }
+    const std::string out = (work_ / "graph.svg").string();
+
+    EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
+    EXPECT_TRUE(dotRan());
+    EXPECT_TRUE(fs::exists(dotPathOf(out))) << dotPathOf(out);
+}
+
+// ── Test 23: there is no dot on PATH ─────────────────────────────────────────
+
+TEST_F(DagGraphToSvg, KeepsTheDotFileWhenThereIsNoDot) {
+    setenv("PATH", (root_ / "empty").c_str(), 1);
+    const std::string out = (work_ / "graph.svg").string();
+
+    EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
+    EXPECT_FALSE(dotRan());
+    EXPECT_TRUE(fs::exists(dotPathOf(out))) << dotPathOf(out);
+}
+
+// ── Test 24: the exit status cannot be read ──────────────────────────────────
+// With SIGCHLD ignored, waitpid() fails with ECHILD. There is no status to
+// trust, and the status variable starts at 0, which reads as success, so the
+// answer is false and the .dot file stays, although the stand-in wrote the SVG.
+
+TEST_F(DagGraphToSvg, ReturnsFalseWhenTheExitStatusCannotBeRead) {
+    const std::string out = (work_ / "graph.svg").string();
+
+    bool rendered = true;
+    {
+        const SigchldIgnored ignored;
+        rendered = GraphExporter::toSvg({ node_ }, out);
+    }
+
+    EXPECT_FALSE(rendered);
+    EXPECT_TRUE(dotRan());
+    EXPECT_TRUE(fs::exists(out)) << out;
+    EXPECT_TRUE(fs::exists(dotPathOf(out))) << dotPathOf(out);
+}
+
+// ── Test 25: the .dot file cannot be written ─────────────────────────────────
+// Nothing is run, and nothing is left behind.
+
+TEST_F(DagGraphToSvg, RunsNothingWhenTheDirectoryIsMissing) {
+    const std::string out = (work_ / "no_such_dir" / "graph.svg").string();
+
+    EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
+    EXPECT_FALSE(dotRan());
+    EXPECT_TRUE(fs::is_empty(work_));
+}
+
+// ── Test 26: dot gets the caller's environment ───────────────────────────────
+
+TEST_F(DagGraphToSvg, HandsDotTheCallersEnvironment) {
+    setenv("FLYWHEEL_DAG_TEST_ENV", "from the caller", 1);
+    const std::string out = (work_ / "graph.svg").string();
+
+    EXPECT_TRUE(GraphExporter::toSvg({ node_ }, out));
+    const std::string recorded = readAll(bin_ / "env");
+    EXPECT_EQ(recorded.substr(0, recorded.find('\0')), "from the caller");
+}
+
+#endif  // FLYWHEEL_DAG_HAS_TO_SVG
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
