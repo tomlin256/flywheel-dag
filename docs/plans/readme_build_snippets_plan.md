@@ -1,6 +1,8 @@
 # Point the README's Two Build Snippets at a Preset
 
-**Status: Approved (2026-11-04).** Approved as written.
+**Status: Done (2026-11-04).** Approved as written. The README's install snippet and quickstart use the
+`relwithdebinfo-macos-arm64` preset, and `test_presets` holds the README to the presets (R8). Closed at your
+request with CI on the change still queued (Outcome).
 
 Closes [flywheel-dag#64](https://github.com/tomlin256/flywheel-dag/issues/64).
 
@@ -110,9 +112,45 @@ docs commits are not waited for. No release.
 
 | Step | Status | Commit |
 |---|---|---|
-| 1 — The plan | Pending | |
-| 2 — The rule, then the README | Pending | |
-| 3 — Close out | Pending | |
+| 1 — The plan | Done | `2fef8a3`; the approval is recorded in `fac9044` |
+| 2 — The rule, then the README | Done | `398e998` |
+| 3 — Close out | Done | the commit that adds this section |
+
+Step 2's "done when" held, on the files as committed, except the last item (CI):
+
+- R8 went in first and failed on the old README with four findings (`-B build` twice, `--build build`,
+  `--install build`) and `build/bin`. On the new README `test_presets` reports "R1 to R8 hold".
+- Both snippets, run as written on the Mac: the quickstart configured, built without a warning and exited 0; the
+  install wrote 25 headers, the `find_package` config (`share/cmake/flywheel_dag/`) and the LICENSE file into a
+  prefix in the scratchpad.
+- `ctest --preset relwithdebinfo-macos-arm64` passes 46 of 46, `test_presets`, `test_cmake_floor` and
+  `test_cmake_diagnostics` among them.
+- Each hand-made change to a copy of the new README, passed as `README_DIR`, fails R8 with the message stated and no
+  other rule; a control copy with no change passes:
+
+  | Change | R8 reports |
+  |---|---|
+  | M1 | 1 command that installs `build` itself (`--install build`) |
+  | M2 | 1 command that configures `build` itself (`-B build`) |
+  | M3 | 1 command that builds `build` itself (`--build build`) |
+  | M4 | 1 command that tests `build` itself (`--test-dir build`) |
+  | M5 | names `bin`, which is no configure preset |
+  | M6 | names `relwithdebinfo-macos-arm65`, which is no configure preset |
+  | M7 | names `macos-arm64`, which is a hidden preset |
+
+- Not pinned by a mutant: a probe appended the line ``Run `cmake -B build` or (cmake --build build) or "cmake --install build".``
+  to a copy, and R8 reported all three, so a closing backtick, parenthesis or quote ends the flat form as the
+  Self-review says.
+- The dry run of the leak audit over the tree was clean, and so was the pre-push run.
+
+Where the work differs from the plan:
+
+- **CI was not read.** Step 2 asked for a green run on both legs. You asked to close the plan while run 41868258297
+  on `398e998` was still queued. The push of the close-out commit supersedes it (CI cancels the earlier run), and
+  the run on that commit has the same `include/`, `tests/` and README. Neither result had been read when the plan
+  was closed.
+- The flat form is matched as the flag, `build`, then anything but a path character, and not "a space or the end of
+  the line" as the plan first said; the plan's text was corrected in `398e998`.
 
 ## Self-review — risks and assumptions
 
