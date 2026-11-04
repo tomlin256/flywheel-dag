@@ -293,6 +293,23 @@ The tests, the example and the benchmark compile the engine's headers with `-Wal
 fails the build. None of these flags reaches a consumer or a dependency. They are set only when
 flywheel-dag is the top-level project, and never on `flywheel::dag`.
 
+### clang-tidy
+
+CI also runs clang-tidy over the tests, the examples and the benchmark, and so over every engine header they
+include, with the checks in `.clang-tidy`. The tool is LLVM 23 on both runners, and a test, `clang_tidy_version`,
+fails on any other major. The tests are off until a configure names the tool:
+
+```bash
+cmake --preset relwithdebinfo-macos-arm64 -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy
+ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8
+```
+
+`FLYWHEEL_DAG_CLANG_TIDY` is a command on `PATH` or a path to one, and a configure that names a tool it cannot run
+fails; `FLYWHEEL_DAG_CLANG_TIDY_ARGS` adds arguments, as a list. There is one test per source file, and a few that
+prove the gate bites. On a Mac, `brew install llvm` has LLVM 23; it is keg-only, so link its `clang-tidy` and
+`clangd` into a directory on your `PATH`. On Ubuntu, `clang-tidy-23` is in LLVM's own apt repository,
+apt.llvm.org, and `.github/workflows/ci.yml` shows the install.
+
 ## Benchmark
 
 [`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle

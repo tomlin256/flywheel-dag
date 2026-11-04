@@ -63,6 +63,15 @@ ctest --preset relwithdebinfo-macos-arm64
   - The flags are the top level's alone. Never put one on `flywheel_dag`'s
     `INTERFACE` or in the cache; `test_warning_flags` and
     `test_consumer_subproject` check it.
+- CI holds the code to clang-tidy (flywheel-dag#60). `.clang-tidy` is the one list of checks, and the editor's clangd
+  reads it too. `cmake --preset relwithdebinfo-macos-arm64 -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy`, then
+  `ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8` runs the same tests as CI's `clang-tidy` job
+  (`clang-tidy-23` on Ubuntu). The tool is one LLVM major, 23, on the Mac (Homebrew's `llvm`, with `clangd` and
+  `clang-tidy` linked into `/opt/homebrew/bin`), in the `ubuntu-dev` image and in CI, and `clang_tidy_version` fails
+  on any other. Moving to another is one commit: the number in `tests/CMakeLists.txt`, the install steps in
+  `ci.yml`, the image, and what the new major reports. Fix a finding. `NOLINT(<check>)` is for a tool that is wrong or
+  cannot see an invariant, by name and with a comment that says which (`~TimeOnExit` in `dag_engine.inl`, and
+  `toSvg` until flywheel-dag#62). `tests/clang_tidy_canary/` holds deliberate defects; it is in no compile database.
 - `benchmarks/bench_hot_path` is `EXCLUDE_FROM_ALL` and not a ctest test. Time a
   change by running it before and after, on the same machine:
   `cmake --build --preset relwithdebinfo-macos-arm64 --target bench_hot_path &&
