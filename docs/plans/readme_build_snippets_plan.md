@@ -1,6 +1,6 @@
 # Point the README's Two Build Snippets at a Preset
 
-**Status: Awaiting approval.**
+**Status: Approved (2026-11-04).** Approved as written.
 
 Closes [flywheel-dag#64](https://github.com/tomlin256/flywheel-dag/issues/64).
 
