@@ -1,8 +1,9 @@
 # Run clang-tidy in CI, at LLVM 23 on the Mac, in Ubuntu and in CI
 
-**Status: Approved (2026-11-03), in progress.** Expanded the same day, from a Linux-only gate on the distro's tool to
-one LLVM major, 23, in all three places (D1, D2 and D7 to D9). Approved as written: D1 to D9 stood, with leave to
-install LLVM on the Mac and link it (Step 2).
+**Status: Done (2026-11-04).** Expanded on 2026-11-03 from a Linux-only gate on the distro's tool to one LLVM major,
+23, in all three places (D1, D2 and D7 to D9), and approved as written: D1 to D9 stood, with leave to install LLVM on
+the Mac and link it (Step 2). CI runs clang-tidy on both runners (run 41800758142), the code is clean under it, and the
+Outcome section at the end records what the steps found and where they differ from this text.
 
 Closes [flywheel-dag#60](https://github.com/tomlin256/flywheel-dag/issues/60), and
 [flywheel-dag#40](https://github.com/tomlin256/flywheel-dag/issues/40), which is one of its findings.
@@ -424,5 +425,40 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 | 7 The CRTP constructors | Done | `fix: make the CRTP bases' constructors private to their derived class`. `test_crtp_access` was red on the unchanged headers, for the three misuse cases and nothing else (the control compiled), and is green after. M9a to M9c, each constructor back to `protected`, fail their own case and no other. Remaining 2 at 2 sites on the Mac and on Ubuntu (`~TimeOnExit`, `std::system`). Mac: build clean, ctest 46 of 46. Ubuntu 26.04 (GCC 15.2) and the `ubuntu-dev` image (GCC 13.3): configure and build clean, ctest 46 of 46. The disassembly of `Engine::cycle()` is identical to the pre-Step-6 binary, and the invariants match. |
 | 8 The two suppressions | Done | `fix: name the two findings clang-tidy cannot be satisfied on, and say why`. `NOLINTNEXTLINE(bugprone-exception-escape)` on `~TimeOnExit`, with the invariant stated, and `NOLINT(cert-env33-c, bugprone-command-processor)` on the `std::system` call, with a comment that points at **flywheel-dag#62** (opened: `toSvg` builds a shell command from two unquoted paths; label `bug`). Remaining 0 on the Mac (Homebrew 23.1.4), on Ubuntu 26.04 (23.1.5) and in a container from the `ubuntu-dev` image (23.1.5): all 40 `clang_tidy_` tests pass on each. Mac: build clean, ctest 46 of 46; the disassembly of `Engine::cycle()` is identical to the pre-Step-6 binary and the invariants match. M10 (no eviction in `record()`) fails the new test. **M6** (a by-value `std::string` parameter in `dag.hpp`): of 35 units 30 include it, and exactly those 30 per-file tests failed; the 5 that do not (`allocation_counter`, `bench_report`, `test_allocation_counter`, `test_bench_report`, `test_ring_buffer`) passed. |
 | 9 The CI job | Done | `ci: run clang-tidy at LLVM 23`. The workflow parses as YAML (Ruby) with the jobs `build`, untouched, and `clang-tidy`. The Ubuntu leg's steps, taken out of the YAML and run as separate `bash -e` steps in a fresh `ubuntu:26.04` container (arm64 here, with the arm64 preset; the runner is x86_64): the key fingerprint check passes, apt installs clang-tidy 23.1.6 (apt.llvm.org's snapshot had moved on from 23.1.5 within hours), and 40 of 40 tests pass in 22 s. The macOS leg's steps on the Mac, against Homebrew's 23.1.4: 40 of 40 in 15 s. **Not proved here:** the x86_64 packages, and a first `brew install llvm` on a runner. Step 10 is that test. |
-| 10 Push, and read CI | | |
-| 11 Docs, and the plan done | | |
+| 10 Push, and read CI | Done | One push of 12 commits (`ab4fd79`) after the leak audit's dry run and a last full build and ctest of the final tree on the Mac, on Ubuntu 26.04 (GCC 15.2) and in the `ubuntu-dev` image (GCC 13.3). Run 41800758142: all four jobs green. `clang-tidy` on Ubuntu: `ubuntu-26.04`, CMake 4.4.4, `Ubuntu LLVM version 23.1.6`, 40 of 40 in 1 min 43 s. `clang-tidy` on macOS: `macos-26-arm64`, CMake 4.4.4, `Homebrew LLVM version 23.1.4`, 40 of 40 in 3 min, the first `brew install llvm` taking 44 s. The two `build` legs keep their names and pass 46 of 46, `test_crtp_access` included, with no warning. flywheel-dag#40 and flywheel-dag#60 are closed with a comment each. |
+| 11 Docs, and the plan done | Done | `CLAUDE.md` and `README.md`, committed before the push; then this commit: the status, this table and the Outcome. The memory notes are updated outside the repo. The run for this docs-only commit is unread. |
+
+## Outcome
+
+- **CI runs clang-tidy, at one major.** 23.1.4 (Homebrew) on the Mac and on the macOS runner; 23.1.5 and 23.1.6
+  (apt.llvm.org) in the Ubuntu container and on the Ubuntu runner. The apt snapshot moved from 23.1.5 to 23.1.6 within
+  hours and the findings did not change; `clang_tidy_version` holds the major only, as planned.
+- **Eighty-three findings, none left, two named.** 77 sites on the Mac, 62 on Ubuntu, all in code that CI had never
+  read. Sixty-eight were fixed in the code; the 13 `bugprone-signed-bitwise` diagnostics are a configuration option;
+  `~TimeOnExit` and the `std::system` call are `NOLINT` by name, each with a comment, and `std::system` cites
+  flywheel-dag#62, opened for its unquoted paths. `Engine::cycle()` is the same instructions as before the header
+  changes, addresses aside, and `bench_hot_path --invariants` matches the committed file.
+- **Where the measurements differed from this plan:**
+  - `opt.value()` is reported like `*opt`, so the optional sites use a check the analysis can see (a helper in
+    `test_timeseries.cpp`, `if (!x.has_value()) FAIL()` in `test_dag.cpp`), not `.value()`.
+  - clang 23 against the macOS SDK's libc++ stopped 21 units on nlohmann/json's `std::char_traits<unsigned char>`
+    under the project's `-Werror=deprecated-declarations`. The tests pass `-Wno-error=deprecated-declarations`; a
+    deprecation in this project's own files is still an error.
+  - A file no target compiles is analysed with flags clang-tidy infers from its neighbours, not failed; M7 shows a
+    defect in one is found.
+  - M1 takes the three canaries as well as `clang_tidy_checks`, because they pass `--config-file`; M5 turns the 31
+    red per-file tests green, which only the canaries notice; the plan's M10, `buf_(window)`, does not make
+    `record()` throw (it evicts before it pushes), so the mutant is `record()` without its eviction.
+  - clangd reads `.clang-tidy`: an LSP probe shows it for Apple's 21.0.0 and Homebrew's 23.1.4. Neither shows the
+    checks clangd's default filter leaves out as slow, `bugprone-use-after-move` and
+    `bugprone-unchecked-optional-access`; CI does.
+  - The 5 `bugprone-throwing-static-initialization` sites are the macOS SDK's alone (glibc declares `std::acos` and
+    `std::exp` `noexcept`, the SDK does not), so the macOS leg is their only gate. Nothing on Ubuntu was missing from
+    the Mac's list.
+- **Outside this repository.** The `ubuntu-dev` image has `clang-tidy-23` (docker-ubuntu#5, closed; its plan 005, its
+  suite green twice, three hand-made changes failing as stated). Homebrew's `llvm` 23.1.4 is on the Mac with `clangd`
+  and `clang-tidy` linked into `/opt/homebrew/bin`, so the next Claude Code session starts clangd 23.
+- **Left to you.** Recreating the live `ubuntu-dev` (`./start.sh --detach`, which closes its shells), which still has
+  clang-tidy 18; whether the public header changes (D6) are a v1.0.1; and flywheel-dag#62.
+- **CI was not shown a seeded defect.** That is M6 on a scratch copy: of 35 units, the 30 that include a seeded
+  `dag.hpp` failed and the 5 that do not passed.
