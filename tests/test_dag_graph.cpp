@@ -435,17 +435,23 @@ protected:
     }
 
     /// toSvg(outPath) renders: it returns true; dot was given exactly -Tsvg,
-    /// dotArgument, -o and outArgument; the SVG is there and the .dot file is
-    /// not; pwn did not run. outPath ends in ".svg".
-    void expectRendered(const std::string& outPath, const std::string& dotArgument,
-                        const std::string& outArgument) const {
+    /// dotArgument, -o and outArgument; the SVG is there and the .dot file at
+    /// dotPath is not; pwn did not run.
+    void expectRendered(const std::string& outPath, const std::string& dotPath,
+                        const std::string& dotArgument, const std::string& outArgument) const {
         forgetRuns();
         EXPECT_TRUE(GraphExporter::toSvg({ node_ }, outPath));
         const std::vector<std::string> expected{ "-Tsvg", dotArgument, "-o", outArgument };
         EXPECT_EQ(recordedArguments(), expected);
         EXPECT_TRUE(fs::exists(outPath)) << outPath;
-        EXPECT_FALSE(fs::exists(dotPathOf(outPath))) << dotPathOf(outPath);
+        EXPECT_FALSE(fs::exists(dotPath)) << dotPath;
         EXPECT_FALSE(pwnRan());
+    }
+
+    /// The same for an outPath that ends in ".svg", whose .dot file is dotPathOf(outPath).
+    void expectRendered(const std::string& outPath, const std::string& dotArgument,
+                        const std::string& outArgument) const {
+        expectRendered(outPath, dotPathOf(outPath), dotArgument, outArgument);
     }
 
     std::shared_ptr<Input<double>> node_ = makeInput("a");
@@ -569,6 +575,69 @@ TEST_F(DagGraphToSvg, HandsDotTheCallersEnvironment) {
     EXPECT_TRUE(GraphExporter::toSvg({ node_ }, out));
     const std::string recorded = readAll(bin_ / "env");
     EXPECT_EQ(recorded.substr(0, recorded.find('\0')), "from the caller");
+}
+
+// ── Test 27: the .dot file is named after the last extension of the file name ─
+// graph.svg gives graph.dot (the rule every test above relies on); a name with
+// two extensions loses the last, one with none gains .dot, and a name that is
+// only an extension keeps it as a stem.
+
+TEST_F(DagGraphToSvg, NamesTheDotFileAfterTheLastExtensionOfTheFileName) {
+    const std::vector<std::pair<std::string, std::string>> names = {
+        { "graph.v2.svg", "graph.v2.dot" }, { "graph", "graph.dot" }, { ".hidden", ".hidden.dot" },
+    };
+    for (const auto& [file, dotFile] : names) {
+        SCOPED_TRACE(file);
+        const std::string out = (work_ / file).string();
+        const std::string dotPath = (work_ / dotFile).string();
+        expectRendered(out, dotPath, dotPath, out);
+    }
+}
+
+// ── Test 28: a dot in a directory name is not the extension ──────────────────
+// keep.dot is where a rule that looks at the whole path would write the DOT,
+// replacing the file, and then remove it.
+
+TEST_F(DagGraphToSvg, LeavesAFileBesideADottedDirectoryAlone) {
+    const fs::path dir = work_ / "keep.d";
+    fs::create_directory(dir);
+    {
+        std::ofstream precious(work_ / "keep.dot");
+        precious << "precious";
+    }
+    const std::string out = (dir / "graph").string();
+    const std::string dotPath = (dir / "graph.dot").string();
+
+    expectRendered(out, dotPath, dotPath, out);
+    EXPECT_EQ(readAll(work_ / "keep.dot"), "precious");
+}
+
+// ── Test 29: dot does not read the file it writes ────────────────────────────
+// An output path that ends in .dot, in any case (a Mac's file system ignores
+// it), would be its own input, and removing the .dot file would remove the output.
+
+TEST_F(DagGraphToSvg, DoesNotReadTheFileItWrites) {
+    const std::vector<std::string> files = { "graph.dot", "graph.DOT" };
+    for (const std::string& file : files) {
+        SCOPED_TRACE(file);
+        const std::string out = (work_ / file).string();
+        const std::string dotPath = out + ".dot";
+        expectRendered(out, dotPath, dotPath, out);
+    }
+}
+
+// ── Test 30: a path with a NUL is refused ────────────────────────────────────
+// A NUL ends a path where the OS reads it, so the .dot name and the output
+// could be one file. Nothing is written and nothing is run.
+
+TEST_F(DagGraphToSvg, RefusesAPathWithANul) {
+    std::string out = (work_ / "x.svg").string();
+    out.push_back('\0');
+    out += "y.z";
+
+    EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
+    EXPECT_FALSE(dotRan());
+    EXPECT_TRUE(fs::is_empty(work_));
 }
 
 #endif  // FLYWHEEL_DAG_HAS_TO_SVG

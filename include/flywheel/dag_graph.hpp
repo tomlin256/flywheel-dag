@@ -26,6 +26,7 @@
 #include "dag.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stack>
@@ -60,10 +61,14 @@ public:
 
 #ifdef FLYWHEEL_DAG_HAS_TO_SVG
     /// Write DOT to a .dot file, run `dot -Tsvg` on it without a shell, write SVG
-    /// to outPath. Returns true on success, and removes the .dot file. On failure
-    /// (no `dot` on PATH or non-zero exit) the .dot file is kept alongside outPath
-    /// and false is returned. outPath may hold any character, a space, ';' or '$'
-    /// included, and may start with '-'.
+    /// to outPath. The .dot file sits beside outPath and is named from the file
+    /// name alone: its extension becomes ".dot" (".dot" is appended when it has
+    /// none), so graph.svg gives graph.dot; an outPath that already ends in .dot,
+    /// in any case, gets ".dot" appended instead, so that dot never reads the file
+    /// it writes. Returns true on success, and removes the .dot file. On failure
+    /// (no `dot` on PATH or non-zero exit) the .dot file is kept and false is
+    /// returned. outPath may hold any character, a space, ';' or '$' included, and
+    /// may start with '-'; one with a NUL is refused (false, nothing written).
     static bool toSvg(const std::vector<ConstNodePtr>& roots,
                       const std::string& outPath,
                       const std::string& graphName = "flywheel");
@@ -77,6 +82,23 @@ private:
     /// leading '-' becomes "./-", which names the same file.
     static std::string asArgument(const std::string& path) {
         return (!path.empty() && path.front() == '-') ? "./" + path : path;
+    }
+
+    static char asciiLower(const char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+
+    /// Where toSvg() writes the DOT text (flywheel-dag#63): beside outPath, named
+    /// from the file name alone, so that a dot in a directory name is never taken
+    /// for the extension. The extension of the file name becomes ".dot", or ".dot"
+    /// is appended when there is none. When the extension already is .dot, in any
+    /// case (a Mac's file system ignores it), that would be outPath itself, which
+    /// dot would read as it wrote it, so ".dot" goes on the end of the whole path
+    /// instead. The two names share their stem byte for byte, so a .dot extension
+    /// is the only way they can meet.
+    static std::string dotPathFor(const std::string& outPath) {
+        std::string extension = std::filesystem::path{outPath}.extension().string();
+        std::ranges::transform(extension, extension.begin(), asciiLower);
+        if (extension == ".dot") return outPath + ".dot";
+        return std::filesystem::path{outPath}.replace_extension(".dot").string();
     }
 
     /// Run `dot -Tsvg dotPath -o outPath` and wait for it. True when it started
@@ -255,13 +277,11 @@ inline bool GraphExporter::toSvg(const std::vector<ConstNodePtr>& roots,
                                  const std::string& outPath,
                                  const std::string& graphName)
 {
-    const std::string dot = toDot(roots, graphName);
+    // A NUL ends a path where the OS reads it, so the .dot name and outPath could then be one file.
+    if (outPath.find('\0') != std::string::npos) return false;
 
-    // Derive .dot path: replace/append extension
-    std::string dotPath;
-    const auto dotPos = outPath.rfind('.');
-    dotPath = (dotPos != std::string::npos) ? outPath.substr(0, dotPos) + ".dot"
-                                            : outPath + ".dot";
+    const std::string dot = toDot(roots, graphName);
+    const std::string dotPath = dotPathFor(outPath);
 
     {
         std::ofstream f(dotPath);
