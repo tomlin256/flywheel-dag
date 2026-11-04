@@ -3,7 +3,8 @@
 **Status: Done (2026-11-04).** Expanded on 2026-11-03 from a Linux-only gate on the distro's tool to one LLVM major,
 23, in all three places (D1, D2 and D7 to D9), and approved as written: D1 to D9 stood, with leave to install LLVM on
 the Mac and link it (Step 2). CI runs clang-tidy on both runners (run 41800758142), the code is clean under it, and the
-Outcome section at the end records what the steps found and where they differ from this text.
+Outcome section at the end records what the steps found and where they differ from this text. D6 left a release to
+you; you asked for one afterwards, and it shipped as v1.0.1 (2026-11-04, Outcome).
 
 Closes [flywheel-dag#60](https://github.com/tomlin256/flywheel-dag/issues/60), and
 [flywheel-dag#40](https://github.com/tomlin256/flywheel-dag/issues/40), which is one of its findings.
@@ -426,7 +427,7 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 | 8 The two suppressions | Done | `fix: name the two findings clang-tidy cannot be satisfied on, and say why`. `NOLINTNEXTLINE(bugprone-exception-escape)` on `~TimeOnExit`, with the invariant stated, and `NOLINT(cert-env33-c, bugprone-command-processor)` on the `std::system` call, with a comment that points at **flywheel-dag#62** (opened: `toSvg` builds a shell command from two unquoted paths; label `bug`). Remaining 0 on the Mac (Homebrew 23.1.4), on Ubuntu 26.04 (23.1.5) and in a container from the `ubuntu-dev` image (23.1.5): all 40 `clang_tidy_` tests pass on each. Mac: build clean, ctest 46 of 46; the disassembly of `Engine::cycle()` is identical to the pre-Step-6 binary and the invariants match. M10 (no eviction in `record()`) fails the new test. **M6** (a by-value `std::string` parameter in `dag.hpp`): of 35 units 30 include it, and exactly those 30 per-file tests failed; the 5 that do not (`allocation_counter`, `bench_report`, `test_allocation_counter`, `test_bench_report`, `test_ring_buffer`) passed. |
 | 9 The CI job | Done | `ci: run clang-tidy at LLVM 23`. The workflow parses as YAML (Ruby) with the jobs `build`, untouched, and `clang-tidy`. The Ubuntu leg's steps, taken out of the YAML and run as separate `bash -e` steps in a fresh `ubuntu:26.04` container (arm64 here, with the arm64 preset; the runner is x86_64): the key fingerprint check passes, apt installs clang-tidy 23.1.6 (apt.llvm.org's snapshot had moved on from 23.1.5 within hours), and 40 of 40 tests pass in 22 s. The macOS leg's steps on the Mac, against Homebrew's 23.1.4: 40 of 40 in 15 s. **Not proved here:** the x86_64 packages, and a first `brew install llvm` on a runner. Step 10 is that test. |
 | 10 Push, and read CI | Done | One push of 12 commits (`ab4fd79`) after the leak audit's dry run and a last full build and ctest of the final tree on the Mac, on Ubuntu 26.04 (GCC 15.2) and in the `ubuntu-dev` image (GCC 13.3). Run 41800758142: all four jobs green. `clang-tidy` on Ubuntu: `ubuntu-26.04`, CMake 4.4.4, `Ubuntu LLVM version 23.1.6`, 40 of 40 in 1 min 43 s. `clang-tidy` on macOS: `macos-26-arm64`, CMake 4.4.4, `Homebrew LLVM version 23.1.4`, 40 of 40 in 3 min, the first `brew install llvm` taking 44 s. The two `build` legs keep their names and pass 46 of 46, `test_crtp_access` included, with no warning. flywheel-dag#40 and flywheel-dag#60 are closed with a comment each. |
-| 11 Docs, and the plan done | Done | `CLAUDE.md` and `README.md`, committed before the push; then this commit: the status, this table and the Outcome. The memory notes are updated outside the repo. The run for this docs-only commit is unread. |
+| 11 Docs, and the plan done | Done | `CLAUDE.md` and `README.md`, committed before the push; then this commit: the status, this table and the Outcome. The memory notes are updated outside the repo. The run for this docs-only commit, 41801757612, is green. |
 
 ## Outcome
 
@@ -458,7 +459,16 @@ notes on running clang-tidy by hand and on where the editor's clangd comes from 
 - **Outside this repository.** The `ubuntu-dev` image has `clang-tidy-23` (docker-ubuntu#5, closed; its plan 005, its
   suite green twice, three hand-made changes failing as stated). Homebrew's `llvm` 23.1.4 is on the Mac with `clangd`
   and `clang-tidy` linked into `/opt/homebrew/bin`, so the next Claude Code session starts clangd 23.
-- **Left to you.** Recreating the live `ubuntu-dev` (`./start.sh --detach`, which closes its shells), which still has
-  clang-tidy 18; whether the public header changes (D6) are a v1.0.1; and flywheel-dag#62.
+- **Released, and the container recreated (2026-11-04).** You asked for both after the plan was done. v1.0.1 is
+  `cebd14b` (`build: release v1.0.1`), tagged and published at
+  https://github.com/tomlin256/flywheel-dag/releases/tag/v1.0.1. Run 41804824173 on that commit is green on all four
+  jobs: `build` on Ubuntu 26.04 (GCC 15.2) and on macOS 26 (Apple Clang 21), 46 of 46 each, and `clang-tidy` on both,
+  40 of 40 each (Ubuntu LLVM 23.1.6, Homebrew LLVM 23.1.4). A throwaway container from the `ubuntu-dev` image (GCC 13.3,
+  CMake 4.4.5, LLVM 23.1.5) built and tested a `git archive` copy of the release commit with CI's flags and the gate
+  on: no warning, 46 of 46 and 40 of 40. The notes name the one change that can stop a build, a class that derives one
+  of the three CRTP bases with a template argument other than itself. The live `ubuntu-dev` was recreated with
+  `./start.sh --detach`: it has `clang-tidy` 23.1.5 and CMake 4.4.5, kept the `/ccache` volume, and runs the 40 gate
+  tests on the mounted checkout, 40 of 40.
+- **Left to you.** flywheel-dag#62.
 - **CI was not shown a seeded defect.** That is M6 on a scratch copy: of 35 units, the 30 that include a seeded
   `dag.hpp` failed and the 5 that do not passed.
