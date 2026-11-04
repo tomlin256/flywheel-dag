@@ -1,6 +1,6 @@
 # Name `toSvg()`'s `.dot` File From the File Name Alone
 
-**Status: Proposed (2026-11-04).** Awaiting approval.
+**Status: Approved (2026-11-04).** Approved as written.
 
 Closes [flywheel-dag#63](https://github.com/tomlin256/flywheel-dag/issues/63).
 
