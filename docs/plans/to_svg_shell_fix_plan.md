@@ -192,6 +192,8 @@ Where the work differs from the plan:
 
 Left open: [flywheel-dag#63](https://github.com/tomlin256/flywheel-dag/issues/63). The release notes owe two
 lines: `toSvg()` is not declared where `<spawn.h>` is absent (D3), and the shell no longer expands `outPath`.
+Both are in the notes of v1.0.2 (2026-11-04), which carries this change and flywheel-dag#63, whose plan records the
+release.
 
 ## Self-review — risks and assumptions
 

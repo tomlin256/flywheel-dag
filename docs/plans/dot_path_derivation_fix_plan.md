@@ -1,7 +1,8 @@
 # Name `toSvg()`'s `.dot` File From the File Name Alone
 
 **Status: Done (2026-11-04).** Approved as written. `toSvg()` names its `.dot` file from the file name alone,
-and refuses a path with a NUL.
+and refuses a path with a NUL. The plan leaves the release out; you asked for one afterwards, and it shipped with
+flywheel-dag#61 and flywheel-dag#62 as v1.0.2 (2026-11-04, Outcome).
 
 Closes [flywheel-dag#63](https://github.com/tomlin256/flywheel-dag/issues/63).
 
@@ -122,6 +123,17 @@ Every item of Step 2's "done when" held, on the files as committed:
 
 Where the work differs from the plan: it does not. No throwaway `ubuntu:26.04` container was run, as the plan
 said; CI's Ubuntu leg is the GCC 15.2.0 check.
+
+**Released (2026-11-04).** You asked for v1.0.2 after the plan was done. It is `e6c2ecd` (`build: release v1.0.2`),
+tagged and published at https://github.com/tomlin256/flywheel-dag/releases/tag/v1.0.2, and carries
+flywheel-dag#61, flywheel-dag#62 and this change, and moves the version strings in `CMakeLists.txt` and the README
+to 1.0.2. Run 41845708247 on it is green on all four jobs: `build` on Ubuntu 26.04 (GCC 15.2) and on
+macOS 26 (Apple Clang 21), 46 of 46 each, and `clang-tidy` on both, 40 of 40 each (Ubuntu LLVM 23.1.6, Homebrew
+LLVM 23.1.4). On the Mac `ctest` passed 46 of 46 with CI's flags and no warning. The notes name the two changes a
+consumer can meet: `toSvg()` is not declared where `<spawn.h>` is absent (flywheel-dag#62, D3), and the shell no
+longer expands `outPath`. The container check of the release commit was not run: Docker Desktop would not start. Its
+`include/` and `tests/` are those of `90e6c4d`, which passed 46 of 46 in `ubuntu-dev` (GCC 13.3.0), and CI's Ubuntu
+leg is green on the release commit itself.
 
 ## Self-review — risks and assumptions
 
