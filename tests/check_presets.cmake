@@ -1,15 +1,18 @@
 # check_presets.cmake — test_presets: CMakePresets.json names one build tree per
-# kind and platform, and says which of them a host can use.
+# kind and platform, and says which of them a host can use; README.md names only
+# those trees.
 #
 # Run by ctest as
 #
 #   cmake -DSOURCE_DIR=<source> -DHOST_SYSTEM_NAME=<CMAKE_HOST_SYSTEM_NAME>
-#         [-DPRESETS_DIR=<dir>] -P check_presets.cmake
+#         [-DPRESETS_DIR=<dir>] [-DREADME_DIR=<dir>] -P check_presets.cmake
 #
 # PRESETS_DIR is the directory whose CMakePresets.json is read (default
 # SOURCE_DIR); a hand-made change to a copy of the file is passed here, and must
-# fail the rule that names it (docs/plans/platform_build_dirs_plan.md). SOURCE_DIR
-# is the checkout whose cmake/flywheel_dag_platform.cmake spells the hosts.
+# fail the rule that names it (docs/plans/platform_build_dirs_plan.md). README_DIR
+# is the same for R8: the directory whose README.md is read (default SOURCE_DIR)
+# (docs/plans/readme_build_snippets_plan.md). SOURCE_DIR is the checkout whose
+# cmake/flywheel_dag_platform.cmake spells the hosts.
 #
 # CMake rejects a field it does not know, so the file cannot carry its own
 # rationale. It is here. A tree is build/<preset name>, so the name of a preset is
@@ -31,6 +34,12 @@
 # floor it would make CMake 3 stop on `cmake --preset` with "major version 4 must be
 # less than 3" before CMakeLists.txt could say "CMake 4.0 or higher is required".
 #
+# A command in the README builds the tree it names. A tree at build/ itself is one
+# no preset defines: the guard lets it through, because the name claims no
+# platform, and it sits among the named trees. So R8 reads the README, as
+# test_cmake_floor and test_cmake_diagnostics do, and holds every tree it names to
+# the presets.
+#
 # A new kind is a deliberate edit to the table of kinds below as well as to the
 # file. The rules:
 #
@@ -46,17 +55,23 @@
 #       carry the three settings above, and only `base` sets them
 #   R7  cmake --list-presets=all lists, for the configure, build and test presets,
 #       exactly the presets for HOST_SYSTEM_NAME's OS: CMake agrees with R3
+#   R8  README.md names only trees a preset defines: each `--preset <name>` and
+#       each build/<name> is a visible configure preset, and no command is -B,
+#       --build, --install or --test-dir on `build` itself
 
 cmake_minimum_required(VERSION 4.0)
 
 foreach(var IN ITEMS SOURCE_DIR HOST_SYSTEM_NAME)
     if(NOT ${var})
         message(FATAL_ERROR "usage: cmake -DSOURCE_DIR=<dir> -DHOST_SYSTEM_NAME=<name> "
-                            "[-DPRESETS_DIR=<dir>] -P check_presets.cmake")
+                            "[-DPRESETS_DIR=<dir>] [-DREADME_DIR=<dir>] -P check_presets.cmake")
     endif()
 endforeach()
 if(NOT PRESETS_DIR)
     set(PRESETS_DIR "${SOURCE_DIR}")
+endif()
+if(NOT README_DIR)
+    set(README_DIR "${SOURCE_DIR}")
 endif()
 
 include("${SOURCE_DIR}/cmake/flywheel_dag_platform.cmake")
@@ -83,7 +98,7 @@ function(finish)
         string(REPLACE ";" "\n" text "${failures}")
         message(FATAL_ERROR "test_presets: ${count} rule(s) failed:\n${text}")
     endif()
-    message(STATUS "test_presets: R1 to R7 hold")
+    message(STATUS "test_presets: R1 to R8 hold")
 endfunction()
 
 # json_member(<out> <json> <member>...): the member's value, or empty if it is
@@ -389,6 +404,53 @@ else()
         list(SORT listed_${section})
         if(NOT "${listed_${section}}" STREQUAL "${for_host}")
             rule_failed(R7 "cmake lists the ${section} presets '${listed_${section}}' for a ${HOST_SYSTEM_NAME} host, not '${for_host}'")
+        endif()
+    endforeach()
+endif()
+
+# R8: the README names only trees a preset defines. The text is matched whole, as
+# check_cmake_floor.cmake does, because it holds `;` and `[`, which a list of its
+# lines would split. CMake's regex has no lookahead and no \b, so a command on
+# `build` itself is the flag, spaces, `build`, and then anything that does not
+# continue a path: `--build build/relwithdebinfo-macos-arm64` is not one.
+set(readme_file "${README_DIR}/README.md")
+if(NOT EXISTS "${readme_file}")
+    rule_failed(R8 "${readme_file} is missing")
+else()
+    file(READ "${readme_file}" readme_text)
+
+    set(flat_flags "-B"         "--build" "--install" "--test-dir")
+    set(flat_verbs "configure"  "build"   "install"   "test")
+    foreach(flag verb IN ZIP_LISTS flat_flags flat_verbs)
+        string(REGEX MATCHALL "${flag} +build([^A-Za-z0-9_/.-]|$)" hits "${readme_text}")
+        list(LENGTH hits n)
+        if(n GREATER 0)
+            rule_failed(R8 "README.md has ${n} command(s) that ${verb} 'build' itself (${flag} build)")
+        endif()
+    endforeach()
+
+    # The names: `--preset <name>`, and the component after build/.
+    set(named "")
+    string(REGEX MATCHALL "--preset +[A-Za-z0-9_-]+" uses "${readme_text}")
+    foreach(use IN LISTS uses)
+        string(REGEX REPLACE "^--preset +" "" name "${use}")
+        list(APPEND named "${name}")
+    endforeach()
+    string(REGEX MATCHALL "build/[A-Za-z0-9_-]+" uses "${readme_text}")
+    foreach(use IN LISTS uses)
+        string(REGEX REPLACE "^build/" "" name "${use}")
+        list(APPEND named "${name}")
+    endforeach()
+    list(REMOVE_DUPLICATES named)
+    foreach(name IN LISTS named)
+        preset_json(preset configure ${name})
+        if("${preset}" STREQUAL "")
+            rule_failed(R8 "README.md names '${name}', which is no configure preset")
+        else()
+            json_member(hidden "${preset}" hidden)
+            if(hidden)
+                rule_failed(R8 "README.md names '${name}', which is a hidden preset")
+            endif()
         endif()
     endforeach()
 endif()

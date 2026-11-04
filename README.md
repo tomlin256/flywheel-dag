@@ -66,8 +66,8 @@ only when flywheel-dag is the top-level project.
 From a checkout, configure and install. Nothing needs building first:
 
 ```bash
-cmake -B build
-cmake --install build --prefix /opt/flywheel-dag
+cmake --preset relwithdebinfo-macos-arm64        # relwithdebinfo-linux-arm64 or -linux-x86_64 on Linux
+cmake --install build/relwithdebinfo-macos-arm64 --prefix /opt/flywheel-dag
 ```
 
 The prefix holds the engine alone: its headers, a `find_package` config and the LICENSE file.
@@ -134,8 +134,9 @@ a threshold with hysteresis, a warm-up gate and a latched alert — and drives i
 with `Engine::step()`:
 
 ```bash
-cmake -B build && cmake --build build
-./build/bin/quickstart
+cmake --preset relwithdebinfo-macos-arm64        # relwithdebinfo-linux-arm64 or -linux-x86_64 on Linux
+cmake --build --preset relwithdebinfo-macos-arm64
+./build/relwithdebinfo-macos-arm64/bin/quickstart
 ```
 
 ### Derivatives

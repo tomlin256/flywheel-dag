@@ -52,8 +52,8 @@ can be passed in as `PRESETS_DIR` does for the presets file). The README names o
 
 - each `--preset <name>` is a visible configure preset;
 - each `build/<name>` path is one too (`build/<kind>-<os>-<arch>` in prose has no name and is skipped);
-- no command is `-B build`, `--build build`, `--install build` or `--test-dir build` followed by a space or the end
-  of the line, which is `build` itself.
+- no command is `-B build`, `--build build`, `--install build` or `--test-dir build` followed by anything but a
+  path character (a letter, a digit, `_`, `-`, `.` or `/`), which is `build` itself.
 
 ## Decisions
 
@@ -124,8 +124,8 @@ docs commits are not waited for. No release.
 - **R8 is a text match.** A future snippet spelled another way (`-S . -B ./build`) passes unseen. R8 pins the
   spellings that existed, and each has a mutant.
 - **CMake's regex has no lookahead and no `\b`.** `--build build/relwithdebinfo-macos-arm64` must not read as
-  `build` itself, so the flat forms are matched as the flag, a space, `build`, then a space or a newline. M3 and
-  the unmutated README cover both sides.
+  `build` itself, so the flat forms are matched as the flag, spaces, `build`, then anything but a path character:
+  a newline, a space or a closing backtick all end it. M3 and the unmutated README cover both sides.
 - **Match on the whole text, not `file(STRINGS)` lines.** The README holds `;` and `[`, which list handling would
   split; `check_cmake_floor.cmake` reads it with `file(READ)` for the same reason.
 - **Leak audit.** README, plan and commit text name no downstream application; the pre-push audit is dry-run
