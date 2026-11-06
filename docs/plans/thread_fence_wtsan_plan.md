@@ -1,8 +1,10 @@
 # Issue Standalone Fences Through `dag::threadFence()`, Which GCC's ThreadSanitizer Build Accepts
 
-**Status: In progress (approved 2026-11-06).** Approved as written: D1, the decision the issue asked for before a plan
-was written (silence the true warning in one helper), and D2, the new public name (so the next release is 1.1.0), are
-both yes.
+**Status: Done (2026-11-06).** Approved as written: D1, the decision the issue asked for before a plan was written
+(silence the true warning in one helper), and D2, the new public name (so the next release is 1.1.0), are both yes.
+`CycleSeqLock` issues its four fences through `dag::threadFence<Order>()`, `test_tsan_fences` holds it, and the whole
+suite builds and passes under GCC's ThreadSanitizer with `-Werror` and no `-Wno-error=tsan`. The plan leaves the release
+out (Outcome).
 
 Closes [flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49).
 
@@ -97,7 +99,7 @@ release/acquire operation it models); why the order is a template argument; why 
 header refuses to compile below C++23, like the others (`test_standard_guard` globs them).
 
 **2. `CycleSeqLock`** calls `dag::threadFence<std::memory_order_release>()` and `<std::memory_order_acquire>()` at its
-four sites, and `dag_engine.hpp` includes the header. The class comment gains the sentence the issue found missing: a
+four sites, and `dag_engine.inl`, the file that calls it, includes the header. The class comment gains the sentence the issue found missing: a
 sanitizer cannot check this lock (it does not report on atomics and does not model the fences), so the deterministic
 tests hold the protocol.
 
@@ -218,7 +220,7 @@ Mac the scan names the four sites and the compile cases pass. Green after the en
   | M3. one of the four sites back to `std::atomic_thread_fence` | `test_tsan_fences`: the scan on every host, and the engine unit on GCC |
   | M4. the pragmas deleted from the helper | `test_tsan_fences` on GCC: the helper unit and the engine unit |
   | M5. the `!defined(__clang__)` guard deleted | `test_tsan_fences` on Clang and Apple clang: `unknown warning group '-Wtsan'`, in both units |
-  | M6. `-Wtsan` misspelt in the pragma | `test_tsan_fences` on GCC: `unknown option after '#pragma GCC diagnostic'`, and `-Werror=tsan` again |
+  | M6. `-Wtsan` misspelt in the pragma | `test_tsan_fences` on GCC: `unknown option after '#pragma GCC diagnostic'` |
   | M7. the control's bare fence replaced with a plain statement | `test_tsan_fences` on GCC: the control compiles |
 
   M5 and M6 were run on the probe above, with the narrow flags, and fail as stated; the rest are run in this step.
@@ -232,6 +234,66 @@ The issue is closed with a comment that gives the commits, once CI on the Step 3
 of docs commits are not waited for.
 
 Commit: `docs: name dag::threadFence as the second exception to the warning rule`.
+
+## Outcome
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `1ad0a48`; the approval is recorded in `377c75e` |
+| 2 — The helper and its tests | Done | `a22ec49` |
+| 3 — `CycleSeqLock` uses it, and the check that holds it | Done | `2a4a8c5` |
+| 4 — Docs, and close out | Done | the commit that adds this section |
+
+Every item of Step 2's and Step 3's "done when" held, on the files as committed:
+
+- **Step 2.** The build prints no warning with CI's flags, and `ctest` passes 47 of 47 on the Mac (Apple clang 21) and in
+  `ubuntu-dev` (GCC 13.3.0), `test_standard_guard` and `test_install` among them. The `clang_tidy_` tests pass 41 of 41
+  on both (40 before). M1 (`noexcept` dropped) fails the build with `static assertion failed due to requirement
+  'noexcept(dag::threadFence())'`; M2 (the order ignored) survives, as the plan said.
+- **Step 3, red first.** Before the engine changed, `test_tsan_fences` failed on the Mac with the scan naming
+  `dag_engine.inl` lines 53, 57, 81 and 83 and the compile cases passing, and in `ubuntu-dev` with the same four lines
+  and the engine unit stopping with `-Werror=tsan` at `-O0` and at `-O2`.
+- **Step 3, green.** `ctest` passes 48 of 48 on the Mac and in `ubuntu-dev`, with no compiler warning, and the
+  `clang_tidy_` tests 41 of 41 on both. The test takes 2.3 to 2.7 s on the Mac and about 6 s in `ubuntu-dev`.
+  `bench_hot_path --invariants` matches `benchmarks/expected_invariants.txt` (Mac).
+- **The check script by hand:** GCC 15.2.0 in a throwaway `ubuntu:26.04` container (CMake 4.2.3) and Clang 23.1.6 in
+  `ubuntu-dev` both pass.
+- **The whole suite under ThreadSanitizer,** `ubuntu-dev`, GCC 13.3.0, a full rebuild of the tree (48 objects) with
+  `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` and `-fsanitize=thread`: no `-Wtsan` line (68 before), no warning, no error;
+  `ctest` passes 48 of 48 in 50 s with no ThreadSanitizer report. On the Mac, Apple clang 21's runtime runs all of
+  `test_dag_async` (146 tests, the 13 `CycleSeqLock` and `EngineCycleSeqLock` ones among them) with no report.
+- **Object code,** the committed engine against the commit before it, the unit that opens a `WriteScope` and calls
+  `readConsistent()`, at `-O2`: identical, plain and under `-fsanitize=thread`, on aarch64 (native) and on x86-64
+  (emulated; 31,646 and 45,666 lines of disassembly).
+- **Hand-made changes,** on a scratch copy, each run against `test_tsan_fences` alone. The control (no change) passes in
+  both trees, and each change fails the test as the plan said:
+
+  | Change | What the test said |
+  |---|---|
+  | M3, the reader's first acquire back to `std::atomic_thread_fence` | Mac: the scan, `dag_engine.inl:83`. `ubuntu-dev`: the scan, and the engine unit at `-O0` and `-O2`, `-Werror=tsan` |
+  | M4, the pragmas deleted | `ubuntu-dev`: the helper unit and the engine unit, each at `-O0` and `-O2`, `-Werror=tsan` |
+  | M5, the compiler guard deleted | Mac (Apple clang): both units at both levels, `unknown warning group '-Wtsan'` |
+  | M6, `-Wtsan` misspelt | `ubuntu-dev`: both units at both levels, `unknown option after '#pragma GCC diagnostic' kind [-Werror=pragmas]` |
+  | M7, the control no longer a fence | `ubuntu-dev`: `the control compiled` at `-O0` and `-O2` |
+
+- **CI,** run 42208191045 on `2a4a8c5`, is green on all four jobs: `build` on Ubuntu (GCC 15.2.0, CMake 4.4.5, x86-64)
+  and on macOS (Apple clang 21.0.0), 48 of 48 each, `test_tsan_fences` among them (14.7 s and 6.7 s on the shared
+  runners), and `clang-tidy` on both. Run 42206613192 on `a22ec49` is green too.
+
+Where the work differs from the plan:
+
+- **`dag_engine.inl` includes `dag_thread_fence.hpp`, not `dag_engine.hpp`.** The editor's include analysis called the
+  include unused in the `.hpp`, because only the `.inl` calls the helper, and the `.inl` already holds the one other
+  include that only it needs (spdlog). "The change" above is corrected.
+- **`test_dag_thread_fence.cpp` needed a `main()`,** as every suite here defines its own; the plan did not say so.
+- **The script reports a compiler's first error line,** not the chain of includes its output opens with; the plan did not
+  say how a failure would read.
+- **M6's row** said "and `-Werror=tsan` again"; the test shows each unit's first error only, which is the pragma's, so the
+  row no longer claims the second.
+- **M5 and M6 were run twice,** on the probe, as the plan said, and again on the test itself.
+
+**Not released.** The fix is on `main`; a consumer takes it with a tag, and the new header makes that 1.1.0 (D2). The
+release waits for your word (D6). Until a consumer's pin moves to it, its own `-Wno-error=tsan` stays.
 
 ## Not in this plan
 

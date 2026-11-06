@@ -45,10 +45,14 @@ ctest --preset relwithdebinfo-macos-arm64
   `-Werror=author`); use them locally, after the preset. The presets leave the
   last one off, so a newer compiler's new warning does not stop a contributor's
   build.
-  - Fix a warning, never silence it. The one exception is a confirmed compiler
-    false positive: silence it at that one site, for that one compiler, with a
-    comment naming the bug (the counting `operator delete` in
-    `benchmarks/bench_hot_path.cpp`).
+  - Fix a warning, never silence it. There are two exceptions. A confirmed
+    compiler false positive: silence it at that one site, for that one compiler,
+    with a comment naming the bug (the counting `operator delete` in
+    `benchmarks/bench_hot_path.cpp`). And GCC's `-Wtsan` at a standalone fence,
+    which is true and costs nothing for a fence that orders atomics only: issue
+    the fence through `dag::threadFence<Order>()` (`dag_thread_fence.hpp`,
+    flywheel-dag#49), never `std::atomic_thread_fence`; `test_tsan_fences` fails
+    on a bare one.
   - Hold an evaluated `ValuePtr` in a local before binding a reference into it:
     `const ValuePtr v = node->eval(ctx); const T& x = get_value<T>(v);`. GCC's
     `-Wdangling-reference` rejects a reference into the temporary.
