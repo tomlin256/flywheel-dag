@@ -265,6 +265,67 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
 endif()
 
+# The files Claude Code loads stay small (flywheel-dag#70). CLAUDE.md and the engine rules it imports are in every
+# session's context, so they have byte budgets; a CLAUDE.md anywhere in the checkout loads on demand, and Claude Code
+# keeps only the start of one past 40,000 characters, so none may pass 38,000. The budgets are these three numbers,
+# the one place they are written. The check is a plain cmake -P script, so it runs in every tree.
+#
+# Its own behaviour is held by fixtures in tests/claude_md_budget/, run with budgets of 20 bytes, 20 bytes and 30
+# characters: one it must accept, at the limit and with multi-byte text that is under the character cap and over the
+# byte count, and five it must refuse, each for its own reason. A refusal passes on the text of the script's own
+# message and fails on the message of any other rule, because a PASS_REGULAR_EXPRESSION ignores the exit status: a
+# script that accepts the fixture, or one that dies of something else, fails the test.
+# Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  set(_claude_md_budget_script   ${CMAKE_CURRENT_SOURCE_DIR}/check_claude_md_budget.cmake)
+  set(_claude_md_budget_fixtures ${CMAKE_CURRENT_SOURCE_DIR}/claude_md_budget)
+  set(_claude_md_budget_small    -DCLAUDE_MD_BYTES=20 -DRULES_BYTES=20 -DNESTED_CHARS=30)
+
+  add_test(NAME test_claude_md_budget
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DCLAUDE_MD_BYTES=6500 -DRULES_BYTES=6000 -DNESTED_CHARS=38000
+      -P ${_claude_md_budget_script})
+
+  add_test(NAME test_claude_md_budget_accepts
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${_claude_md_budget_fixtures}/accepts ${_claude_md_budget_small}
+      -P ${_claude_md_budget_script})
+
+  # The fixture's name, the problem it must draw, and the messages of the other rules, which it must not.
+  function(flywheel_dag_claude_md_budget_rejects name problem others)
+    add_test(NAME test_claude_md_budget_${name}
+      COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${_claude_md_budget_fixtures}/${name} ${_claude_md_budget_small}
+        -P ${_claude_md_budget_script})
+    set_tests_properties(test_claude_md_budget_${name} PROPERTIES
+      PASS_REGULAR_EXPRESSION "${problem}"
+      FAIL_REGULAR_EXPRESSION "${others}")
+  endfunction()
+
+  set(_over_claude_md  "CLAUDE\\.md is [0-9]+ bytes, over its budget")
+  set(_over_rules      "docs/engine_rules\\.md is [0-9]+ bytes, over its budget")
+  set(_over_nested     "CLAUDE\\.md is [0-9]+ characters, over the cap")
+  set(_missing_claude_md "[^/]CLAUDE\\.md is missing")
+  set(_missing_rules   "docs/engine_rules\\.md is missing")
+
+  flywheel_dag_claude_md_budget_rejects(rejects_claude_md
+    "CLAUDE\\.md is 22 bytes, over its budget of 20"
+    "${_over_rules}|${_over_nested}|is missing")
+  flywheel_dag_claude_md_budget_rejects(rejects_rules
+    "docs/engine_rules\\.md is 21 bytes, over its budget of 20"
+    "${_over_claude_md}|${_over_nested}|is missing")
+  flywheel_dag_claude_md_budget_rejects(rejects_nested
+    "sub/CLAUDE\\.md is 31 characters, over the cap of 30"
+    "${_over_claude_md}|${_over_rules}|is missing")
+  flywheel_dag_claude_md_budget_rejects(rejects_no_claude_md
+    "[^/]CLAUDE\\.md is missing"
+    "${_over_claude_md}|${_over_rules}|${_over_nested}|${_missing_rules}")
+  flywheel_dag_claude_md_budget_rejects(rejects_no_rules
+    "docs/engine_rules\\.md is missing"
+    "${_over_claude_md}|${_over_rules}|${_over_nested}|${_missing_claude_md}")
+endif()
+
 # clang-tidy over this project's own sources, as a gate (flywheel-dag#60). The root sets _flywheel_dag_clang_tidy when
 # FLYWHEEL_DAG_CLANG_TIDY names a tool, and has already refused a configure that asked for one it cannot run, so
 # nothing here checks again. Nothing is built: clang-tidy reads compile_commands.json and the sources the build would

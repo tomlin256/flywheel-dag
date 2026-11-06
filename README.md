@@ -350,7 +350,8 @@ invalidation protocol and what an equality policy can and cannot gate in `dag.hp
 flushing and allocation in `dag_async.hpp`, the cycle in `dag_engine.hpp`, and state persistence in
 `dag_state_store.hpp`. [`docs/plans/`](docs/plans) has the reasoning behind each fix.
 [`CLAUDE.md`](CLAUDE.md) is the short list of rules a contributor or coding agent needs before
-touching any of it.
+touching any of it, and [`docs/engine_rules.md`](docs/engine_rules.md) holds the rules for code that
+builds nodes and drives an engine.
 
 ## License
 
