@@ -43,7 +43,7 @@ evaluates only the part of the graph they dirtied.
 include(FetchContent)
 FetchContent_Declare(flywheel_dag
   GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-  GIT_TAG        v1.0.2)
+  GIT_TAG        v1.1.0)
 FetchContent_MakeAvailable(flywheel_dag)
 
 target_link_libraries(my_app PRIVATE flywheel::dag)

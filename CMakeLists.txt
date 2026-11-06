@@ -4,7 +4,7 @@
 #
 #   FetchContent_Declare(flywheel_dag
 #     GIT_REPOSITORY https://github.com/tomlin256/flywheel-dag.git
-#     GIT_TAG        v1.0.2)
+#     GIT_TAG        v1.1.0)
 #   FetchContent_MakeAvailable(flywheel_dag)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
@@ -68,7 +68,7 @@ if(_flywheel_dag_top_level)
         "The platform this build tree was first configured on")
 endif()
 
-project(FLYWHEEL_DAG VERSION 1.0.2 LANGUAGES CXX)
+project(FLYWHEEL_DAG VERSION 1.1.0 LANGUAGES CXX)
 
 # Export compile_commands.json for clangd and other tooling.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
