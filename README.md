@@ -225,7 +225,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
 | `dag_traversal.hpp` | `dag::traversal` | `bfs_upstream`, `BfsRange` |
-| `dag_graph.hpp` | `dag` | `GraphExporter` — DOT, and SVG through Graphviz's `dot` on a POSIX host (`toSvg()`; `FLYWHEEL_DAG_HAS_TO_SVG` says whether it exists) |
+| `dag_graph.hpp` | `dag` | `GraphExporter` — DOT, and SVG through Graphviz's `dot` on a POSIX host (`toSvg()`, and `dotPathFor()`, the `.dot` file it keeps when it fails; `FLYWHEEL_DAG_HAS_TO_SVG` says whether they exist) |
 | `dag_window_status.hpp` | `dag::ts` | `WindowStatus`, `IWindowed` |
 | `dag_ring_buffer.hpp` | `dag` | `RingBuffer` |
 | `dag_thread_fence.hpp` | `dag` | `threadFence<Order>()` — `std::atomic_thread_fence` for a program built under `-fsanitize=thread` with `-Werror` on GCC; use it for a fence that orders atomics only |

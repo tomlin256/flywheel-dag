@@ -13,6 +13,7 @@
 #include "flywheel/dag_timeseries.hpp"
 
 #ifdef FLYWHEEL_DAG_HAS_TO_SVG
+#include <algorithm>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -454,6 +455,44 @@ protected:
         expectRendered(outPath, dotPathOf(outPath), dotArgument, outArgument);
     }
 
+    /// Every regular file under dir, as strings, sorted.
+    static std::vector<std::string> filesUnder(const fs::path& dir) {
+        std::vector<std::string> files;
+        for (const fs::directory_entry& entry : fs::recursive_directory_iterator(dir)) {
+            if (entry.is_regular_file()) files.push_back(entry.path().string());
+        }
+        std::ranges::sort(files);
+        return files;
+    }
+
+    /// For each name that tells a case of the rule apart, in a directory of its own (with a keep.d beside it, for
+    /// the one name that goes into it): toSvg() fails, dotPathFor() is the .dot path the documented rule gives, and
+    /// the files toSvg() left are that one and, when outWritten, the SVG that the stand-in dot wrote to outPath
+    /// before it failed. The caller arranges the failure.
+    void expectDotPathForNamesTheKeptFile(const bool outWritten) const {
+        const std::vector<std::pair<std::string, std::string>> cases = {
+            { "graph.svg", "graph.dot" },     { "graph.v2.svg", "graph.v2.dot" }, { "graph", "graph.dot" },
+            { ".hidden", ".hidden.dot" },     { "keep.d/graph", "keep.d/graph.dot" },
+            { "graph.dot", "graph.dot.dot" }, { "graph.DOT", "graph.DOT.dot" },
+        };
+        int number = 0;
+        for (const auto& [file, dotFile] : cases) {
+            SCOPED_TRACE(file);
+            const fs::path dir = work_ / ("case" + std::to_string(number++));
+            fs::create_directories(dir / "keep.d");
+            const std::string out     = (dir / file).string();
+            const std::string dotPath = (dir / dotFile).string();
+
+            EXPECT_EQ(GraphExporter::dotPathFor(out), dotPath);
+            EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
+
+            std::vector<std::string> expected{ dotPath };
+            if (outWritten) expected.push_back(out);
+            std::ranges::sort(expected);
+            EXPECT_EQ(filesUnder(dir), expected);
+        }
+    }
+
     std::shared_ptr<Input<double>> node_ = makeInput("a");
     fs::path    root_;  // the scratch directory, with bin/ (the stand-ins), work/ (the working directory) and empty/
     fs::path    bin_;
@@ -638,6 +677,39 @@ TEST_F(DagGraphToSvg, RefusesAPathWithANul) {
     EXPECT_FALSE(GraphExporter::toSvg({ node_ }, out));
     EXPECT_FALSE(dotRan());
     EXPECT_TRUE(fs::is_empty(work_));
+}
+
+// ── Test 31: dotPathFor() is the file toSvg() keeps, when there is no dot ────
+// A caller that could not render learns where the DOT text is from dotPathFor()
+// and from nothing else (flywheel-dag#68). For each name that tells a case of the
+// rule apart (an extension replaced, one gained, a name that is only an extension,
+// a dot in a directory name, .dot in either case) it is the string the documented
+// rule gives and the one file toSvg() left. Each name has a directory of its own,
+// so that "the one file" is exact.
+
+TEST_F(DagGraphToSvg, DotPathForNamesTheFileKeptWhenThereIsNoDot) {
+    setenv("PATH", (root_ / "empty").c_str(), 1);
+
+    expectDotPathForNamesTheKeptFile(false);
+}
+
+// ── Test 32: and when dot runs and fails ─────────────────────────────────────
+// The stand-in writes the SVG before it exits 3, so the SVG is there as well.
+
+TEST_F(DagGraphToSvg, DotPathForNamesTheFileKeptWhenDotFails) {
+    {
+        std::ofstream exitCode(bin_ / "exit");
+        exitCode << "3\n";
+    }
+
+    expectDotPathForNamesTheKeptFile(true);
+}
+
+// ── Test 33: a relative path stays relative ──────────────────────────────────
+
+TEST_F(DagGraphToSvg, DotPathForKeepsARelativePathRelative) {
+    EXPECT_EQ(GraphExporter::dotPathFor("graph.svg"), "graph.dot");
+    EXPECT_EQ(GraphExporter::dotPathFor("out/graph.svg"), "out/graph.dot");
 }
 
 #endif  // FLYWHEEL_DAG_HAS_TO_SVG

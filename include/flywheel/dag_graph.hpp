@@ -12,7 +12,7 @@
 //
 // GraphExporter traverses the DAG backward from a set of root (output) nodes
 // and produces a Graphviz DOT description. toSvg() also runs `dot -Tsvg` to
-// render it; if that fails, the .dot file is kept.
+// render it; if that fails, the .dot file is kept, and dotPathFor() says where.
 //
 // toSvg() starts `dot` itself with posix_spawnp and hands it the two paths as
 // arguments, so no shell reads them and a path is only ever a path
@@ -60,18 +60,35 @@ public:
                              const std::string& graphName = "flywheel");
 
 #ifdef FLYWHEEL_DAG_HAS_TO_SVG
-    /// Write DOT to a .dot file, run `dot -Tsvg` on it without a shell, write SVG
-    /// to outPath. The .dot file sits beside outPath and is named from the file
-    /// name alone: its extension becomes ".dot" (".dot" is appended when it has
-    /// none), so graph.svg gives graph.dot; an outPath that already ends in .dot,
-    /// in any case, gets ".dot" appended instead, so that dot never reads the file
-    /// it writes. Returns true on success, and removes the .dot file. On failure
-    /// (no `dot` on PATH or non-zero exit) the .dot file is kept and false is
-    /// returned. outPath may hold any character, a space, ';' or '$' included, and
-    /// may start with '-'; one with a NUL is refused (false, nothing written).
+    /// Write DOT to the .dot file dotPathFor(outPath), run `dot -Tsvg` on it
+    /// without a shell, write SVG to outPath. Returns true on success, and removes
+    /// the .dot file. On failure (no `dot` on PATH or non-zero exit) the .dot file
+    /// is kept and false is returned, so a caller that cannot render can say where
+    /// the DOT text is: dotPathFor(outPath). When the .dot file cannot be written
+    /// (its directory is missing) nothing is run and no file is left. outPath may
+    /// hold any character, a space, ';' or '$' included, and may start with '-';
+    /// one with a NUL is refused (false, nothing written).
     static bool toSvg(const std::vector<ConstNodePtr>& roots,
                       const std::string& outPath,
                       const std::string& graphName = "flywheel");
+
+    /// The file toSvg() writes the DOT text to, and keeps when it returns false
+    /// (flywheel-dag#63, flywheel-dag#68): beside outPath, named from the file name
+    /// alone, so that a dot in a directory name is never taken for the extension.
+    /// The extension of the file name becomes ".dot", or ".dot" is appended when
+    /// there is none, so graph.svg gives graph.dot. When the extension already is
+    /// .dot, in any case (a Mac's file system ignores it), that would be outPath
+    /// itself, which dot would read as it wrote it, so ".dot" goes on the end of
+    /// the whole path instead: graph.dot gives graph.dot.dot. The two names share
+    /// their stem byte for byte, so a .dot extension is the only way they can
+    /// meet. Pure: it touches no file, and a relative outPath gives a relative
+    /// path.
+    static std::string dotPathFor(const std::string& outPath) {
+        std::string extension = std::filesystem::path{outPath}.extension().string();
+        std::ranges::transform(extension, extension.begin(), asciiLower);
+        if (extension == ".dot") return outPath + ".dot";
+        return std::filesystem::path{outPath}.replace_extension(".dot").string();
+    }
 #endif
 
 private:
@@ -85,21 +102,6 @@ private:
     }
 
     static char asciiLower(const char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
-
-    /// Where toSvg() writes the DOT text (flywheel-dag#63): beside outPath, named
-    /// from the file name alone, so that a dot in a directory name is never taken
-    /// for the extension. The extension of the file name becomes ".dot", or ".dot"
-    /// is appended when there is none. When the extension already is .dot, in any
-    /// case (a Mac's file system ignores it), that would be outPath itself, which
-    /// dot would read as it wrote it, so ".dot" goes on the end of the whole path
-    /// instead. The two names share their stem byte for byte, so a .dot extension
-    /// is the only way they can meet.
-    static std::string dotPathFor(const std::string& outPath) {
-        std::string extension = std::filesystem::path{outPath}.extension().string();
-        std::ranges::transform(extension, extension.begin(), asciiLower);
-        if (extension == ".dot") return outPath + ".dot";
-        return std::filesystem::path{outPath}.replace_extension(".dot").string();
-    }
 
     /// Run `dot -Tsvg dotPath -o outPath` and wait for it. True when it started
     /// and exited 0. posix_spawnp, unlike fork and exec, is safe from a process
