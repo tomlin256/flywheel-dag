@@ -228,6 +228,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 | `dag_graph.hpp` | `dag` | `GraphExporter` — DOT, and SVG through Graphviz's `dot` on a POSIX host (`toSvg()`; `FLYWHEEL_DAG_HAS_TO_SVG` says whether it exists) |
 | `dag_window_status.hpp` | `dag::ts` | `WindowStatus`, `IWindowed` |
 | `dag_ring_buffer.hpp` | `dag` | `RingBuffer` |
+| `dag_thread_fence.hpp` | `dag` | `threadFence<Order>()` — `std::atomic_thread_fence` for a program built under `-fsanitize=thread` with `-Werror` on GCC; use it for a fence that orders atomics only |
 
 ## Building and testing
 

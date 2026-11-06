@@ -17,6 +17,7 @@ set(FLYWHEEL_DAG_TESTS
   test_dag_ops
   test_dag_replay
   test_dag_state_store
+  test_dag_thread_fence
   test_dag_traversal
   test_engine_state
   test_engine_stateful_discovery
