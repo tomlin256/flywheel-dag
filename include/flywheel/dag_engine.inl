@@ -14,6 +14,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include "dag_thread_fence.hpp"
+
 namespace dag::async {
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,11 +52,11 @@ inline double RollingCycleWindow::meanUs() const {
 inline CycleSeqLock::WriteScope::WriteScope(CycleSeqLock& lock) : lock_(lock) {
     lock_.writer_.store(std::this_thread::get_id(), std::memory_order_relaxed);
     lock_.seq_.fetch_add(1, std::memory_order_relaxed);
-    std::atomic_thread_fence(std::memory_order_release);
+    dag::threadFence<std::memory_order_release>();
 }
 
 inline CycleSeqLock::WriteScope::~WriteScope() {
-    std::atomic_thread_fence(std::memory_order_release);
+    dag::threadFence<std::memory_order_release>();
     lock_.seq_.fetch_add(1, std::memory_order_relaxed);
     lock_.writer_.store(std::thread::id{}, std::memory_order_relaxed);
 }
@@ -78,9 +80,9 @@ auto CycleSeqLock::readConsistent(F&& fn, const std::string_view what,
             std::this_thread::yield();
             before = seq_.load(std::memory_order_relaxed);
         }
-        std::atomic_thread_fence(std::memory_order_acquire);   // pairs with WriteScope's fences
+        dag::threadFence<std::memory_order_acquire>();   // pairs with WriteScope's fences
         auto result = fn();
-        std::atomic_thread_fence(std::memory_order_acquire);
+        dag::threadFence<std::memory_order_acquire>();
         if (seq_.load(std::memory_order_relaxed) == before)
             return result;
         if (attempt == maxAttempts) {

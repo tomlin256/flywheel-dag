@@ -210,6 +210,24 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_crtp_access.cmake)
 endif()
 
+# The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that
+# orders atomics only (flywheel-dag#49). Nothing else would notice a fence that went back to std::atomic_thread_fence,
+# or a pragma that stopped working: the suite is not built under ThreadSanitizer, and the default build is not -Werror.
+# This scans the headers for a bare fence, compiles the helper and an engine unit with -fsanitize=thread (compile only,
+# so no ThreadSanitizer runtime is needed), and on GCC checks that a bare fence still draws the warning. Registered for
+# GCC and Clang, at the top level, like test_crtp_access.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_test(NAME test_tsan_fences
+    COMMAND ${CMAKE_COMMAND}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DCXX_ID=${CMAKE_CXX_COMPILER_ID}
+      -DINCLUDE_DIR=${PROJECT_SOURCE_DIR}/include
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/tsan_fences
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_tsan_fences.cmake)
+endif()
+
 # CMakePresets.json names one build tree per kind and platform and says which of
 # them a host can use. The check reads the file with string(JSON) and asks CMake
 # to list the presets for this host. Registered at the top level, where the file

@@ -128,6 +128,10 @@ private:
 inline constexpr std::size_t kDefaultCycleSeqReadAttempts = 64;
 
 // Seqlock over Engine::cycle(): lets another thread read cycle-written atomics as one set.
+//
+// A sanitizer cannot check it. ThreadSanitizer never reports on an atomic access, and it does not model the fences
+// this lock orders with (dag_thread_fence.hpp), so a clean ThreadSanitizer run says nothing about readConsistent().
+// The retry, wait-out and give-up tests in test_dag_async.cpp hold the protocol (flywheel-dag#49).
 class CycleSeqLock {
 public:
     // Holds one cycle open. RAII so a throwing callback can't leave it open and stall every reader.
