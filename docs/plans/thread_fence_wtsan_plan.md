@@ -4,7 +4,7 @@
 (silence the true warning in one helper), and D2, the new public name (so the next release is 1.1.0), are both yes.
 `CycleSeqLock` issues its four fences through `dag::threadFence<Order>()`, `test_tsan_fences` holds it, and the whole
 suite builds and passes under GCC's ThreadSanitizer with `-Werror` and no `-Wno-error=tsan`. The plan leaves the release
-out (Outcome).
+out; you asked for it afterwards, and it shipped as v1.1.0 (Outcome).
 
 Closes [flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49).
 
@@ -292,8 +292,15 @@ Where the work differs from the plan:
   row no longer claims the second.
 - **M5 and M6 were run twice,** on the probe, as the plan said, and again on the test itself.
 
-**Not released.** The fix is on `main`; a consumer takes it with a tag, and the new header makes that 1.1.0 (D2). The
-release waits for your word (D6). Until a consumer's pin moves to it, its own `-Wno-error=tsan` stays.
+**Released (2026-11-06).** You asked for the release after the plan was done (D6), and the new header made it 1.1.0
+(D2). It is `c3cd9a1` (`build(#49): release v1.1.0`), tagged and published at
+https://github.com/tomlin256/flywheel-dag/releases/tag/v1.1.0, and carries this change and flywheel-dag#64 (the README's
+build snippets name a preset). It moves the version strings in `CMakeLists.txt` and the README to 1.1.0. Run 42211466885
+on it is green on all four jobs: `build` on Ubuntu (GCC 15.2.0) and on macOS (Apple clang 21.0.0), 48 of 48 each, and
+`clang-tidy` on both, 41 of 41 each. On the Mac and in `ubuntu-dev`, `ctest` passed 48 of 48 on the release commit before
+it was pushed, the generated version file reported 1.1.0, and `bench_hot_path --invariants` matched the committed file. The
+tag was made after CI was green, so it points at a commit CI has run. Until a consumer's pin moves to it, that consumer's
+own `-Wno-error=tsan` stays.
 
 ## Not in this plan
 
