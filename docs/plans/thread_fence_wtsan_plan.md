@@ -293,7 +293,7 @@ Where the work differs from the plan:
 - **M5 and M6 were run twice,** on the probe, as the plan said, and again on the test itself.
 
 **Released (2026-11-06).** You asked for the release after the plan was done (D6), and the new header made it 1.1.0
-(D2). It is `c3cd9a1` (`build(#49): release v1.1.0`), tagged and published at
+(D2). It is `c3cd9a1` (`build: release v1.1.0`), tagged and published at
 https://github.com/tomlin256/flywheel-dag/releases/tag/v1.1.0, and carries this change and flywheel-dag#64 (the README's
 build snippets name a preset). It moves the version strings in `CMakeLists.txt` and the README to 1.1.0. Run 42211466885
 on it is green on all four jobs: `build` on Ubuntu (GCC 15.2.0) and on macOS (Apple clang 21.0.0), 48 of 48 each, and
