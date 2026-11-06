@@ -1,7 +1,8 @@
 # Issue Standalone Fences Through `dag::threadFence()`, Which GCC's ThreadSanitizer Build Accepts
 
-**Status: Proposed (2026-11-06).** Not yet approved. D1 is the decision the issue asked for before a plan was
-written, and D2 is a new public name.
+**Status: In progress (approved 2026-11-06).** Approved as written: D1, the decision the issue asked for before a plan
+was written (silence the true warning in one helper), and D2, the new public name (so the next release is 1.1.0), are
+both yes.
 
 Closes [flywheel-dag#49](https://github.com/tomlin256/flywheel-dag/issues/49).
 
