@@ -211,8 +211,8 @@ Each has a default. Approving the plan as written takes the default.
 | 0 — Baseline and tools | Done | The compare script passes its own check, and 39 translation units preprocess to the same text with every comment blanked. Strict build prints no warning; ctest 55 of 55. |
 | 1 — `dag.*`, `dag_async.*` | Done | Four closed-issue references cut and one tense corrected. The citation of flywheel-dag#31 over ValueSlot's thread rule stays. |
 | 2 — `dag_engine.*` and neighbours | Done | 24 closed-issue references cut in `dag_engine.*`, `dag_graph.hpp` and `dag_thread_fence.hpp`; two comparisons with the old `std::system` call rewritten as present facts. `dag_state_store.*` needed no change. Strict build prints no warning; ctest 55 of 55. |
-| 3 — Replay, utilities, AAD | Not started | |
-| 4 — Ops and time series | Not started | |
+| 3 — Replay, utilities, AAD | Done | All 824 comment lines read. One wording changed ("previously computed result" to "cached result", `dag_memoize.hpp`). The twelve files hold no issue reference and no plan pointer. Claims checked against the code: the coordinator's drain sequence, `bfs_upstream` as the only walk the engine uses, the ring buffer's evict-then-push order, the tape's cost figure (3.9 µs against 0.18 µs, measured in `docs/plans/gradient_node_plan.md`). Strict build prints no warning; ctest 55 of 55. |
+| 4 — Ops and time series | Done | All 593 comment lines read; nothing to change. No issue reference, no plan pointer, and every test a comment names exists. Code unchanged, so the Step 3 build covers it. |
 | 5 — Core tests | Not started | |
 | 6 — Async, wake-state and allocation tests | Not started | |
 | 7 — Engine, persistence and utility tests | Not started | |

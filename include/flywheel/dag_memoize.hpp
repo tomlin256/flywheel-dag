@@ -49,7 +49,7 @@ std::size_t hash_tuple(const std::string& name, const Tuple& t,
 //
 // A compute node that caches results keyed by hash(node_name, input_values).
 // When the same input combination is seen again the functor is skipped and the
-// previously computed result is returned directly.
+// cached result is returned directly.
 //
 // The cache is static per <Out, Ins...> template instantiation and shared
 // across all instances. The node name is folded into the hash key so
