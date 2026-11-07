@@ -423,7 +423,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
 | 5 The workflow and its check | Done | Red then green; 34 hand-made changes, the control and a comment-only change; actionlint clean; default 83 of 83 on the Mac and in `ubuntu-dev`, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; GCC 15.2 builds warning-free, `asan` 86 of 86 there, `tsan` 83 of 85 (the two known `SIGILL`) |
 | 6 First dispatches, schedule, docs | Done | Dispatch 1: the `tsan` leg stopped at the `vm.mmap_rnd_bits` step (no sudo), fixed test first; `asan` 86 of 86 (7 min 43 s), then 87 of 87 with the leak canary (7 min 38 s); `tsan` 85 of 85 in five consecutive dispatches (4 min 12 s to 6 min 58 s); `timeout-minutes` 15; `asan` nightly; docs pushed |
-| 7 `tsan` joins the nightly; close | In progress | Red then green; 6 red, 3 green and the control; default 83, `asan` 86 (87 in `ubuntu-dev`), `tsan` 85; pushed, with `CI`, `clang-tidy` and dispatches of `which=both` and `which=asan` green on the pushed commit. Waiting for the first scheduled run (03:17 UTC, 2026-11-08); the issue stays open until both jobs are green in one |
+| 7 `tsan` joins the nightly; close | Done | Red then green; 6 red, 3 green and the control; default 83, `asan` 86 (87 in `ubuntu-dev`), `tsan` 85; pushed, with `CI`, `clang-tidy` and dispatches of `which=both` and `which=asan` green on the pushed commit. The issue was closed by the owner before the first scheduled run (03:17 UTC, 2026-11-08), which was the plan's bar |
 
 ## Outcome
 
@@ -812,6 +812,7 @@ notice is the only annotation. `which=tsan` was not dispatched again: its altern
 runs of Step 6 took. Over four runs the `asan` job takes 7 min 31 s to 9 min 55 s, so the 15-minute bound is 1.5 times the slowest
 run and about twice the usual one.
 
-*The scheduled run is not in.* The first tick is at 03:17 UTC on 2026-11-08, after the last run of the session that wrote this.
-`gh run list --workflow sanitizers.yml --event schedule` shows it. flywheel-dag#45 stays open until a scheduled run on `main` shows
-both jobs green, and is closed by hand after that.
+*The scheduled run is not in, and the issue is closed.* The first tick is at 03:17 UTC on 2026-11-08, after the last run of the session
+that wrote this. The plan's bar for closing flywheel-dag#45 was a scheduled run on `main` with both jobs green; the owner closed it by
+hand on 2026-11-07, before that run, so this is the one place the work departs from the plan's "done". `gh run list --workflow
+sanitizers.yml --event schedule` shows the tick, and a red job there is a finding that gets a `bug` issue of its own.
