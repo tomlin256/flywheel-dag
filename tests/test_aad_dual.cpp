@@ -151,11 +151,11 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
         return v;
     };
     // Relative, so that a small slope gets no more room than a large one: an
-    // absolute 1e-15 accepted a relative error of 1.1e-12 for tanh at 4.2, and of
-    // 4.1e-8 for erf and erfc (flywheel-dag#41). The Dual and its oracle reach
-    // most slopes by the same expression and agree to an ulp or two. erf and erfc
-    // at 4.2 are 1e-15 from the true slope in both, since −x² rounds before exp,
-    // so a more accurate slope would have to move the oracle too.
+    // absolute 1e-15 would accept a relative error of 1.1e-12 for tanh at 4.2,
+    // and of 4.1e-8 for erf and erfc. The Dual and its oracle reach most slopes
+    // by the same expression and agree to an ulp or two. erf and erfc at 4.2 are
+    // 1e-15 from the true slope in both, since −x² rounds before exp, so a more
+    // accurate slope would have to move the oracle too.
     for (const Case& c : cases) {
         for (const double v : {0.3, 1.7, 4.2}) {
             const double at = pointFor(c, v);
@@ -172,8 +172,7 @@ TEST(AadDual, FunctionsMatchTheirDerivatives) {
 // references are 4/(eˣ + e⁻ˣ)² to 17 digits, from
 //     echo 'scale=400; x=10; 4/((e(x)+e(-x))^2)' | bc -l
 // so they do not lean on the C library's cosh. FunctionsMatchTheirDerivatives
-// looks no further than 4.2, where the defect is 5.6e-14 off, and its tolerance
-// was absolute below a slope of 1 until flywheel-dag#41: it accepted that.
+// looks no further than 4.2, where the defect is only 5.6e-14 off.
 TEST(AadDual, TanhSlopeIsAccurateWhereTanhRoundsToOne) {
     struct Point {
         double x;
