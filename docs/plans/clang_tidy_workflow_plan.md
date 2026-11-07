@@ -1,6 +1,6 @@
 # clang-tidy as a workflow of its own
 
-**Status: Approved as written (2026-11-07), so D1 to D6 stand at their defaults.** Rob asked for the clang-tidy job to become a
+**Status: Done (2026-11-07).** Approved as written, so D1 to D6 stood at their defaults; the Outcome at the end records what the steps found. Rob asked for the clang-tidy job to become a
 workflow of its own, modelled on cryptocogs's.
 
 Closes [flywheel-dag#72](https://github.com/tomlin256/flywheel-dag/issues/72). It takes items 1 and 2 of
@@ -347,4 +347,52 @@ red-then-green record and the counts. *Done when:* pushed; 4b started no lint ru
 | 1 Start from green | Done | The last run on `main` before this work (42366473696) was green on all four jobs. The unmodified tree was not built on its own: Step 2's checkpoint runs all 75 of its tests. |
 | 2 `test_ci_clang_tidy`, the workflow, the job leaves `ci.yml` | Done | Red first (both tests), then green: 76 of 76, no warning. Hand-made changes: a to o and s red, p to r green, 23 runs as expected. actionlint: 0 errors in both workflows. |
 | 3 `paths-ignore` and `test_ci_paths` | Done | Red first ("found no workflow with a paths-ignore list"), then green: 77 of 77, no warning. Hand-made changes: a to t, 20 runs as expected (h, l, o and a green). |
-| 4 Docs, close | Not started | |
+| 4 Docs, close | Done | 4a (README) and 4b (CLAUDE.md, releasing.md, the older plan's pointer, this Outcome); 77 of 77 at each. The runs and the check that 4b started no lint run are in the closing comment on flywheel-dag#72. |
+
+## Outcome
+
+Done on 2026-11-07, as approved, with the additions below. Times are from the runs' job records; counts are from the Mac tree
+`relwithdebinfo-macos-arm64`, configured with CI's flags (`-Werror=author -Werror=deprecated
+-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`), and no step built with a warning.
+
+| Step | Count | The push's runs |
+|---|---|---|
+| 2 `test_ci_clang_tidy`, the workflow, the job leaves `ci.yml` | **76 of 76** | `CI` [run 42370887095](https://github.com/tomlin256/flywheel-dag/actions/runs/42370887095) green: the two build jobs took 4 min 28 s (Ubuntu) and 5 min 25 s (macOS). `clang-tidy` [run 42370887104](https://github.com/tomlin256/flywheel-dag/actions/runs/42370887104) green: 41 tests on each leg, as before the move; Ubuntu 1 min 55 s (LLVM 23.1.6, 4 cores), macOS 2 min 22 s (Homebrew LLVM 23.1.4, 3 cores). |
+| 3 `paths-ignore` and `test_ci_paths` | **77 of 77** | `clang-tidy` [run 42371390863](https://github.com/tomlin256/flywheel-dag/actions/runs/42371390863) green: 41 tests per leg; Ubuntu 1 min 47 s, macOS 2 min 0 s. Its `CI` run, 42371390685, was cancelled by the next push (`cancel-in-progress`), and the next push's tree contains it. |
+| 4a README | 77 of 77 | Starts both workflows: the README is in neither list. |
+| 4b `CLAUDE.md` (6,478 of 6,500 bytes), `docs/releasing.md`, the older plan's pointer, this Outcome | 77 of 77 | Starts `CI` only. That the lint workflow started nothing for it is checked with `gh run list --workflow clang-tidy.yml` after the push, and the result is in the closing comment on flywheel-dag#72. |
+
+**Red first, as planned.** Step 2: `test_ci_clang_tidy` ("does not exist") and `test_cmake_diagnostics` ("cannot be read")
+failed with no workflow; both passed with it. Step 3: `test_ci_paths` failed with "found no workflow with a paths-ignore list"
+until the workflow had its lists.
+
+**Hand-made changes**, on a scratch copy made from git's file list (so no `build*` was copied), each through the real check, with
+a change that did not apply stopping the harness. Step 2: 23 runs, all as expected. Rows a to o and s are red and p, q and r are green; i ran in its two forms
+(`continue-on-error`, then `|| true`) and o through both checks, and n and the second run of o are red in
+`test_cmake_diagnostics`, the rest in `test_ci_clang_tidy`. Step 3: 20 runs, all as expected; a, h, l and o are green and b to g,
+i, j, k, m, n and p to t are red, each with the message the row names.
+
+**Where it differs from the plan.**
+
+- **Row s, a rule the plan did not have.** Taking `-Werror=author -Werror=deprecated` off the lint's Configure line left `test_cmake_diagnostics`
+  and `test_ci_clang_tidy` green, because `test_cmake_diagnostics` reads the whole file and the comment above the line says the same words.
+  `test_ci_clang_tidy` now requires the configure line that turns the gate on to carry them (red first: the row was green until
+  the rule was added). This closes a hole the old job had too.
+- **Rows p to t of Step 3.** `.github/` is refused as an ignored path (a workflow that ignored its own file would not run for a
+  change to it), a lint workflow whose ctest line loses `-R '^clang_tidy_'` is treated as running the whole suite (so the
+  document rule applies to it), `ci.yml` with a list is checked (q, r), and a `.yaml` workflow and a quoted `"on":` are read or
+  refused (s, t). Row i is the `push` list deleted with the trigger kept, the mirror of row c.
+- **The status line of `test_ci_paths`** names each workflow's list and the files it covers, the workflows with no list, and the
+  skipped ones, so that what it read is in the log.
+- **The comment over `test_cmake_diagnostics`** was brought to "CI's two workflows" in Step 2, with its list, and not in 4a.
+
+**actionlint** (Docker image `rhysd/actionlint`, the files mounted read-only): 0 errors in both workflows after Step 2 and again
+after Step 3. `actions/checkout@v6` is `using: node24`, as audited before the work began.
+
+**What the move showed.** The two lint legs cost what they did in `ci.yml` (Ubuntu 1 min 59 s then, 1 min 47 s to 1 min 55 s now;
+macOS 2 min 12 s then, 2 min to 2 min 22 s now), so a last green is no later. With no concurrency group the lint for the Step 3
+commit finished and said green while its `CI` run was cancelled by the push after it: each commit keeps its own lint result, as
+D2 intended.
+
+**Left for later.** The optional rehearsal of the Ubuntu steps in a fresh `ubuntu:26.04` container was not run: the first run on
+the runner was the real test, and it passed. flywheel-dag#69 item 3 (shallow clones) is still open.

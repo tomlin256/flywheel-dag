@@ -9,6 +9,11 @@ you; you asked for one afterwards, and it shipped as v1.0.1 (2026-11-04, Outcome
 Closes [flywheel-dag#60](https://github.com/tomlin256/flywheel-dag/issues/60), and
 [flywheel-dag#40](https://github.com/tomlin256/flywheel-dag/issues/40), which is one of its findings.
 
+The job has since moved out of `ci.yml` into a workflow of its own, `clang-tidy.yml`: see
+[clang_tidy_workflow_plan.md](clang_tidy_workflow_plan.md)
+([flywheel-dag#72](https://github.com/tomlin256/flywheel-dag/issues/72)). Where this text says `ci.yml` runs the lint, that
+workflow does.
+
 ## Problem
 
 The issue is its title: *"Make CI run clang tidy"*. Today clang-tidy runs in the editor only. `.clangd` enables
