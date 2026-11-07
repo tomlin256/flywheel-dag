@@ -255,6 +255,8 @@ check, the harness in the scratchpad):
 | q | the major written `${LLVM_MAJOR}` and `${{ env.LLVM_MAJOR }}` | green |
 | r | a rule mentioned only in a comment | green |
 | s | the strict flags taken off the Configure line, the header comment still saying them (added while the rows were run) | red in `test_ci_clang_tidy`; `test_cmake_diagnostics` alone stays green |
+| t | the last ctest line of the lint job deleted, so that only the `-N` line is left (added) | red: the job lists the tests and never runs them |
+| u | `\| tee ctest.log` on the ctest line that runs the tests (added) | red: a pipe's status is its last command's |
 
 *Also:* both workflows pass actionlint (its Docker image, the files mounted read-only; if Docker is down, that is said in the
 Outcome and the first run is the lint). `actions/checkout@v6` is re-audited (`using: node24`).
@@ -361,6 +363,7 @@ Done on 2026-11-07, as approved, with the additions below. Times are from the ru
 | 3 `paths-ignore` and `test_ci_paths` | **77 of 77** | `clang-tidy` [run 42371390863](https://github.com/tomlin256/flywheel-dag/actions/runs/42371390863) green: 41 tests per leg; Ubuntu 1 min 47 s, macOS 2 min 0 s. Its `CI` run, 42371390685, was cancelled by the next push (`cancel-in-progress`), and the next push's tree contains it. |
 | 4a README | 77 of 77 | Starts both workflows: the README is in neither list. |
 | 4b `CLAUDE.md` (6,478 of 6,500 bytes), `docs/releasing.md`, the older plan's pointer, this Outcome | 77 of 77 | Starts `CI` only. That the lint workflow started nothing for it is checked with `gh run list --workflow clang-tidy.yml` after the push, and the result is in the closing comment on flywheel-dag#72. |
+| Addendum: the two run rules (t, u) in `test_ci_clang_tidy` | 77 of 77 | Starts both workflows; the runs are in the closing comment on flywheel-dag#72. |
 
 **Red first, as planned.** Step 2: `test_ci_clang_tidy` ("does not exist") and `test_cmake_diagnostics` ("cannot be read")
 failed with no workflow; both passed with it. Step 3: `test_ci_paths` failed with "found no workflow with a paths-ignore list"
@@ -378,6 +381,7 @@ i, j, k, m, n and p to t are red, each with the message the row names.
   and `test_ci_clang_tidy` green, because `test_cmake_diagnostics` reads the whole file and the comment above the line says the same words.
   `test_ci_clang_tidy` now requires the configure line that turns the gate on to carry them (red first: the row was green until
   the rule was added). This closes a hole the old job had too.
+- **Rows t and u of Step 2, after the Outcome was first written.** The check held that every ctest command selects `^clang_tidy_`, which a workflow whose only ctest line is the `-N` listing also meets: deleting the line that runs the tests left every test green. It now requires one command that runs the tests (no `-N`), and not piped, since a pipe's status is its last command's. The check as committed stayed green on both rows; with the rule added both are red (the Step 2 harness is 25 rows in all, each as expected).
 - **Rows p to t of Step 3.** `.github/` is refused as an ignored path (a workflow that ignored its own file would not run for a
   change to it), a lint workflow whose ctest line loses `-R '^clang_tidy_'` is treated as running the whole suite (so the
   document rule applies to it), `ci.yml` with a list is checked (q, r), and a `.yaml` workflow and a quoted `"on":` are read or

@@ -15,7 +15,8 @@
 #     -Werror=deprecated: test_cmake_diagnostics holds their spelling and effect, but reads the whole file, so a comment that
 #     says them meets it.
 #   - Every ctest command selects the gate's tests, -R '^clang_tidy_'. Without it the job would run the whole suite, which nothing
-#     has built.
+#     has built. One of them runs the tests (the others may only list them, -N), and it is not piped: a pipe's status is its
+#     last command's.
 #   - Nothing lets the job pass by failing: no continue-on-error, no `|| true`. A lint step that cannot fail gates nothing.
 #   - Every preset of the matrix names a configure preset and a test preset of CMakePresets.json, every --preset argument is the
 #     matrix's, so that the tree that is configured is the tree that is tested, and the matrix has a Linux leg and a macOS leg
@@ -173,12 +174,25 @@ list(LENGTH ctest_lines ctest_count)
 if(ctest_count EQUAL 0)
     string(APPEND failures "\n  the workflow never runs ctest")
 endif()
+set(runs_tests FALSE)
 foreach(line IN LISTS ctest_lines)
     if(NOT line MATCHES "-R '\\^clang_tidy_'")
         string(STRIP "${line}" shown)
         string(APPEND failures "\n  a ctest command does not select the gate's tests with -R '^clang_tidy_':\n      ${shown}")
     endif()
+    if(NOT line MATCHES "[ \t]-N([ \t]|$)")    # a command that runs the tests, and not one that only lists them
+        set(runs_tests TRUE)
+        if(line MATCHES "\\|")
+            string(STRIP "${line}" shown)
+            string(APPEND failures
+                "\n  the ctest command that runs the tests is piped, and a pipe's status is its last command's, so a failing run "
+                "would pass:\n      ${shown}")
+        endif()
+    endif()
 endforeach()
+if(ctest_count GREATER 0 AND NOT runs_tests)
+    string(APPEND failures "\n  every ctest command only lists tests (-N): none runs them")
+endif()
 
 # ── nothing lets the job pass by failing ─────────────────────────────────────
 if(code MATCHES "continue-on-error")
