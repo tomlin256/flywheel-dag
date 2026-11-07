@@ -274,5 +274,5 @@ closed.
 | 0 Approval | Done | Approved as written on 2026-11-07, with the defaults of D1 to D4. |
 | 1 Start from green | Done | The last runs on `3aa98fd` (`CI` and `clang-tidy`) were green. The Mac tree at `aed3ff7` built with no warning and passed 77 of 77. |
 | 2 The filter and the units script | Done | Red first ("does not exist"), then green: 78 of 78, no warning, 32 cases. Hand-made changes: a to t, 20 runs as expected (n green); o to t are rows the plan did not have. |
-| 3 The walk, the registration moves, `clang_tidy_units` | Not started | |
+| 3 The walk, the registration moves, `clang_tidy_units` | Done | Red first (the stubs fail to configure on the missing `flywheel_dag_clang_tidy_add_tests`; the real roots lack `clang_tidy_units`; the examples-off tree lists `clang_tidy_aad` and `clang_tidy_quickstart`), then green: 79 of 79, no warning, 31 cases. Gate on, Mac: 42, 40, 39 and 37 `clang_tidy_` tests green, with 36, 34, 33 and 31 units that `clang_tidy_units` finds exactly the tree's. Hand-made changes: 27 red and the control green, for the plan's a to m and 14 more (the Outcome lists them). |
 | 4 Docs, close | Not started | |

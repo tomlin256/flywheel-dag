@@ -2,12 +2,12 @@
 # holds it to.
 #
 # Run by ctest as `cmake -DSOURCE_DIR=<repo> -P check_ci_clang_tidy.cmake`. It reads .github/workflows/clang-tidy.yml,
-# tests/CMakeLists.txt and CMakePresets.json. It needs no clang-tidy and no build, and runs in every tree.
+# cmake/flywheel_dag_clang_tidy.cmake and CMakePresets.json. It needs no clang-tidy and no build, and runs in every tree.
 #
 # A workflow cannot be run here, so this holds what a run would find out late, or not at all. It holds:
 #
-#   - LLVM_MAJOR is set once, in the workflow's env, and is the major that tests/CMakeLists.txt registers the gate with
-#     (_flywheel_dag_clang_tidy_major). The Ubuntu leg's apt source, package and tool are named by $LLVM_MAJOR, and no line has a
+#   - LLVM_MAJOR is set once, in the workflow's env, and is the major that cmake/flywheel_dag_clang_tidy.cmake registers the gate
+#     with (_flywheel_dag_clang_tidy_major). The Ubuntu leg's apt source, package and tool are named by $LLVM_MAJOR, and no line has a
 #     literal major in their place or in a step's name. A major moved in one place only is otherwise a red clang_tidy_version
 #     after the push.
 #   - The configure turns the gate on (-DFLYWHEEL_DAG_CLANG_TIDY=). Without it a leg configures, selects no clang_tidy_ test, and
@@ -35,7 +35,7 @@ if(NOT DEFINED SOURCE_DIR)
 endif()
 
 set(workflow     "${SOURCE_DIR}/.github/workflows/clang-tidy.yml")
-set(registration "${SOURCE_DIR}/tests/CMakeLists.txt")
+set(registration "${SOURCE_DIR}/cmake/flywheel_dag_clang_tidy.cmake")
 set(presets      "${SOURCE_DIR}/CMakePresets.json")
 
 set(failures "")
@@ -122,7 +122,7 @@ elseif(NOT "${llvm_major}" MATCHES "^[0-9]+$")
     string(APPEND failures "\n  LLVM_MAJOR is '${llvm_major}', not a number")
 elseif(NOT "${llvm_major}" STREQUAL "${gate_major}")
     string(APPEND failures
-        "\n  LLVM_MAJOR is ${llvm_major} and _flywheel_dag_clang_tidy_major (tests/CMakeLists.txt) is ${gate_major}: "
+        "\n  LLVM_MAJOR is ${llvm_major} and _flywheel_dag_clang_tidy_major (cmake/flywheel_dag_clang_tidy.cmake) is ${gate_major}: "
         "clang_tidy_version would fail the run, so move both in one commit")
 endif()
 

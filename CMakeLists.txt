@@ -78,8 +78,8 @@ option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                       
 option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand"          ${_flywheel_dag_top_level})
 option(FLYWHEEL_DAG_INSTALL          "Generate the install rules and the package config" ${_flywheel_dag_top_level})
 
-# clang-tidy as a gate (tests/CMakeLists.txt registers the tests). FLYWHEEL_DAG_CLANG_TIDY names the
-# tool that holds this project's own sources to .clang-tidy: a command on PATH, or a path. Empty, the default, leaves the
+# clang-tidy as a gate (cmake/flywheel_dag_clang_tidy.cmake registers the tests, at the end of this file). FLYWHEEL_DAG_CLANG_TIDY
+# names the tool that holds this project's own sources to .clang-tidy: a command on PATH, or a path. Empty, the default, leaves the
 # clang_tidy_ tests out. A tool that was asked for and cannot be run is an error here, never a gate that is silently
 # absent. FLYWHEEL_DAG_CLANG_TIDY_ARGS is a list of extra arguments for every run.
 set(FLYWHEEL_DAG_CLANG_TIDY "" CACHE STRING
@@ -265,4 +265,17 @@ endif()
 
 if(FLYWHEEL_DAG_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The clang-tidy gate. Its units are the sources of the targets made above:
+# the tests', the examples' and the benchmarks'. So it is registered here,
+# after the last add_subdirectory, and a target made below this line is a unit
+# that nothing registered (clang_tidy_units fails on it). test_clang_tidy_wiring
+# holds this wiring.
+# ─────────────────────────────────────────────────────────────────────────────
+if(_flywheel_dag_clang_tidy)
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_clang_tidy.cmake)
+    flywheel_dag_clang_tidy_add_tests("${_flywheel_dag_clang_tidy}" "${CMAKE_CURRENT_LIST_DIR}"
+                                      "${FLYWHEEL_DAG_CLANG_TIDY_ARGS}")
 endif()
