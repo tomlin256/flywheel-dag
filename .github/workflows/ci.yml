@@ -1,5 +1,7 @@
 name: CI
 
+# No paths-ignore: the suite reads CLAUDE.md, docs/engine_rules.md and README.md, so a change to any of them must start a run.
+# The clang-tidy workflow ignores documentation; test_ci_paths holds both.
 on:
   push:
     branches: [ "main" ]

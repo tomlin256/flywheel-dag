@@ -167,7 +167,8 @@ expects (anything else fails and says so), and fails unless
 - a workflow that has a `paths-ignore` list has one under both triggers, and the two are equal;
 - each entry is a file name or `<dir>/**`, and matches at least one file in the checkout;
 - no entry covers a CMake or C++ file (`CMakeLists.txt`, `*.cmake`, `*.cmake.in`, `CMakePresets.json`, `*.cpp`, `*.hpp`, `*.inl`),
-  `.clang-tidy`, or a file under `tests/clang_tidy_canary/` — what the build and the lint read;
+  `.clang-tidy`, a file under `tests/clang_tidy_canary/`, or a file under `.github/` (a workflow that ignored its own file would
+  not run for a change to it) — what the build and the lint read;
 - for a workflow that runs the whole suite (a `ctest` command that does not select `^clang_tidy_`), no entry covers a file that a
   check reads as `${SOURCE_DIR}/<name>` in `tests/*.cmake` either (`CLAUDE.md`, `docs/engine_rules.md` and `README.md` today);
 - at least one workflow has a list, and a workflow with neither trigger is skipped and named in the status line.
@@ -282,15 +283,20 @@ on the Mac less the `brew install`. The commands are the old job's, so the first
 | f | `tests/clang_tidy_canary/**` added to both | red |
 | g | `notes/**` added to both | red, matches no file |
 | h | `README.md` added to both | green (the lint does not read it) |
-| i | a `push` trigger and no list | red |
+| i | its `push` list deleted, the trigger kept | red, names the workflow and the trigger |
 | j | `on: [push, pull_request]` in the flow layout | red, says it needs the block layout |
 | k | `CLAUDE.md` added to `ci.yml`'s lists, both triggers | red, covers a file `test_claude_md_budget` reads (D3, shown) |
 | l | a third workflow with only `schedule` | green, skipped |
 | m | no workflow with a list | red |
 | n | no workflow files | red |
 | o | comments after `on:`, entries unquoted, double-quoted and reordered, a comment inside a list | green |
+| p | `.github/**` added to both (added while the rows were written: a workflow that ignored its own file would not run for a change to it) | red, covers the workflows |
+| q | the lint workflow's ctest line without `-R '^clang_tidy_'` (added) | red: it now runs more than the lint, and `docs/**` covers files a check reads |
+| r | `docs/**` added to `ci.yml`'s lists, both triggers (added) | red, covers `docs/engine_rules.md` |
+| s | a `.yaml` workflow with both triggers and a list of `notes/**` (added) | red, matches no file: the `.yaml` file was read |
+| t | the lint workflow's `on` key quoted, `"on":` (added) | red, no top-level `on:` key |
 
-*Checkpoint.* Expected 77 of 77. *Done when:* a to o as stated; pushed; the push's own lint runs are green.
+*Checkpoint.* Expected 77 of 77. *Done when:* a to t as stated (h, l, o and a green, the rest red); pushed; the push's own lint runs are green.
 
 ### Step 4 — Docs, close
 
@@ -340,5 +346,5 @@ red-then-green record and the counts. *Done when:* pushed; 4b started no lint ru
 | 0 Approval | Done | Approved as written on 2026-11-07, with the defaults of D1 to D6. |
 | 1 Start from green | Done | The last run on `main` before this work (42366473696) was green on all four jobs. The unmodified tree was not built on its own: Step 2's checkpoint runs all 75 of its tests. |
 | 2 `test_ci_clang_tidy`, the workflow, the job leaves `ci.yml` | Done | Red first (both tests), then green: 76 of 76, no warning. Hand-made changes: a to o and s red, p to r green, 23 runs as expected. actionlint: 0 errors in both workflows. |
-| 3 `paths-ignore` and `test_ci_paths` | Not started | |
+| 3 `paths-ignore` and `test_ci_paths` | Done | Red first ("found no workflow with a paths-ignore list"), then green: 77 of 77, no warning. Hand-made changes: a to t, 20 runs as expected (h, l, o and a green). |
 | 4 Docs, close | Not started | |

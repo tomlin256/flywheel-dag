@@ -279,6 +279,19 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ci_clang_tidy.cmake)
 endif()
 
+# What CI ignores. A workflow that skips a push because it changed only documentation is right
+# when its run reads none of it, and silently wrong when it reads some. This holds every
+# paths-ignore list to the checkout: the two triggers of a workflow agree, each entry matches a
+# file, no entry covers what the build or the lint reads, and a workflow that runs the checks
+# ignores nothing that a check reads. Registered at the top level, where the checkout it reads
+# is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_ci_paths
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ci_paths.cmake)
+endif()
+
 # The files Claude Code loads stay small. CLAUDE.md and the engine rules it imports are in every
 # session's context, so they have byte budgets; a CLAUDE.md anywhere in the checkout loads on demand, and Claude Code
 # keeps only the start of one past 40,000 characters, so none may pass 38,000. The budgets are these three numbers,

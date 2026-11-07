@@ -16,8 +16,10 @@
 # there is no fallback to another major. On macOS the tool is Homebrew's llvm, keg-only and the latest major: when that moves past
 # LLVM_MAJOR, clang_tidy_version fails the leg on purpose, and the commit that moves the major moves LLVM_MAJOR with it.
 #
-# When it runs. For every push and pull request to main, and on demand: Actions > clang-tidy > Run workflow, or
-# `gh workflow run clang-tidy.yml --ref main`.
+# When it runs. For a push or a pull request to main that changes more than documentation, and on demand: Actions > clang-tidy >
+# Run workflow, or `gh workflow run clang-tidy.yml --ref main`. A change to docs/** and CLAUDE.md alone starts no run, because
+# nothing here reads either; ci.yml has no such list, since its suite reads both. test_ci_paths holds the lists to the files that
+# the build and the lint read.
 #
 # The same locally:
 #   cmake --preset relwithdebinfo-macos-arm64 -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy
@@ -27,8 +29,14 @@ name: clang-tidy
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - 'docs/**'
+      - 'CLAUDE.md'
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - 'docs/**'
+      - 'CLAUDE.md'
   workflow_dispatch:
 
 permissions:
