@@ -15,12 +15,12 @@
 # wrong, or run by an older CMake, still passes CI. That is why the gate itself is
 # tested, as test_warning_flags tests the compiler's.
 #
-# Two things are held. The spelling: CI's workflow, README.md and CLAUDE.md each say
+# Two things are held. The spelling: CI's two workflows, README.md and CLAUDE.md each say
 # -Werror=author -Werror=deprecated and none says -Werror=dev. The behaviour: a probe
 # project that says message(AUTHOR_WARNING) or message(DEPRECATION), configured with
 # the flags in this file, fails to configure, and without them it warns. The probe
 # needs no network and compiles nothing. This file's flags are the oracle, and the
-# spelling check holds the three files to them.
+# spelling check holds the four files to them.
 #
 # The behaviour needs CMake 4.4. A CMake before it is one the README still allows and
 # no CI job runs, so the behaviour is skipped, and the status line says so; the spelling
@@ -44,6 +44,7 @@ set(problems "")
 # ── the spelling ─────────────────────────────────────────────────────────────
 set(spelled
     .github/workflows/ci.yml
+    .github/workflows/clang-tidy.yml
     README.md
     CLAUDE.md)
 foreach(file IN LISTS spelled)

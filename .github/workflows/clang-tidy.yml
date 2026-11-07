@@ -1,0 +1,100 @@
+# clang-tidy over this project's own sources, as a workflow of its own. The tests are the clang_tidy_ ones that
+# FLYWHEEL_DAG_CLANG_TIDY registers (tests/CMakeLists.txt).
+#
+# What it runs. Nothing is built: clang-tidy reads <tree>/compile_commands.json, so each leg configures a tree with the gate on
+# and runs the tests whose names begin clang_tidy_: one per translation unit under tests/, examples/ and benchmarks/, through
+# which the engine's headers are checked, and the ones that prove the gate bites (the version, the checks, three canaries). The
+# macOS leg is the only gate on what the macOS SDK adds.
+#
+# A workflow of its own, so that a red lint run cannot mask whether the build in ci.yml is green. It has no cache and no
+# concurrency group: nothing is built, and every push keeps its own result, so a red one names its commit.
+#
+# The LLVM major is written once, in the env below, and test_ci_clang_tidy holds it to the number beside the gate's registration
+# in tests/CMakeLists.txt; clang_tidy_version fails a run on any other major. On Ubuntu the tool comes from apt.llvm.org, the LLVM
+# project's own apt repository, one per major and Ubuntu codename. Its signing key is checked against the fingerprint LLVM
+# publishes before apt is told to trust it, and if the repository has no source for a new codename, apt-get update fails and
+# there is no fallback to another major. On macOS the tool is Homebrew's llvm, keg-only and the latest major: when that moves past
+# LLVM_MAJOR, clang_tidy_version fails the leg on purpose, and the commit that moves the major moves LLVM_MAJOR with it.
+#
+# When it runs. For every push and pull request to main, and on demand: Actions > clang-tidy > Run workflow, or
+# `gh workflow run clang-tidy.yml --ref main`.
+#
+# The same locally:
+#   cmake --preset relwithdebinfo-macos-arm64 -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy
+#   ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8
+name: clang-tidy
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The LLVM major of the tool, written here once: the Ubuntu leg's apt source, package and tool say $LLVM_MAJOR.
+  LLVM_MAJOR: "23"
+
+jobs:
+  clang-tidy:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The preset names the tree, build/<preset>, and the build type; the same commands build it on a laptop
+        # (CMakePresets.json). The guard in CMakeLists.txt stops a runner of another architecture at Configure.
+        include:
+          - os: ubuntu-latest
+            preset: relwithdebinfo-linux-x86_64
+          - os: macos-latest
+            preset: relwithdebinfo-macos-arm64
+    runs-on: ${{ matrix.os }}
+    # Far above a normal run; the bound is for a hung step, which otherwise runs until GitHub's six-hour job cap.
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v6
+
+    # The key is fetched to the runner's temp directory and checked against the fingerprint before apt is told to trust it.
+    - name: Install clang-tidy ${{ env.LLVM_MAJOR }} (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        . /etc/os-release
+        curl -fsSL -o "$RUNNER_TEMP/llvm.asc" https://apt.llvm.org/llvm-snapshot.gpg.key
+        found=$(gpg --show-keys --with-colons "$RUNNER_TEMP/llvm.asc" | awk -F: '/^fpr/ { print $10; exit }')
+        test "$found" = 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 || { echo "apt.llvm.org's key is $found" >&2; exit 1; }
+        sudo install -D -m 0644 "$RUNNER_TEMP/llvm.asc" /etc/apt/keyrings/apt.llvm.org.asc
+        echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-$LLVM_MAJOR main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends "clang-tidy-$LLVM_MAJOR"
+        echo "CLANG_TIDY=clang-tidy-$LLVM_MAJOR" >> "$GITHUB_ENV"
+
+    # Homebrew's llvm is the latest major and keg-only, so the tool is found by its prefix.
+    - name: Install clang-tidy (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install llvm
+        echo "CLANG_TIDY=$(brew --prefix llvm)/bin/clang-tidy" >> "$GITHUB_ENV"
+
+    - name: Tool versions
+      run: |
+        cmake --version | head -1
+        "$CLANG_TIDY" --version | head -1
+
+    # -Werror=author -Werror=deprecated: any CMake author or deprecation warning fails the configure, as in ci.yml;
+    # test_cmake_diagnostics holds the spelling and the effect, and test_ci_clang_tidy that this line carries them. The preset
+    # names the tree and the build type.
+    - name: Configure
+      run: cmake --preset ${{ matrix.preset }} -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_CLANG_TIDY="$CLANG_TIDY"
+
+    # The test preset passes --output-on-failure, so a failing unit prints clang-tidy's findings, and noTestsAction: error fails
+    # a run that selects no test. The first ctest only prints how many tests the run is (the Total Tests line); the runner's core
+    # count is echoed so that it stays a measurement and not an assumption.
+    - name: clang-tidy
+      run: |
+        cores=$(getconf _NPROCESSORS_ONLN)
+        echo "runner cores: $cores"
+        ctest --preset ${{ matrix.preset }} -N -R '^clang_tidy_' | tail -1
+        ctest --preset ${{ matrix.preset }} -R '^clang_tidy_' -j "$cores"

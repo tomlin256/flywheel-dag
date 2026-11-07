@@ -144,7 +144,7 @@ what is wrong, unless:
 |---|---|
 | `LLVM_MAJOR` is set on one line, in the env, and equals the number in the one `set(_flywheel_dag_clang_tidy_major N)` | A major moved in one place only shows after the push, as a red `clang_tidy_version`. |
 | no line has a literal major (`clang-tidy-<n>`, `clang-tidy <n>`, `llvm-toolchain-…-<n>`), and the apt install, the apt source and `CLANG_TIDY=` on the Ubuntu leg name `$LLVM_MAJOR` | One place to move. |
-| the configure passes `-DFLYWHEEL_DAG_CLANG_TIDY=` | Without it the leg configures, selects no `clang_tidy_` test, and `noTestsAction` is the only thing left to notice. |
+| the configure passes `-DFLYWHEEL_DAG_CLANG_TIDY=`, on a line that also carries `-Werror=author -Werror=deprecated` | Without the first the leg configures, selects no `clang_tidy_` test, and `noTestsAction` is the only thing left to notice. Without the second a CMake author warning or deprecation passes: `test_cmake_diagnostics` reads the whole file, so the comment that explains the flags meets it (row s of Step 2). |
 | every `ctest` command selects `-R '^clang_tidy_'` | The prefix is the gate's. Without it the job would run a suite nothing built. |
 | no `continue-on-error`, no line ending in `\|\| true` or `\|\| :` | A lint step that cannot fail gates nothing. |
 | every `preset:` of the matrix names a configure and a test preset of `CMakePresets.json`, every `--preset` argument is `${{ matrix.preset }}`, and the matrix has a Linux leg and a macOS leg (D1) | A misspelt preset is a red run after the push; a literal one tests a tree the matrix did not configure. |
@@ -154,8 +154,9 @@ It reads each file or fails; it never passes by reading nothing.
 ### 3. `test_cmake_diagnostics` (modified)
 
 `tests/check_cmake_diagnostics.cmake` holds the strict flags' spelling in `.github/workflows/ci.yml`, `README.md` and
-`CLAUDE.md`. `.github/workflows/clang-tidy.yml` joins that list (four files), so the Configure line that moves is held on its
-own, and the comment over the test in `tests/CMakeLists.txt` says "CI's workflows".
+`CLAUDE.md`. `.github/workflows/clang-tidy.yml` joins that list (four files), so a lint workflow that drops the spelling is red,
+and the comment over the test in `tests/CMakeLists.txt` says "CI's workflows". The check reads comments as well as code, so
+section 2 holds that the Configure line itself carries the flags.
 
 ### 4. `paths-ignore` and `test_ci_paths` (new; Step 3)
 
@@ -193,8 +194,9 @@ The memory note that names `ci.yml` for the install steps is updated outside the
   reads `CLAUDE.md` and `docs/engine_rules.md`, and three checks read `README.md`: flywheel-dag#69's item 2 asked for the lists on
   every workflow, and that part would let a budget overrun through. `README.md` stays out of the lint's list too, as in
   cryptocogs. *Alternative:* no filter and no `test_ci_paths` (drop Step 3 and section 4).
-- **D4 A move, with two small changes.** The Configure line keeps `-Werror=author -Werror=deprecated` and `test_cmake_diagnostics`
-  holds it (section 3). `-j` is the runner's core count, read with `getconf` because macOS has no `nproc`, and printed, as
+- **D4 A move, with two small changes.** The Configure line keeps `-Werror=author -Werror=deprecated`; `test_cmake_diagnostics`
+  holds the spelling in the file (section 3) and `test_ci_clang_tidy` that the Configure line carries it (section 2). `-j` is
+  the runner's core count, read with `getconf` because macOS has no `nproc`, and printed, as
   cryptocogs does; the old job said `-j4`.
 - **D5 The checks are scripts proven by hand-made changes on a scratch copy**, recorded in the Outcome, as cryptocogs did.
   *Alternative:* committed fixture trees with a test per refusal, as `test_comment_refs` has; stronger and about three times the
@@ -251,11 +253,12 @@ check, the harness in the scratchpad):
 | p | the control, nothing changed | green |
 | q | the major written `${LLVM_MAJOR}` and `${{ env.LLVM_MAJOR }}` | green |
 | r | a rule mentioned only in a comment | green |
+| s | the strict flags taken off the Configure line, the header comment still saying them (added while the rows were run) | red in `test_ci_clang_tidy`; `test_cmake_diagnostics` alone stays green |
 
 *Also:* both workflows pass actionlint (its Docker image, the files mounted read-only; if Docker is down, that is said in the
 Outcome and the first run is the lint). `actions/checkout@v6` is re-audited (`using: node24`).
 
-*Checkpoint.* Expected 76 of 76. *Done when:* red then green as stated; a to o red and p to r green; actionlint clean; pushed;
+*Checkpoint.* Expected 76 of 76. *Done when:* red then green as stated; a to o and s red and p to r green; actionlint clean; pushed;
 the push starts `CI` (two jobs) and `clang-tidy` (two legs), and each lint leg runs the same 41 tests as before.
 
 *After the push, optional (left for later in the Outcome if skipped):* the Ubuntu leg's steps, taken out of the YAML and run as
@@ -335,7 +338,7 @@ red-then-green record and the counts. *Done when:* pushed; 4b started no lint ru
 | Step | Status | Notes |
 |---|---|---|
 | 0 Approval | Done | Approved as written on 2026-11-07, with the defaults of D1 to D6. |
-| 1 Start from green | Not started | |
-| 2 `test_ci_clang_tidy`, the workflow, the job leaves `ci.yml` | Not started | |
+| 1 Start from green | Done | The last run on `main` before this work (42366473696) was green on all four jobs. The unmodified tree was not built on its own: Step 2's checkpoint runs all 75 of its tests. |
+| 2 `test_ci_clang_tidy`, the workflow, the job leaves `ci.yml` | Done | Red first (both tests), then green: 76 of 76, no warning. Hand-made changes: a to o and s red, p to r green, 23 runs as expected. actionlint: 0 errors in both workflows. |
 | 3 `paths-ignore` and `test_ci_paths` | Not started | |
 | 4 Docs, close | Not started | |
