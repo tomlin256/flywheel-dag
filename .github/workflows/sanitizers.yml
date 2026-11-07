@@ -17,7 +17,9 @@
 # No cache of any kind: a dependency tree restored from the other mode would be silent partial instrumentation, and
 # test_sanitizer_coverage would be the only thing to say so.
 #
-# When it runs. On demand: Actions > Sanitizers > Run workflow, or `gh workflow run sanitizers.yml --ref main -f which=both`.
+# When it runs. Every night, the asan job alone, so that a finding is reported up to a day after the commit that caused it; and on
+# demand, either job or both: Actions > Sanitizers > Run workflow, or `gh workflow run sanitizers.yml --ref main -f which=both` (or
+# `which=asan`, or `which=tsan`).
 #
 # The same locally, on a Linux host (the presets are asan-linux-arm64 and tsan-linux-arm64 on an aarch64 one):
 #   cmake --preset asan-linux-x86_64 -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
@@ -26,6 +28,10 @@
 name: Sanitizers
 
 on:
+  schedule:
+    # An odd minute, since GitHub delays scheduled runs at the start of an hour. A scheduled run has no input, so it runs the
+    # fallthrough of the matrix below.
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       which:
@@ -54,8 +60,8 @@ jobs:
         # The kinds to run: both, tsan alone, or asan alone (the fallthrough, which is also what a run with no input gets).
         kind: ${{ fromJSON(inputs.which == 'both' && '["asan","tsan"]' || inputs.which == 'tsan' && '["tsan"]' || '["asan"]') }}
     runs-on: ubuntu-latest
-    # Far above what a run is expected to take; the bound is for a hung test, which otherwise runs until GitHub's six-hour cap.
-    timeout-minutes: 45
+    # About twice what a cold run takes; the bound is for a hung test, which otherwise runs until GitHub's six-hour cap.
+    timeout-minutes: 15
     env:
       # The preset names the tree, build/<preset>, the build type and the mode; the same commands build it on a laptop
       # (CMakePresets.json). The guard in CMakeLists.txt stops a runner of another architecture at Configure.

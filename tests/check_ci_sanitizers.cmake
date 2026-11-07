@@ -25,6 +25,8 @@
 #   - ASAN_OPTIONS has detect_leaks=1, and TSAN_OPTIONS has halt_on_error=1 (ThreadSanitizer then stops at its first report, so the
 #     finding is the end of the log and not buried under what follows).
 #   - The job has a timeout-minutes, and fail-fast is off, so that one sanitizer red does not hide the other.
+#   - The workflow runs on a schedule, so that a finding does not wait for someone to start a run, and on demand, so that a finding can
+#     be reproduced on the runner.
 #   - The step that reads and lowers vm.mmap_rnd_bits comes before the configure, and only the tsan job runs it. Every command on the
 #     sysctl goes through sudo: the runner's user cannot read /proc/sys/vm/mmap_rnd_bits.
 #
@@ -268,6 +270,13 @@ endforeach()
 # ── the triggers ─────────────────────────────────────────────────────────────
 if(NOT code MATCHES "\n[ \t]*workflow_dispatch:")
     string(APPEND failures "\n  the workflow has no workflow_dispatch trigger: a finding could not be reproduced on the runner")
+endif()
+# A cron has five fields; CMake's regex has no counted repetition, so each is written out. The comment lines that were dropped leave
+# empty lines between the key and its item.
+set(cron_field "[0-9*/,-]+")
+if(NOT code MATCHES "\n[ \t]*schedule:[ \t]*(\n[ \t]*)+-[ \t]*cron:[ \t]*[\"']${cron_field} ${cron_field} ${cron_field} ${cron_field} ${cron_field}[\"']")
+    string(APPEND failures
+        "\n  the workflow has no schedule with a cron of five fields: a finding would wait for someone to start a run")
 endif()
 
 if(NOT "${failures}" STREQUAL "")
