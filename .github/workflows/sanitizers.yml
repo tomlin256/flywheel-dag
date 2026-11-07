@@ -1,0 +1,105 @@
+# The engine's own tests under a sanitizer, as a workflow of its own: AddressSanitizer with UndefinedBehaviorSanitizer (asan), and
+# ThreadSanitizer (tsan). The option is FLYWHEEL_DAG_SANITIZE (cmake/flywheel_dag_sanitize.cmake), and the presets asan-* and
+# tsan-* set it (CMakePresets.json).
+#
+# What it runs. The whole suite of a sanitizer tree, with no test selected out: every unit test, the canaries that prove the
+# sanitizer is live (sanitizer_canary_*, which commit one deliberate violation each and must be caught), and
+# test_sanitizer_coverage, which holds every compile unit and every executable of the tree, the fetched dependencies' included,
+# to the mode's options. A finding is a failing test, and halt_on_error makes ThreadSanitizer stop at the first report.
+#
+# A workflow of its own, so that a red sanitizer run cannot mask whether the build in ci.yml is green, and so that the time of an
+# instrumented build is not spent on every push.
+#
+# Linux only: LeakSanitizer exists only there (Apple's runtime answers "detect_leaks is not supported on this platform"), and the
+# runner's GCC is the compiler that rejects what the others accept. The runtime options are in the Test step's env, and
+# test_ci_sanitizers holds the ones that must hold. A local run on a Mac leaves out detect_leaks.
+#
+# No cache of any kind: a dependency tree restored from the other mode would be silent partial instrumentation, and
+# test_sanitizer_coverage would be the only thing to say so.
+#
+# When it runs. On demand: Actions > Sanitizers > Run workflow, or `gh workflow run sanitizers.yml --ref main -f which=both`.
+#
+# The same locally, on a Linux host (the presets are asan-linux-arm64 and tsan-linux-arm64 on an aarch64 one):
+#   cmake --preset asan-linux-x86_64 -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+#   cmake --build --preset asan-linux-x86_64 --parallel 4
+#   ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1:detect_leaks=1 ctest --preset asan-linux-x86_64
+name: Sanitizers
+
+on:
+  workflow_dispatch:
+    inputs:
+      which:
+        description: "Which sanitizer"
+        type: choice
+        options:
+          - both
+          - asan
+          - tsan
+        default: both
+
+permissions:
+  contents: read
+
+# A newer run with the same `which` cancels the one in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.which }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ${{ matrix.kind }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The kinds to run: both, tsan alone, or asan alone (the fallthrough, which is also what a run with no input gets).
+        kind: ${{ fromJSON(inputs.which == 'both' && '["asan","tsan"]' || inputs.which == 'tsan' && '["tsan"]' || '["asan"]') }}
+    runs-on: ubuntu-latest
+    # Far above what a run is expected to take; the bound is for a hung test, which otherwise runs until GitHub's six-hour cap.
+    timeout-minutes: 45
+    env:
+      # The preset names the tree, build/<preset>, the build type and the mode; the same commands build it on a laptop
+      # (CMakePresets.json). The guard in CMakeLists.txt stops a runner of another architecture at Configure.
+      PRESET: ${{ matrix.kind }}-linux-x86_64
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Tool versions
+      run: |
+        cmake --version | head -1
+        c++ --version | head -1
+        uname -r
+        echo "runner cores: $(getconf _NPROCESSORS_ONLN)"
+
+    # ThreadSanitizer maps its shadow memory at fixed addresses, and a kernel with more address-space randomisation than the
+    # mapping allows makes every instrumented program die at start-up. The value is logged before and after, so that a run says
+    # whether the image needed it.
+    - name: Address-space randomisation (tsan)
+      if: matrix.kind == 'tsan'
+      run: |
+        bits=$(cat /proc/sys/vm/mmap_rnd_bits)
+        echo "vm.mmap_rnd_bits before: $bits"
+        if [ "$bits" -gt 28 ]; then
+          sudo sysctl -w vm.mmap_rnd_bits=28
+        fi
+        echo "vm.mmap_rnd_bits after: $(cat /proc/sys/vm/mmap_rnd_bits)"
+
+    # -Werror=author -Werror=deprecated: any CMake author or deprecation warning fails the run, as in ci.yml;
+    # test_cmake_diagnostics holds the spelling and the effect, and test_ci_sanitizers that this line carries them.
+    # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes any compiler warning in this project's own code fail it too. The build type and the
+    # mode are the preset's, and nothing here sets them.
+    - name: Configure
+      run: cmake --preset ${{ env.PRESET }} -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+
+    - name: Build
+      run: cmake --build --preset ${{ env.PRESET }} --parallel 4
+
+    # The whole suite: no -R, no -E. The test preset passes --output-on-failure and --timeout 120, and fails a run that finds no
+    # tests. detect_leaks is the part macOS cannot do. halt_on_error makes ThreadSanitizer stop at its first report; UBSan stops
+    # on its own, through -fno-sanitize-recover=undefined.
+    - name: Test
+      env:
+        ASAN_OPTIONS: detect_stack_use_after_return=1:strict_string_checks=1:detect_leaks=1
+        UBSAN_OPTIONS: print_stacktrace=1
+        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+      run: ctest --preset ${{ env.PRESET }}

@@ -332,8 +332,8 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_floor.cmake)
 endif()
 
-# The strict configure flags. CI's two workflows, the README and CLAUDE.md spell them
-# -Werror=author -Werror=deprecated, and the check holds the four to that spelling. On
+# The strict configure flags. CI's three workflows, the README and CLAUDE.md spell them
+# -Werror=author -Werror=deprecated, and the check holds the five to that spelling. On
 # CMake 4.4 or later it also configures a probe project to see that the flags make an
 # author warning and a deprecation fatal; an older CMake ignores -Werror=author without
 # a word, so there it checks the spelling only and says so. The probe compiles nothing
@@ -359,6 +359,19 @@ if(_flywheel_dag_top_level)
     COMMAND ${CMAKE_COMMAND}
       -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ci_clang_tidy.cmake)
+endif()
+
+# The sanitizer workflow cannot be run here either, so this holds what a run would find out late or not at all: that every mode
+# of its matrix is one cmake/flywheel_dag_sanitize.cmake accepts and has a configure, a build and a test preset for the runner;
+# that its configure carries the strict flags and leaves the mode and the build type to the preset; that every ctest command runs
+# the whole suite, the canaries and test_sanitizer_coverage included; that nothing lets it pass by failing (no continue-on-error,
+# no || true, no cache, no suppressions=); and the runtime options, the timeout and the order of steps that a sanitizer run needs.
+# Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_ci_sanitizers
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ci_sanitizers.cmake)
 endif()
 
 # The unit filter of cmake/flywheel_dag_clang_tidy.cmake, and tests/check_clang_tidy_units.cmake, which compares a list of

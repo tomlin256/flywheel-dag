@@ -421,7 +421,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 2 Canaries, coverage, first pass | Done | Five tests added; 17 script mutants and A to E red; no report in four first-pass runs; default 82 of 82, asan 85 of 85, tsan 84 of 84, on the Mac and in `ubuntu-dev` |
 | 3 The guard | Done | Red then green for both tests, 9 hand-made changes, 82 of 82 on the Mac and in `ubuntu-dev` |
 | 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
-| 5 The workflow and its check | Not started | |
+| 5 The workflow and its check | Done | Red then green; 34 hand-made changes, the control and a comment-only change; actionlint clean; default 83 of 83 on the Mac and in `ubuntu-dev`, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; GCC 15.2 builds warning-free, `asan` 86 of 86 there, `tsan` 83 of 85 (the two known `SIGILL`) |
 | 6 First dispatches, schedule, docs | Not started | |
 | 7 `tsan` joins the nightly; close | Not started | |
 
@@ -648,3 +648,55 @@ Each cache shows `CMAKE_BUILD_TYPE=RelWithDebInfo`, an empty `CMAKE_CXX_FLAGS` a
 since macOS has no LeakSanitizer, and set `symbolize=0`. The six scratch trees of Step 2 (`build/scratch-{asan,tsan}`, `-ctr` and
 `-tidy`, 5.9 GB) are deleted, after looking at each: a cache that names this repository, configured today, no process using it.
 CI for the Step 3 commit finished green (CI and clang-tidy).
+
+### Step 5 — The workflow and its check (2026-11-07)
+
+*Red then green.* `test_ci_sanitizers` (`tests/check_ci_sanitizers.cmake`) was registered first and run with no workflow: red,
+`.github/workflows/sanitizers.yml does not exist`. With the workflow, as section 5 describes it and dispatch-only, it is green. The
+workflow's header says what is true while it is dispatch-only; the sentence about how late a finding is reported comes with the
+schedule in Step 6.
+
+*Hand-made changes.* Each is a scratch copy of the working tree with one text change, run through the real check; the control passes,
+and so does a comment that names the things the check forbids (the check reads code, not comments). There are 34 changes, the plan's
+thirteen and 21 more so that every rule of the check is shown to be needed by itself, and each was read for the rule that turned it red:
+
+| Rule | Changes | `test_ci_sanitizers` says |
+|---|---|---|
+| `PRESET` is `${{ matrix.kind }}-linux-x86_64`, set once, and every `--preset` is it | `PRESET` ending `linux-x86-64`; a second `PRESET:` in the Test step; `--preset asan-linux-x86_64` on the build line | `PRESET is not …`; `PRESET is set on 2 lines`; `a --preset argument is not PRESET` |
+| every mode of the matrix is a sanitizer with presets | mode `adress`; mode `OFF`; `kind: ${{ fromJSON(inputs.which) }}` | the module's `FLYWHEEL_DAG_SANITIZE='adress' is not a sanitizer mode`; `the matrix runs 'OFF', which switches no sanitizer on` and no `OFF-linux-x86_64` preset; `the matrix names no sanitizer` |
+| the configure leaves the mode and build type to the preset, and keeps the strict flags | `-DFLYWHEEL_DAG_SANITIZE=asan`, `-DCMAKE_BUILD_TYPE=Debug` and `-DCMAKE_CXX_FLAGS=…` on it; the two `-Werror=` flags off it; `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` off it | `the configure names <variable>, which the preset sets`; `does not carry -Werror=author -Werror=deprecated`; `does not carry -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON` |
+| the whole suite runs | `ctest … -R '^test_dag'`; `-E sanitizer`; `-N`; `\| tail -20`; `2>&1 \| tee ctest.log` | `selects or excludes tests`; `every ctest command only lists tests (-N)`; `is piped` |
+| nothing passes by failing | `continue-on-error: true`; `\|\| true` and `\|\| :` on ctest and on the build; an `actions/cache` step; `restore-keys`; `ccache`; `cache: true`; `suppressions=` in `TSAN_OPTIONS` | `says continue-on-error`; `a line ends in '\|\| true' (or '\|\| :')`; `caches something`; `says suppressions=` |
+| the runtime options | `ASAN_OPTIONS` without `detect_leaks=1`; `TSAN_OPTIONS` without `halt_on_error=1` | `does not set detect_leaks=1`; `does not set halt_on_error=1` |
+| bounds, runner, trigger | no `timeout-minutes`; `fail-fast: true`; `runs-on: macos-latest`; `workflow_call` for `workflow_dispatch` | `no timeout-minutes`; `does not say fail-fast: false`; `does not run on Ubuntu`; `no workflow_dispatch trigger` |
+| the `vm.mmap_rnd_bits` step | moved after the configure; `if: matrix.kind != 'none'` | `comes after the configure`; `does not say 'if: matrix.kind == 'tsan''` |
+
+The first run, of 31 changes, showed that the pipe rule matched `||` too, so a `|| true` on the ctest line was red for two rules and
+the `|| true` rule was not shown to be needed. The pipe rule now matches a single `|` only; the three changes added after that run are
+`|| true` and `|| :` on the build line, where only the `||` rule can see them, and the `| tee`.
+
+*`test_cmake_diagnostics`.* Its list of files grows to five (`.github/workflows/sanitizers.yml`), and its two comments say "CI's three
+workflows". Red first: with the old list, a scratch copy whose `sanitizers.yml` says `-Werror=dev` passed ("4 files spell the strict
+flags"); with the new list it fails, naming `.github/workflows/sanitizers.yml still says -Werror=dev`, and the real checkout passes
+("5 files").
+
+*Also.* actionlint 1.7.12 (the `rhysd/actionlint` image, the checkout mounted read-only) lints all three workflows and prints
+nothing. The only action any workflow uses is `actions/checkout@v6`, in all three, and its `action.yml` says `using: node24`; the
+current release, v7.0.1, is `node24` too, so nothing changes here.
+
+*Checkpoint.* The default tree is 83 of 83 on the Mac (Apple clang 21) and in `ubuntu-dev` (GCC 13.3), with CI's strict flags and no
+warning. The Mac preset trees are `asan-macos-arm64` 86 of 86 and `tsan-macos-arm64` 85 of 85, no sanitizer report line in either.
+The workflow's three commands, by hand, in a fresh `ubuntu:26.04` container (GCC 15.2.0, CMake 4.2.3, 12 cores, kernel
+6.12.76-linuxkit, `vm.mmap_rnd_bits` 18), with CI's strict flags and runtime options and the dependencies fetched as CI fetches
+them; the container is aarch64, so the presets are `asan-linux-arm64` and `tsan-linux-arm64` and the commands are otherwise the
+workflow's:
+
+| Tree | Configure | Build | ctest | Sanitizer report lines |
+|---|---|---|---|---|
+| `asan-linux-arm64` | 27 s | 146 s, 0 warnings, 0 errors | 86 of 86, 57 s | 0 |
+| `tsan-linux-arm64` | 19 s | 73 s, 0 warnings, 0 errors | 83 of 85, 57 s | 0 |
+
+The two that fail are `test_dag_async` and `test_wake_state`, with `Illegal instruction` and no output: the same two as in the
+measurement above, which read it as a property of this aarch64 container's runtime and kernel. They are not a finding, and the
+x86_64 runner is the first place that GCC 15.2's ThreadSanitizer runs them (Step 6). Both trees list `sanitizer_canary_*`,
+`test_sanitizer_coverage` and `test_ci_sanitizers` as passed.
