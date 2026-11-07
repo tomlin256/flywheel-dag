@@ -26,7 +26,10 @@
 #     finding is the end of the log and not buried under what follows).
 #   - The job has a timeout-minutes, and fail-fast is off, so that one sanitizer red does not hide the other.
 #   - The workflow runs on a schedule, so that a finding does not wait for someone to start a run, and on demand, so that a finding can
-#     be reproduced on the runner.
+#     be reproduced on the runner. A scheduled run has no `which` input and takes the last array of the kind: expression, so that
+#     expression is evaluated for no input and for each value of `which` (it must be a chain of `inputs.which == '<value>' && '[...]'`
+#     alternatives ending in a bare array, and any other shape fails): the schedule and which=both run every mode of the matrix, and
+#     which=asan and which=tsan run the mode they name and no other.
 #   - The step that reads and lowers vm.mmap_rnd_bits comes before the configure, and only the tsan job runs it. Every command on the
 #     sysctl goes through sudo: the runner's user cannot read /proc/sys/vm/mmap_rnd_bits.
 #
@@ -85,6 +88,74 @@ else()
 endif()
 if("${modes}" STREQUAL "")
     string(APPEND failures "\n  the matrix names no sanitizer: no [\"asan\"]-style array in its kind: line")
+endif()
+
+# The modes that a run gets for a value of the `which` input; "" is a run with no input, which is what a scheduled run is. The
+# expression is a chain of `inputs.which == '<value>' && '[<modes>]'` joined by `||` and ending in a bare array. That is the one shape
+# evaluated here, and any other fails, so that a rule is never held against an expression it does not understand. GitHub's && and ||
+# give the operand that decides, so the first alternative whose condition holds gives the array.
+function(modes_run_for which out)
+    set(${out} "UNPARSED" PARENT_SCOPE)
+    if(NOT kind_lines MATCHES "fromJSON\\((.*)\\)[ \t]*[}][}]")
+        return()
+    endif()
+    string(REPLACE " || " ";" alternatives "${CMAKE_MATCH_1}")
+    foreach(alternative IN LISTS alternatives)
+        if(alternative MATCHES "^inputs\\.which == '([a-z]*)' && '<lbracket>([^<]*)<rbracket>'$")
+            set(condition "${CMAKE_MATCH_1}")
+            set(array_text "${CMAKE_MATCH_2}")
+            if(NOT "${condition}" STREQUAL "${which}")
+                continue()
+            endif()
+        elseif(alternative MATCHES "^'<lbracket>([^<]*)<rbracket>'$")
+            set(array_text "${CMAKE_MATCH_1}")
+        else()
+            return()
+        endif()
+        string(REGEX MATCHALL "[A-Za-z_]+" words "${array_text}")
+        set(${out} "${words}" PARENT_SCOPE)
+        return()
+    endforeach()
+endfunction()
+
+if(kind_count EQUAL 1 AND NOT "${modes}" STREQUAL "")
+    foreach(wanted IN ITEMS asan tsan)
+        if(NOT wanted IN_LIST modes)
+            string(APPEND failures "\n  the matrix does not name ${wanted}: the workflow runs both sanitizers")
+        endif()
+    endforeach()
+    # Each value of `which`, and a run with no input, against the modes it must run.
+    foreach(case IN ITEMS "|schedule" "both|both" "asan|asan" "tsan|tsan")
+        string(REPLACE "|" ";" case_parts "${case}")
+        list(GET case_parts 0 which)
+        list(GET case_parts 1 label)
+        modes_run_for("${which}" got)
+        if(got STREQUAL "UNPARSED")
+            string(APPEND failures
+                "\n  the kind: expression is not a chain of `inputs.which == '<value>' && '[...]'` alternatives ending in a bare array, "
+                "the one shape that this check evaluates")
+            break()
+        endif()
+        if(label STREQUAL "schedule" OR label STREQUAL "both")
+            set(want "${modes}")
+        else()
+            set(want "${label}")
+        endif()
+        list(SORT got)
+        list(SORT want)
+        if(NOT "${got}" STREQUAL "${want}")
+            list(JOIN got ", " got_text)
+            list(JOIN want ", " want_text)
+            if(label STREQUAL "schedule")
+                string(APPEND failures
+                    "\n  a scheduled run, which has no `which` input, runs ${got_text} and must run ${want_text}: every mode of the "
+                    "matrix has to be reachable from the schedule")
+            else()
+                string(APPEND failures
+                    "\n  which=${which} runs ${got_text} and must run ${want_text}")
+            endif()
+        endif()
+    endforeach()
 endif()
 
 file(READ "${presets}" presets_json)

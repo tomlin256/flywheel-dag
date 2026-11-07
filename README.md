@@ -326,7 +326,7 @@ LLVM's own apt repository, apt.llvm.org, and `.github/workflows/clang-tidy.yml` 
 
 A workflow of its own, `sanitizers.yml`, builds the tests with a sanitizer on Linux x86_64 and runs the whole suite. `asan` is
 AddressSanitizer with UndefinedBehaviorSanitizer (and LeakSanitizer, which is part of its runtime on Linux), and `tsan` is
-ThreadSanitizer. The `asan` job runs every night, and either job or both run on demand (`gh workflow run sanitizers.yml --ref main
+ThreadSanitizer. Both jobs run every night, and either one or both run on demand (`gh workflow run sanitizers.yml --ref main
 -f which=both`, or `which=asan`, or `which=tsan`). The option is `FLYWHEEL_DAG_SANITIZE` (`OFF`, `asan` or `tsan`), set by the
 presets `asan-*` and `tsan-*`, and it reaches the fetched dependencies too: a dependency built without it links into an
 instrumented test with no error, and under ThreadSanitizer reads as a race in the project.

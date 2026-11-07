@@ -17,7 +17,7 @@
 # No cache of any kind: a dependency tree restored from the other mode would be silent partial instrumentation, and
 # test_sanitizer_coverage would be the only thing to say so.
 #
-# When it runs. Every night, the asan job alone, so that a finding is reported up to a day after the commit that caused it; and on
+# When it runs. Every night, both jobs, so that a finding is reported up to a day after the commit that caused it; and on
 # demand, either job or both: Actions > Sanitizers > Run workflow, or `gh workflow run sanitizers.yml --ref main -f which=both` (or
 # `which=asan`, or `which=tsan`).
 #
@@ -57,8 +57,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The kinds to run: both, tsan alone, or asan alone (the fallthrough, which is also what a run with no input gets).
-        kind: ${{ fromJSON(inputs.which == 'both' && '["asan","tsan"]' || inputs.which == 'tsan' && '["tsan"]' || '["asan"]') }}
+        # The kinds to run: asan alone, tsan alone, or both, which is also what a run with no input gets.
+        kind: ${{ fromJSON(inputs.which == 'asan' && '["asan"]' || inputs.which == 'tsan' && '["tsan"]' || '["asan","tsan"]') }}
     runs-on: ubuntu-latest
     # About twice what a cold run takes; the bound is for a hung test, which otherwise runs until GitHub's six-hour cap.
     timeout-minutes: 15

@@ -422,8 +422,8 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 3 The guard | Done | Red then green for both tests, 9 hand-made changes, 82 of 82 on the Mac and in `ubuntu-dev` |
 | 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
 | 5 The workflow and its check | Done | Red then green; 34 hand-made changes, the control and a comment-only change; actionlint clean; default 83 of 83 on the Mac and in `ubuntu-dev`, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; GCC 15.2 builds warning-free, `asan` 86 of 86 there, `tsan` 83 of 85 (the two known `SIGILL`) |
-| 6 First dispatches, schedule, docs | In progress | Dispatch 1: the `tsan` leg stopped at the `vm.mmap_rnd_bits` step (no sudo), fixed test first |
-| 7 `tsan` joins the nightly; close | Not started | |
+| 6 First dispatches, schedule, docs | Done | Dispatch 1: the `tsan` leg stopped at the `vm.mmap_rnd_bits` step (no sudo), fixed test first; `asan` 86 of 86 (7 min 43 s), then 87 of 87 with the leak canary (7 min 38 s); `tsan` 85 of 85 in five consecutive dispatches (4 min 12 s to 6 min 58 s); `timeout-minutes` 15; `asan` nightly; docs pushed |
+| 7 `tsan` joins the nightly; close | In progress | Red then green; 6 red, 3 green and the control; default 83, `asan` 86 (87 in `ubuntu-dev`), `tsan` 85. Waiting for the first scheduled run (03:17 UTC, 2026-11-08); the issue stays open until both jobs are green in one |
 
 ## Outcome
 
@@ -757,3 +757,52 @@ took "three workflows" in Step 5.
 *Checkpoint.* The default tree is 83 of 83 on the Mac and in `ubuntu-dev`; the Mac `asan` tree is 86 of 86 (the leak canary is not
 registered on Darwin) and `ubuntu-dev`'s `asan-linux-arm64` is 87 of 87 under CI's runtime options, `sanitizer_canary_lsan` among
 the passes; `tsan-linux-arm64` is 85 of 85. No sanitizer report line in any of them.
+
+*The leak canary on the runner.* `gh workflow run sanitizers.yml --ref main -f which=asan` on the docs commit
+(https://github.com/tomlin256/flywheel-dag/actions/runs/42400554122): 87 of 87 in 7 min 38 s (configure 22 s, build 314 s, `ctest`
+118 s), `sanitizer_canary_lsan` among the passes at 0.03 s, no report line, no warning. LeakSanitizer is live on the runner under
+the workflow's `ASAN_OPTIONS`, which the Mac cannot show.
+
+*Five green `tsan` dispatches,* one at a time (a newer dispatch cancels the one in flight), all after the `sudo` fix. Each is 85 of 85
+with no report line and no warning; `vm.mmap_rnd_bits` is 32 before the step and 28 after it, on kernel 7.0.0-1019-azure, in every one.
+The times are the steps' own:
+
+| Run | Commit | Total | Configure | Build | `ctest` |
+|---|---|---|---|---|---|
+| https://github.com/tomlin256/flywheel-dag/actions/runs/42398982072 | the `sudo` fix | 6 min 37 s | 26 s | 228 s | 138 s |
+| https://github.com/tomlin256/flywheel-dag/actions/runs/42399710638 | the `sudo` fix | 4 min 22 s | 18 s | 147 s | 93 s |
+| https://github.com/tomlin256/flywheel-dag/actions/runs/42400110133 | the `sudo` fix | 6 min 58 s | 24 s | 237 s | 151 s |
+| https://github.com/tomlin256/flywheel-dag/actions/runs/42400730443 | the docs commit | 4 min 12 s | 19 s | 140 s | 89 s |
+| https://github.com/tomlin256/flywheel-dag/actions/runs/42401137841 | the docs commit | 4 min 39 s | 21 s | 153 s | 101 s |
+
+The same job takes between 4 min 12 s and 6 min 58 s, so the 15-minute bound is more than twice the slowest `tsan` run and the
+`asan` job's 7 min 38 s. The `tsan` job found nothing in five runs, and the two thread tests that `SIGILL` under GCC 15.2's
+ThreadSanitizer in an aarch64 container (Step 5) pass on the x86_64 runner.
+
+### Step 7 — `tsan` joins the nightly (2026-11-07)
+
+*The gate.* The five consecutive green `tsan` dispatches of Step 6, one at a time, none with a finding.
+
+*Test first.* `test_ci_sanitizers` evaluates the `kind:` expression of the matrix for a run with no `which` input, which is what a
+scheduled run is, and for `which=both`, `which=asan` and `which=tsan`. The expression has to be a chain of
+`inputs.which == '<value>' && '[...]'` alternatives that ends in a bare array, the one shape the check evaluates; any other shape is a
+failure of its own, so that a rule is never held against an expression the check does not understand. The schedule and `which=both`
+must run every mode the matrix names, and `which=asan` and `which=tsan` the mode they name and no other. Against the workflow as
+pushed, whose fallthrough was `["asan"]`, it was red with one message: a scheduled run, which has no `which` input, runs asan and
+must run asan, tsan. The fallthrough is now `["asan","tsan"]`, the `both` alternative is gone because the last array answers it, and
+`asan` is spelt out; the check is green and the header of the workflow says that both jobs run every night.
+
+*Hand-made changes,* each a copy of the working tree with one text change, the real check run against it. Six are red, each for its
+own reason: the schedule gets `asan` alone, the schedule gets `tsan` alone, `which=tsan` gets both, the `asan` alternative is missing
+so that `which=asan` gets both, a `!=` condition in place of `==` (not the shape the check evaluates), and `tsan` dropped from the
+matrix (the matrix does not name it, and `which=tsan` runs `asan`). Three are green: `which=both` spelt out as an alternative of its
+own, a space inside the array, and the modes in the order `tsan`, `asan`. The control is green. The sets of Steps 5 and 6 are
+unchanged against the new check: 34 red and 2 green, 5 red and 2 green (the `sudo` rule), 4 red and 2 green (the schedule rule).
+
+*Checkpoint.* The default tree is 83 of 83, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; in `ubuntu-dev` the default tree is 83 of
+83, `asan-linux-arm64` 87 of 87 and `tsan-linux-arm64` 85 of 85, with no sanitizer report line. actionlint is clean on all the
+workflows. No C++ changed, so no object was recompiled in any tree.
+
+*The scheduled run is not in.* The first tick is at 03:17 UTC on 2026-11-08, after the last run of the session that wrote this.
+`gh run list --workflow sanitizers.yml --event schedule` shows it. flywheel-dag#45 stays open until a scheduled run on `main` shows
+both jobs green, and is closed by hand after that.
