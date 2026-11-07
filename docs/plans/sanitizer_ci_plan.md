@@ -715,3 +715,45 @@ it substitutes a command), and went red against the workflow as pushed, naming t
 `sudo sysctl -n`, and the check is green. Five hand-made changes are red for the new rule (a read without sudo, a read of the
 `/proc` file, a write without sudo, the "after" echo without sudo, an echo with a backtick substitution); the control and a reworded
 echo are green; the 34 changes of Step 5 are unchanged, 34 red and the two green.
+
+*The first green runs.* Both legs ran green on the runner, on separate dispatches because of the step above:
+
+| Job | Run | Commit | Total | Configure | Build | `ctest` | Result |
+|---|---|---|---|---|---|---|---|
+| `asan` | https://github.com/tomlin256/flywheel-dag/actions/runs/42398626594 | Step 5 | 7 min 43 s | 25 s | 5 min 13 s | 117 s, 86 tests | 86 of 86, no report line, no warning |
+| `tsan` | https://github.com/tomlin256/flywheel-dag/actions/runs/42398982072 | the sudo fix | 6 min 37 s | 26 s | 3 min 48 s | 137 s, 85 tests | 85 of 85, no report line, no warning |
+
+Both logs list `sanitizer_canary_*`, `test_sanitizer_coverage` and `test_ci_sanitizers` as passed. The runner has 4 cores and CMake 4.4.5,
+and `vm.mmap_rnd_bits` was 32 before the `tsan` job's step and 28 after it. Whether the job would pass without lowering it was not
+measured (left for later: it needs a run with the step off, and the step costs under a second). The only annotation on either run is a
+notice that the `ubuntu-latest` label migrates to Ubuntu 26 on 19 October 2026; this runner is Ubuntu 26.04.1 already, so the notice is
+stale, and there is no deprecation warning.
+
+*`timeout-minutes` is 15,* about twice the slower cold run (the `asan` job, 7 min 43 s), where it was 45 before it was measured. The
+bound is for a hung test, and ctest's own `--timeout 120` bounds each test.
+
+*The schedule.* Test first: `test_ci_sanitizers` requires a `schedule` with a cron of five fields; red against the workflow without
+one, green with `cron: "17 3 * * *"` (an odd minute, since GitHub delays runs at the start of an hour). A scheduled run has no
+`which`, so the matrix falls through to `["asan"]`, and the nightly runs `asan` alone until Step 7. Five hand-made changes (no
+schedule, a cron of four fields, a cron commented out, an empty cron, and the control with the cron in single quotes, which is
+accepted) behave as stated. The first version of the rule was red against a correct workflow, because the comment lines that the check
+drops left empty lines between `schedule:` and its item; the rule now allows them.
+
+*The leak canary,* which the plan did not list. The Linux legs exist for LeakSanitizer, and nothing in a run showed that it is live:
+`test_ci_sanitizers` holds the string `detect_leaks=1`, and the canaries cover AddressSanitizer, UBSan and ThreadSanitizer. Under
+the workflow's `ASAN_OPTIONS` a program that leaks stops with exit 1 and `ERROR: LeakSanitizer: detected memory leaks`, and with
+`detect_leaks=0` it exits 0 in silence (measured in `ubuntu-dev`, GCC 13.3). `sanitizer_canary_lsan` (a leak behind a volatile pointer)
+is registered in an `asan` tree on Linux only, through the same runner, and inherits ctest's environment, so `detect_leaks=0` turns it
+red. In `ubuntu-dev`'s `asan-linux-arm64` it passes under CI's options and with no `ASAN_OPTIONS`, and fails under `detect_leaks=0`
+with the runner's message, which now also names that option (`test_sanitizer_scripts` has a 20th case for it, red before the message
+changed). With the pointer left reachable the program exits 0 with no report, so the runner refuses it. On the Mac, with the Linux
+guard taken out in a scratch copy, the canary is red (`exited 0 with no report`), so the guard is needed.
+
+*Docs.* The README has a `### Sanitizers` section after `### clang-tidy` (the commands, what each sanitizer tree proves about itself, the
+runtime options, that LeakSanitizer is Linux-only) and a badge; `docs/releasing.md` step 6 also reads the last `Sanitizers` run on
+`main`. `CLAUDE.md` took its one sentence in Step 4 and is unchanged (6,499 of 6,500 bytes). The comment over `test_cmake_diagnostics`
+took "three workflows" in Step 5.
+
+*Checkpoint.* The default tree is 83 of 83 on the Mac and in `ubuntu-dev`; the Mac `asan` tree is 86 of 86 (the leak canary is not
+registered on Darwin) and `ubuntu-dev`'s `asan-linux-arm64` is 87 of 87 under CI's runtime options, `sanitizer_canary_lsan` among
+the passes; `tsan-linux-arm64` is 85 of 85. No sanitizer report line in any of them.

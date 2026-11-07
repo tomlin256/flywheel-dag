@@ -1,6 +1,6 @@
 # flywheel-dag
 
-[![CI](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml) [![clang-tidy](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml)
+[![CI](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml) [![clang-tidy](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml) [![Sanitizers](https://github.com/tomlin256/flywheel-dag/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/sanitizers.yml)
 
 A header-only C++23 reactive DAG computation engine.
 
@@ -321,6 +321,32 @@ outside the checkout or under a directory called `_deps`. A `.cpp` in `tests/`, 
 target compiles fails `test_clang_tidy_wiring`, which needs no clang-tidy. On a Mac, `brew install llvm` has LLVM 23; it
 is keg-only, so link its `clang-tidy` and `clangd` into a directory on your `PATH`. On Ubuntu, `clang-tidy-23` is in
 LLVM's own apt repository, apt.llvm.org, and `.github/workflows/clang-tidy.yml` shows the install.
+
+### Sanitizers
+
+A workflow of its own, `sanitizers.yml`, builds the tests with a sanitizer on Linux x86_64 and runs the whole suite. `asan` is
+AddressSanitizer with UndefinedBehaviorSanitizer (and LeakSanitizer, which is part of its runtime on Linux), and `tsan` is
+ThreadSanitizer. The `asan` job runs every night, and either job or both run on demand (`gh workflow run sanitizers.yml --ref main
+-f which=both`, or `which=asan`, or `which=tsan`). The option is `FLYWHEEL_DAG_SANITIZE` (`OFF`, `asan` or `tsan`), set by the
+presets `asan-*` and `tsan-*`, and it reaches the fetched dependencies too: a dependency built without it links into an
+instrumented test with no error, and under ThreadSanitizer reads as a race in the project.
+
+```bash
+cmake --preset asan-macos-arm64        # tsan-macos-arm64 for ThreadSanitizer; -linux-arm64 or -linux-x86_64 on Linux
+cmake --build --preset asan-macos-arm64
+ctest --preset asan-macos-arm64
+```
+
+A sanitizer tree proves that its options took effect. The canaries `sanitizer_canary_asan`, `sanitizer_canary_ubsan` and
+`sanitizer_canary_tsan` each commit one deliberate violation and need both a non-zero exit and the sanitizer's own report, and on
+Linux `sanitizer_canary_lsan` does the same for a leak, so a tree whose options never took effect, or whose leak detector is off
+(`ASAN_OPTIONS=detect_leaks=0`), fails them while every other test passes. `test_sanitizer_coverage` reads the tree's
+`compile_commands.json` and link lines and names any unit or executable, a dependency's included, that lacks the mode's options.
+UBSan stops the program at its first finding (`-fno-sanitize-recover=undefined`). The workflow sets
+`ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1:detect_leaks=1`, `UBSAN_OPTIONS=print_stacktrace=1` and
+`TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1`, and `ctest` is the whole suite: no test is selected out, and
+`test_ci_sanitizers` holds the workflow to that. LeakSanitizer exists only on Linux (Apple's runtime answers "detect_leaks is not
+supported on this platform"), so a run on a Mac leaves `detect_leaks` out.
 
 ## Benchmark
 

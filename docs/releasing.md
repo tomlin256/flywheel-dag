@@ -20,8 +20,9 @@ A release is a commit, an annotated tag and a GitHub release. A consumer that fe
    `gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md --verify-tag --latest`. The notes are a lead paragraph,
    then Added or Changed, Not covered, Tests and Not changed, with issues linked by full URL. No workflow runs on a tag.
 6. **CI, afterwards.** The gate in step 4 is the release's check: do not wait for CI before the tag. Read the runs on the
-   release commit, `CI` and `clang-tidy`, once they finish. A failure the release carries gets a patch release; a
-   pushed tag is not moved.
+   release commit, `CI` and `clang-tidy`, once they finish, and the last `Sanitizers` run on `main` (`gh run list --workflow
+   sanitizers.yml --limit 3`): it is nightly, so it is not a run on the release commit. A failure the release carries gets a patch
+   release; a pushed tag is not moved.
 7. **Record.** The plan's status and Outcome go in a docs commit, pushed once the release commit's `CI` run has finished (a
    push cancels the earlier `CI` run: `ci.yml` has `cancel-in-progress`; `clang-tidy.yml` has none, and a docs commit starts
    no lint run). Quote a commit subject there without its scope (`build: release vX.Y.Z`): plans and docs cite issues as
