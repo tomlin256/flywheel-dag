@@ -210,7 +210,7 @@ Each has a default. Approving the plan as written takes the default.
 |---|---|---|
 | 0 — Baseline and tools | Done | The compare script passes its own check, and 39 translation units preprocess to the same text with every comment blanked. Strict build prints no warning; ctest 55 of 55. |
 | 1 — `dag.*`, `dag_async.*` | Done | Four closed-issue references cut and one tense corrected. The citation of flywheel-dag#31 over ValueSlot's thread rule stays. |
-| 2 — `dag_engine.*` and neighbours | Not started | |
+| 2 — `dag_engine.*` and neighbours | Done | 24 closed-issue references cut in `dag_engine.*`, `dag_graph.hpp` and `dag_thread_fence.hpp`; two comparisons with the old `std::system` call rewritten as present facts. `dag_state_store.*` needed no change. Strict build prints no warning; ctest 55 of 55. |
 | 3 — Replay, utilities, AAD | Not started | |
 | 4 — Ops and time series | Not started | |
 | 5 — Core tests | Not started | |

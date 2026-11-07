@@ -22,7 +22,7 @@
 // -Wtsan, at every fence it compiles under -fsanitize=thread, and -Werror makes that an error. The warning is true.
 // Where the fence orders atomic accesses only, it costs nothing: ThreadSanitizer never reports on an atomic access,
 // with a fence or without one, so there is no race it could miss and none it could invent. CycleSeqLock is such a
-// place (flywheel-dag#49).
+// place.
 //
 // What this does
 // ──────────────

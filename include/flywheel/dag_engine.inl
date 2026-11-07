@@ -222,7 +222,7 @@ inline void Engine::addSource(std::shared_ptr<IFlushable> src) {
 // Flush list
 //
 // A source two groups hold, where neither group sees the other, is held twice and cannot be
-// refused at registration (flywheel-dag#37). So cycle() flushes from a list that holds each source
+// refused at registration. So cycle() flushes from a list that holds each source
 // once, built by walking sources_ in order.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -272,11 +272,11 @@ dag::InputPtr<T> Engine::makeInput(
 
 // cycle() walks outputs_ and calls each callback where it is stored, so a registration from a
 // callback can reallocate the vector under the std::function that is running, and a functor small
-// enough for the function's own buffer then reads freed memory (flywheel-dag#24). These calls are
+// enough for the function's own buffer then reads freed memory. These calls are
 // refused while a cycle is in flight. cycles_ counts a cycle as it begins and timedCycles_ as its
 // guard ends it, so they differ from the fetch_add at the top of cycle() to the count in the guard's
 // destructor, a throw included. cycle() asks the same question of a step() or run() made inside a
-// cycle (flywheel-dag#39).
+// cycle.
 inline bool Engine::cycleInFlight() const {
     return cycles_.load(std::memory_order_relaxed) != timedCycles_;
 }
@@ -399,7 +399,7 @@ inline CycleSeqLockPtr Engine::cycleSeqLock() const { return cycleSeqLock_; }
 }
 
 inline void Engine::cycle() {
-    // A step() or run() made inside a cycle (flywheel-dag#39) would flush every source a second
+    // A step() or run() made inside a cycle would flush every source a second
     // time, which drops an AsyncQueue's batch, and open a second scope on the lock: while it lasts a
     // reader on another thread sees no cycle open, and its end clears the record of the cycle's
     // thread, so a read from the callback waits for ever. Refuse before the scope, the count and the
@@ -446,7 +446,7 @@ inline void Engine::cycle() {
     // 1. Flush all sources — the only point where feed-thread data enters
     //    the DAG.  Invalidations propagate forward synchronously from here.
     //    Each source is flushed once, from the list of the sources and groups
-    //    the engine holds (flywheel-dag#37), rebuilt first if a source was
+    //    the engine holds, rebuilt first if a source was
     //    added since the last cycle or a group grew.
     if (flushListStale()) rebuildFlushList();
     for (auto& s : flushList_) s->flush();
@@ -503,7 +503,7 @@ inline void Engine::cycle() {
 // whatever else holds the source can post() after the Engine is gone, or be
 // between its push and its call to the hook when the Engine is destroyed
 // (AsyncQueue::post() calls the hook once it has released its own lock). A hook
-// that captured `this` would lock a destroyed mutex then (flywheel-dag#42). This
+// that captured `this` would lock a destroyed mutex then. This
 // one locks a mutex that is still there, sets a flag nobody reads, and returns.
 // ─────────────────────────────────────────────────────────────────────────────
 

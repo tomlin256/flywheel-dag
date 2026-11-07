@@ -15,11 +15,10 @@
 // render it; if that fails, the .dot file is kept, and dotPathFor() says where.
 //
 // toSvg() starts `dot` itself with posix_spawnp and hands it the two paths as
-// arguments, so no shell reads them and a path is only ever a path
-// (flywheel-dag#62). That ties it to POSIX: where <spawn.h> does not exist
-// (Windows) the class has toDot() and no toSvg(), and the header still
-// compiles. FLYWHEEL_DAG_HAS_TO_SVG is defined where toSvg() exists. No other
-// header of the engine needs POSIX.
+// arguments, so no shell reads them and a path is only ever a path. That ties
+// it to POSIX: where <spawn.h> does not exist (Windows) the class has toDot()
+// and no toSvg(), and the header still compiles. FLYWHEEL_DAG_HAS_TO_SVG is
+// defined where toSvg() exists. No other header of the engine needs POSIX.
 //
 // Never include this file directly from nodes — it is an opt-in utility.
 
@@ -72,9 +71,9 @@ public:
                       const std::string& outPath,
                       const std::string& graphName = "flywheel");
 
-    /// The file toSvg() writes the DOT text to, and keeps when it returns false
-    /// (flywheel-dag#63, flywheel-dag#68): beside outPath, named from the file name
-    /// alone, so that a dot in a directory name is never taken for the extension.
+    /// The file toSvg() writes the DOT text to, and keeps when it returns false:
+    /// beside outPath, named from the file name alone, so that a dot in a
+    /// directory name is never taken for the extension.
     /// The extension of the file name becomes ".dot", or ".dot" is appended when
     /// there is none, so graph.svg gives graph.dot. When the extension already is
     /// .dot, in any case (a Mac's file system ignores it), that would be outPath
@@ -259,9 +258,9 @@ inline bool GraphExporter::runDot(const std::string& dotPath, const std::string&
     char* const* const env = environ;
 #endif
 
-    // The caller's PATH finds dot, and the child gets the caller's environment and standard streams, as it did under
-    // std::system. A non-zero return is the spawn failing, no dot on PATH included; a libc that reports a failed exec
-    // as exit status 127 instead is caught by the status check below.
+    // The caller's PATH finds dot, and the child gets the caller's environment and standard streams. A non-zero
+    // return is the spawn failing, no dot on PATH included; a libc that reports a failed exec as exit status 127
+    // instead is caught by the status check below.
     pid_t pid = 0;
     if (posix_spawnp(&pid, "dot", nullptr, nullptr, argv.data(), env) != 0) return false;
 
@@ -271,7 +270,7 @@ inline bool GraphExporter::runDot(const std::string& dotPath, const std::string&
         reaped = waitpid(pid, &status, 0);
     } while (reaped == -1 && errno == EINTR);
     // Any other waitpid failure leaves the status unknown, and status starts at 0, which reads as success, so the
-    // child's pid is checked first. A process that ignores SIGCHLD gets ECHILD here, as it did from std::system.
+    // child's pid is checked first. A process that ignores SIGCHLD gets ECHILD here.
     return reaped == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 

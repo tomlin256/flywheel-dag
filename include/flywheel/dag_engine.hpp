@@ -34,11 +34,10 @@
 //   thing: sets a boolean flag and signals a condition variable.  That flag, its
 //   mutex and the condition variable are all a feed thread touches, and they are
 //   not the Engine's own: the Engine and every hook it hands out share them through
-//   a shared_ptr, so a source can still be posted to after its Engine is gone
-//   (flywheel-dag#42).  stop() and poke() set the same state, and every write
-//   another thread makes to what run() waits on is made under its mutex, so a
-//   notification cannot fall between run()'s test and its block
-//   (flywheel-dag#43).
+//   a shared_ptr, so a source can still be posted to after its Engine is gone.
+//   stop() and poke() set the same state, and every write another thread makes
+//   to what run() waits on is made under its mutex, so a notification cannot
+//   fall between run()'s test and its block.
 //
 // Cycle
 //   On each wake: flush all sources (thread boundary), then for each output node
@@ -59,7 +58,7 @@
 //   each source listed once, at the first place the walk reaches it.  A source
 //   that two groups hold, without either seeing the other, is then flushed once
 //   per cycle.  Flushed twice, it would find nothing staged the second time, and
-//   an AsyncQueue would drop its batch (flywheel-dag#37).  addSource() marks the
+//   an AsyncQueue would drop its batch.  addSource() marks the
 //   list stale and the next cycle rebuilds it.  A cycle rebuilds it too when a
 //   group it walked through has grown, which a size compare per group finds, with
 //   no work per source.
@@ -73,7 +72,7 @@
 //   run() must be called from exactly one thread.  stop() and poke() are safe
 //   to call from any thread, including from within output callbacks, but not
 //   from a signal handler: each takes the mutex run() waits under.  A stop()
-//   that arrives as run() is about to wait is not lost (flywheel-dag#43).  A
+//   that arrives as run() is about to wait is not lost.  A
 //   source may be posted to after its Engine is destroyed, and nothing else on
 //   a destroyed Engine may be used.
 
@@ -131,13 +130,13 @@ inline constexpr std::size_t kDefaultCycleSeqReadAttempts = 64;
 //
 // A sanitizer cannot check it. ThreadSanitizer never reports on an atomic access, and it does not model the fences
 // this lock orders with (dag_thread_fence.hpp), so a clean ThreadSanitizer run says nothing about readConsistent().
-// The retry, wait-out and give-up tests in test_dag_async.cpp hold the protocol (flywheel-dag#49).
+// The retry, wait-out and give-up tests in test_dag_async.cpp hold the protocol.
 class CycleSeqLock {
 public:
     // Holds one cycle open. RAII so a throwing callback can't leave it open and stall every reader.
     // Scopes on one lock must not nest: an inner scope turns the sequence word even while the outer
     // cycle is still open, and its end clears the record of the cycle's thread. Engine::cycle()
-    // takes none while a cycle is in flight (flywheel-dag#39).
+    // takes none while a cycle is in flight.
     class WriteScope {
     public:
         explicit WriteScope(CycleSeqLock& lock);
@@ -170,7 +169,7 @@ namespace detail {
 // is work, the flag that says a run is going, and the mutex and condition variable that carry them.
 // A source's wake hook and poke() call signalWork(), stop() calls requestStop(), and run() calls
 // beginRun(), waitForWork() and endRun(). The Engine and every hook it hands out share one through a
-// shared_ptr, so a source can still be posted to after its Engine is gone (flywheel-dag#42).
+// shared_ptr, so a source can still be posted to after its Engine is gone.
 //
 // What the waiter's predicate reads changes only under mu_. A condition variable drops a notification
 // that finds nobody waiting, and a waiter tests its predicate and then blocks, two steps with mu_ held
@@ -180,8 +179,8 @@ namespace detail {
 //     writer:                     running_ = false; notify_all() ......... (nobody waiting yet: dropped)
 //
 // and the waiter would block on a predicate that is already true, with no one left to say so: run()
-// would sleep until a post or a poke() reached it, and stop() was the call meant to end it
-// (flywheel-dag#43). With the store made under mu_, the writer comes either before the waiter's test,
+// would sleep until a post or a poke() reached it, and stop() was the call meant to end it.
+// With the store made under mu_, the writer comes either before the waiter's test,
 // which then sees it, or after the waiter's block, which the notification then reaches.
 //
 // signalWork() and requestStop() are the only writers of hasWork_ and running_ that a waiter's
@@ -248,7 +247,7 @@ public:
     /// ignored: it keeps its first place in the order, and its wake hook is not installed again.
     /// The check sees what the engine holds when this is called. A source that reaches the engine
     /// by another route, through two registries or into a registry after it is registered, is
-    /// flushed once all the same, at the first place the engine reaches it (flywheel-dag#37), and
+    /// flushed once all the same, at the first place the engine reaches it, and
     /// is given the wake hook once for each registry that holds it.
     /// Register a source between cycles, on the thread that runs them.
     void addSource(std::shared_ptr<IFlushable> src);
@@ -329,7 +328,7 @@ public:
 
     /// Signal the engine to stop after the current cycle finishes.
     /// Safe to call from any thread, including from within output callbacks, and a stop() that
-    /// arrives as run() is about to wait is not lost (flywheel-dag#43). It takes the mutex run()
+    /// arrives as run() is about to wait is not lost. It takes the mutex run()
     /// waits under, so call it from a thread, not from a signal handler.
     void stop();
 
@@ -343,7 +342,7 @@ public:
     /// source's flush(), it throws std::runtime_error and begins no cycle: a cycle inside a cycle
     /// would flush every source a second time, which drops an AsyncQueue's batch, and leave
     /// CycleSeqLock out of step. To get another cycle, call step() once this one has returned, or
-    /// poke() an engine that run() drives (flywheel-dag#39).
+    /// poke() an engine that run() drives.
     void step();
 
     // ── Graph inspection ─────────────────────────────────────────────────────
@@ -394,7 +393,7 @@ private:
     // so the message names both rather than the one that called.
     [[noreturn]] static void throwNestedCycle();
 
-    // The flush list (flywheel-dag#37). expandSource() walks one source into it: a source with no
+    // The flush list. expandSource() walks one source into it: a source with no
     // members() is listed, once, and a group is entered, once, and its members walked in its place.
     void rebuildFlushList();
     void expandSource(const std::shared_ptr<IFlushable>& src,
@@ -440,7 +439,7 @@ private:
     // handed out each hold a reference, so the state lasts as long as a source that can still call
     // its hook. A hook that held the Engine would lock a destroyed mutex when a post() outlives the
     // Engine (a feed thread between its push and its call to the hook, or any other holder of the
-    // source): this one sets a flag nobody reads (flywheel-dag#42).
+    // source): this one sets a flag nobody reads.
     using WakeState = detail::BasicWakeState<std::mutex, std::condition_variable>;
     std::shared_ptr<WakeState> wake_ = std::make_shared<WakeState>();
 
@@ -452,7 +451,7 @@ private:
     // touches the total and the count, and publishes their quotient in one store at the end of its
     // guard, so a reader on another thread sees the mean from before a cycle or from after it, never
     // a total from one over a count from the other. It is not totalCycleNs_ / cycles_: cycles_ also
-    // counts a cycle in flight (flywheel-dag#34), and that difference is how cycleInFlight() tells
+    // counts a cycle in flight, and that difference is how cycleInFlight() tells
     // one is, so cycle() and refuseInCycle() read the count too, on the thread that runs cycles.
     uint64_t              totalCycleNs_ = 0;
     uint64_t              timedCycles_  = 0;
