@@ -1,6 +1,6 @@
 # flywheel-dag
 
-[![CI](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml)
+[![CI](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/ci.yml) [![clang-tidy](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml/badge.svg)](https://github.com/tomlin256/flywheel-dag/actions/workflows/clang-tidy.yml)
 
 A header-only C++23 reactive DAG computation engine.
 
@@ -297,9 +297,10 @@ flywheel-dag is the top-level project, and never on `flywheel::dag`.
 
 ### clang-tidy
 
-CI also runs clang-tidy over the tests, the examples and the benchmark, and so over every engine header they
-include, with the checks in `.clang-tidy`. The tool is LLVM 23 on both runners, and a test, `clang_tidy_version`,
-fails on any other major. The tests are off until a configure names the tool:
+A workflow of its own, `clang-tidy.yml`, runs clang-tidy over the tests, the examples and the benchmark, and so over
+every engine header they include, with the checks in `.clang-tidy`. It runs for a push or a pull request that changes more
+than documentation, and on demand (`gh workflow run clang-tidy.yml --ref main`). The tool is LLVM 23 on both runners, and a
+test, `clang_tidy_version`, fails on any other major. The tests are off until a configure names the tool:
 
 ```bash
 cmake --preset relwithdebinfo-macos-arm64 -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy
@@ -310,7 +311,7 @@ ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8
 fails; `FLYWHEEL_DAG_CLANG_TIDY_ARGS` adds arguments, as a list. There is one test per source file, and a few that
 prove the gate bites. On a Mac, `brew install llvm` has LLVM 23; it is keg-only, so link its `clang-tidy` and
 `clangd` into a directory on your `PATH`. On Ubuntu, `clang-tidy-23` is in LLVM's own apt repository,
-apt.llvm.org, and `.github/workflows/ci.yml` shows the install.
+apt.llvm.org, and `.github/workflows/clang-tidy.yml` shows the install.
 
 ## Benchmark
 
