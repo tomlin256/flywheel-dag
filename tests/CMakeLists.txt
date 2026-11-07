@@ -361,7 +361,7 @@ if(_flywheel_dag_top_level)
     set_tests_properties(test_comment_refs_${name} PROPERTIES PASS_REGULAR_EXPRESSION "${problem}")
   endfunction()
 
-  # tests/comment_refs/rejects names issue 31, which no file cites, and cites other issues line by line.
+  # tests/comment_refs/rejects names one open issue (31) that no file cites, and cites others line by line.
   function(flywheel_dag_comment_refs_rejects name problem)
     flywheel_dag_comment_refs_refuses(rejects_${name} "${problem}"
       -DSOURCE_DIR=${_comment_refs_fixtures}/rejects -DOPEN_ISSUES=31)
