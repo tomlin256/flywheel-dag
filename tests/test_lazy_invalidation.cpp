@@ -176,7 +176,7 @@ TEST(LazyInvalidation, InvalidateMaybeSetsMaybeAndStopsAtTheVisitedGuard) {
     const int midPropagations  = c.mid->propagations();
     const int downPropagations = c.down->propagations();
 
-    c.src->invalidateMaybe();   // src is no longer Clean
+    c.src->invalidateMaybe();   // src is already Maybe, so the cascade stops at once
 
     EXPECT_EQ(c.mid->propagations(),  midPropagations)
         << "a second cascade from an already-dirty source must stop immediately";
@@ -569,15 +569,15 @@ TEST(LazyInvalidation, Case7_ForceRecomputeRunsTheFunctorThroughALazyNode) {
     EXPECT_EQ(runs, 3);
 }
 
-// ── The families whose answer is fixed, and where it is fixed ────────────────
+// ── The families whose mode is not chosen per node, and where it is set ──────
 //
 // Neither of these is a per-node question, so neither is offered at make():
 //
 //   dag::ops    STRUCTURALLY PURE. eval() computes Op{}(...), default-constructing
 //               the functor at every evaluation, so it cannot carry state between
-//               calls even if an author wanted it to. Fixed in OpNodeImpl.
+//               calls even if an author wanted it to. Lazy, set in OpNodeImpl.
 //   ConditionNode  Pure selection over three inputs, with no functor at all.
-//                  Fixed in the class.
+//                  Lazy, set in the class.
 //
 // dag::ts is the counterexample and stays Eager for the same kind of reason
 // inverted: a stateful node's output depends on how often it ran.
