@@ -14,7 +14,7 @@
 #   find_package(flywheel_dag 1 CONFIG REQUIRED)
 #   target_link_libraries(my_app PRIVATE flywheel::dag)
 #
-# 4.0 is the floor: this project is CMake 4 (flywheel-dag#57). It is a plain
+# 4.0 is the floor: this project is CMake 4. It is a plain
 # minimum, not a <min>...<max> range: a range flips every policy up to <max> to
 # NEW, which needs its own audit. Every policy up to 4.0 is NEW here, including
 # CMP0156 (a static library is listed once on a link line where the linker allows
@@ -78,7 +78,7 @@ option(FLYWHEEL_DAG_BUILD_EXAMPLES   "Build the examples"                       
 option(FLYWHEEL_DAG_BUILD_BENCHMARKS "Add the benchmarks, which build on demand"          ${_flywheel_dag_top_level})
 option(FLYWHEEL_DAG_INSTALL          "Generate the install rules and the package config" ${_flywheel_dag_top_level})
 
-# clang-tidy as a gate (flywheel-dag#60; tests/CMakeLists.txt registers the tests). FLYWHEEL_DAG_CLANG_TIDY names the
+# clang-tidy as a gate (tests/CMakeLists.txt registers the tests). FLYWHEEL_DAG_CLANG_TIDY names the
 # tool that holds this project's own sources to .clang-tidy: a command on PATH, or a path. Empty, the default, leaves the
 # clang_tidy_ tests out. A tool that was asked for and cannot be run is an error here, never a gate that is silently
 # absent. FLYWHEEL_DAG_CLANG_TIDY_ARGS is a list of extra arguments for every run.
@@ -176,7 +176,7 @@ target_include_directories(flywheel_dag INTERFACE
 target_link_libraries(flywheel_dag INTERFACE
     $<BUILD_INTERFACE:spdlog::spdlog>
     $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
-# C++23 is the engine's floor (flywheel-dag#56). This usage requirement raises a
+# C++23 is the engine's floor. This usage requirement raises a
 # consumer's target to it, whether the consumer adds the engine as a subproject or
 # finds the installed package. A standard the consumer sets higher is left alone.
 # The headers refuse a lower one (dag.hpp), so tests/consumer fails to compile if

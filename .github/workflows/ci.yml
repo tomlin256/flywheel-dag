@@ -43,7 +43,7 @@ jobs:
     # "dev", whose old spelling prints a deprecation notice there. A CMake before
     # 4.4 would ignore -Werror=author without a word, so what makes it bite is the
     # runners' CMake, which Tool versions above prints; test_cmake_diagnostics
-    # holds the spelling and the effect (flywheel-dag#59). FLYWHEEL_DAG_WARNINGS_AS_ERRORS
+    # holds the spelling and the effect. FLYWHEEL_DAG_WARNINGS_AS_ERRORS
     # makes any compiler warning in this project's own code fail it too; the
     # dependencies' sources keep their own flags. The build type is the preset's:
     # relwithdebinfo is RelWithDebInfo, the project's own default, the
@@ -72,7 +72,7 @@ jobs:
         ./build/${{ matrix.preset }}/bin/bench_hot_path --invariants > bench_invariants.txt
         diff -u benchmarks/expected_invariants.txt bench_invariants.txt
 
-  # clang-tidy over this project's own sources, at LLVM 23 on both runners (flywheel-dag#60). The tests are the
+  # clang-tidy over this project's own sources, at LLVM 23 on both runners. The tests are the
   # clang_tidy_* ones that FLYWHEEL_DAG_CLANG_TIDY registers (tests/CMakeLists.txt): one per translation unit, and the
   # ones that prove the gate bites. Nothing is built: clang-tidy reads compile_commands.json, so the job configures
   # and tests. clang_tidy_version holds the major to the number beside the registration, and the install steps name
