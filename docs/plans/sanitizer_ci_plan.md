@@ -225,7 +225,8 @@ issue), push, and comment on flywheel-dag#45 with the path. *Done when:* the iss
 
 ### Step 1 — The option (test first), one commit
 
-*Tests (new):* `test_sanitize_flags` and `test_sanitize_option`, each a plain `cmake -P` registered at the top level in every tree.
+*Tests (new):* `test_sanitize_flags` and `test_sanitize_option`, each a plain `cmake -P` registered at the top level: the first in every
+tree, the second for the Makefiles and Ninja generators only, because it reads the compile database (as `test_warning_flags` does).
 
 1. *Red:* `tests/check_sanitize_flags.cmake` and its `add_test`; the module is missing. *Green:* `cmake/flywheel_dag_sanitize.cmake`.
    The test: `OFF` and the empty string give no options; `asan` and `tsan` give exactly the lists above, compared as strings so
@@ -411,11 +412,53 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 Approval | In progress | Approved 2026-11-07; the plan is committed and flywheel-dag#45 gets a comment that links it |
-| 1 The option | Not started | |
+| 0 Approval | Done | Approved 2026-11-07; the plan is on `main` and flywheel-dag#45 has a comment that links it |
+| 1 The option | Done | Red then green for both tests, 14 hand-made changes, 81 of 81 on the Mac and in `ubuntu-dev` |
 | 2 Canaries, coverage, first pass | Not started | |
 | 3 The guard | Not started | |
 | 4 The presets | Not started | |
 | 5 The workflow and its check | Not started | |
 | 6 First dispatches, schedule, docs | Not started | |
 | 7 `tsan` joins the nightly; close | Not started | |
+
+## Outcome
+
+Written step by step as each checkpoint passes.
+
+### Step 0 — Approval (2026-11-07)
+
+Approved as written, D1 to D7 at their defaults. The plan is on `main`, and flywheel-dag#45 has a comment that links it.
+
+### Step 1 — The option (2026-11-07)
+
+*Red then green.* `test_sanitize_flags` first failed with `include could not find requested file` for the missing module, and passed
+once `cmake/flywheel_dag_sanitize.cmake` existed. `test_sanitize_option` first failed on the unchanged root (no status line, no cache
+entry, 11 of 11 units without an option, `adress` accepted) and passed once the root block existed.
+
+*Hand-made changes.* Each is a scratch copy of the working tree with one text change, run through both real checks; the control
+passes both. The options' text is pinned by `test_sanitize_flags` alone, by design: `test_sanitize_option` takes its expected list
+from the module of the tree under test, so a mutated module is consistent with itself there. The link options are read by
+`test_sanitizer_coverage` (Step 2).
+
+| Change | `test_sanitize_flags` | `test_sanitize_option` |
+|---|---|---|
+| control | pass | pass |
+| module: `-fno-sanitize-recover=undefined` dropped | red: asan compile options | pass |
+| module: tsan's compile options given `address` | red | pass |
+| module: tsan's link options given `address` | red: tsan link options | pass |
+| module: the modes missing from the message | red: the error does not list the modes | red: `adress` |
+| module: `FATAL_ERROR` made `WARNING` | red: every bad value accepted | red: `adress` configured |
+| module: tsan's compile options reordered | red: order | pass |
+| module: `off` accepted | red: `off` accepted | pass |
+| root: the two `add_*_options` calls removed | pass | red: 11 of 11 units miss the options |
+| root: the status line removed | pass | red: no status line, asan and tsan |
+| root: the default `OFF` made `asan` | pass | red: status line, cache and `-fsanitize` in the tree with no option |
+| root: the mode ignored (always `asan`) | pass | red: the no-option and `tsan` cases |
+| root: the block moved below the spdlog fetch | pass | red: 7 of 11 units, all spdlog's |
+| root: the block also run in a subproject | pass | red: the parent project's units |
+
+*Checkpoint.* Mac (Apple clang 21) 81 of 81, `ubuntu-dev` (GCC 13.3) 81 of 81, CI's strict flags, no warning; both trees were current,
+so no object was rebuilt and nothing new was compiled. `test_sanitize_option` takes about 3 s, `test_sanitize_flags` under 0.1 s.
+
+*Deviation.* `test_sanitize_option` is registered for the Makefiles and Ninja generators, not in every tree (the plan said every
+tree); the default presets use Makefiles, so the count is the planned 81.

@@ -180,6 +180,33 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_warning_flags.cmake)
 endif()
 
+# The FLYWHEEL_DAG_SANITIZE modes. This holds the mapping of cmake/flywheel_dag_sanitize.cmake, a pure function, to a table: the exact
+# options of asan and tsan, and a refusal of everything else that names the value and lists the modes. It needs no configure and
+# no build tree, so it runs in every tree. Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_sanitize_flags
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitize_flags.cmake)
+endif()
+
+# The option reaches the units. The check configures the real root offline into scratch trees, with no option and with each mode, and
+# reads each tree's compile_commands.json: with a mode, every unit (the fetched spdlog's among them) carries the mode's options, and
+# with no option no unit carries a -fsanitize option. It configures a parent project too, which pulls the engine in with the option on
+# its command line and must find every unit uninstrumented. It compiles nothing and needs no network. It reads a compile database,
+# which only the Makefile and Ninja generators write, so it is registered for those at the top level, like test_warning_flags.
+if(_flywheel_dag_top_level
+   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja"))
+  add_test(NAME test_sanitize_option
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/sanitize_option
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitize_option.cmake)
+endif()
+
 # Every public header refuses to compile below C++23, and says why. The suite
 # builds as C++23, so nothing else would notice a guard that stopped working:
 # this compiles each header at C++17 and at C++20 and expects the guard's message.

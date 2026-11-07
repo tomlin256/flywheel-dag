@@ -120,6 +120,34 @@ if(_flywheel_dag_top_level)
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Sanitizers (top level only, opt-in).
+#
+#   -DFLYWHEEL_DAG_SANITIZE=asan    AddressSanitizer + UndefinedBehaviorSanitizer
+#   -DFLYWHEEL_DAG_SANITIZE=tsan    ThreadSanitizer
+#
+# The default, OFF, changes nothing. Any other value is a configure error that lists the modes (cmake/flywheel_dag_sanitize.cmake
+# has the options and the reasons). The options reach every target of the tree, so a tree is one mode or none.
+#
+# This sits BEFORE the first FetchContent_MakeAvailable on purpose. A directory's compile and link options are copied into each
+# target as it is created, so they reach the fetched dependencies only if they are set first, and ThreadSanitizer needs the
+# dependencies instrumented too. The warning flags further down sit after every dependency for the opposite reason. A subproject
+# ignores the option: the engine is header-only, a consumer instruments its own targets, and an option that instrumented the
+# engine's fetched spdlog alone would be partial instrumentation. Nothing goes on flywheel_dag's INTERFACE or in CMAKE_CXX_FLAGS.
+# test_sanitize_option holds all of this.
+# ─────────────────────────────────────────────────────────────────────────────
+if(_flywheel_dag_top_level)
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_sanitize.cmake)
+    set(FLYWHEEL_DAG_SANITIZE "OFF" CACHE STRING "Sanitizer: OFF, asan (address + undefined) or tsan (thread)")
+    set_property(CACHE FLYWHEEL_DAG_SANITIZE PROPERTY STRINGS OFF asan tsan)
+    flywheel_dag_sanitizer_flags("${FLYWHEEL_DAG_SANITIZE}" _flywheel_dag_sanitize_compile _flywheel_dag_sanitize_link)
+    if(_flywheel_dag_sanitize_compile)
+        add_compile_options(${_flywheel_dag_sanitize_compile})
+        add_link_options(${_flywheel_dag_sanitize_link})
+        message(STATUS "flywheel-dag: sanitizer '${FLYWHEEL_DAG_SANITIZE}' (${_flywheel_dag_sanitize_link})")
+    endif()
+endif()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Dependencies: spdlog and nlohmann/json, and googletest for the tests.
 #
 # A parent that already provides a target (find_package, or its own
