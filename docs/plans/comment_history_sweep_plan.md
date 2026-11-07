@@ -1,6 +1,6 @@
 # Comments State the Present, Not the History
 
-**Status: In progress. Approved 2026-11-07, with the defaults under "Decisions to confirm".**
+**Status: Done 2026-11-07. Approved the same day, with the defaults under "Decisions to confirm".**
 Comments, one test and one line of `CLAUDE.md`: no engine code changes, so no release.
 
 Closes [flywheel-dag#71](https://github.com/tomlin256/flywheel-dag/issues/71).
@@ -227,6 +227,73 @@ Each has a default. Approving the plan as written takes the default.
 | 7 — Engine, persistence and utility tests | Done | All 648 comment lines read. Six closed-issue references cut (graph, traversal and replay tests) and one note that called the ring buffer's oracle "the container this replaces" restated as what the oracle is. The reference to flywheel-dag#32 in `test_engine_stateful_discovery.cpp` states the limitation that open issue tracks and stays. Strict build prints no warning; ctest 55 of 55. |
 | 8 — Time-series, ops and AAD tests | Done | All 598 comment lines read. Two closed-issue references cut, both in `test_aad_dual.cpp`, where they sat in sentences that told how an earlier tolerance behaved ("accepted", "was absolute … until"): the first now says what an absolute tolerance would accept, the second drops the clause. Every other file needed no change. Strict build prints no warning; ctest 55 of 55. |
 | 9 — Root build files, CI, benchmarks, examples | Done | All 437 comment lines read. Six closed-issue references cut: three in `CMakeLists.txt`, two in `ci.yml`, one in `.clang-tidy`. GCC bug 103993 and the `GIT_TAG v1.2.0` pin stay as they are. The files hold no plan pointer. Strict build prints no warning; ctest 55 of 55. |
-| 10 — Test build files, check scripts, consumer, canary | Done | All 606 comment lines read. 11 closed-issue references cut (four in `tests/CMakeLists.txt`, one each in five check scripts, one each in the three canary files) and the three `docs/plans/` pointers (`check_platform.cmake`, `check_presets.cmake` twice). `check_presets.cmake` defines R8 in its own rule list, so no rule needed restating. Six comments rewritten as present facts: "went back to" (three), "none of the checks .clangd used to remove" (now names the checks the test refuses), "The issue's symptom", "The old spelling is not clean" and "CMake 4.4 renamed". Claims read against the code: the five budget fixtures and their 20/20/30 limits, the skip list, the install file list, the version table, the four fences, `-O0`/`-O2`, the diagnostic flags and the counting-test list. Strict build prints no warning; ctest 55 of 55. |
+| 10 — Test build files, check scripts, consumer, canary | Done | All 606 comment lines read. 11 closed-issue references cut (four in `tests/CMakeLists.txt`, one each in five check scripts, one each in the three canary files) and the three `docs/plans/` pointers (`check_platform.cmake`, `check_presets.cmake` twice). `check_presets.cmake` defines R8 in its own rule list, so no rule needed restating. Seven comments rewritten as present facts: "went back to" (three), "none of the checks .clangd used to remove" (now names the checks the test refuses), "The issue's symptom", "The old spelling is not clean" and "CMake 4.4 renamed". Claims read against the code: the five budget fixtures and their 20/20/30 limits, the skip list, the install file list, the version table, the four fences, `-O0`/`-O2`, the diagnostic flags and the counting-test list. Strict build prints no warning; ctest 55 of 55. |
 | 11 — `test_comment_refs` | Done | Tests first: 20 tests and three fixture trees registered with the script absent, all 20 red (`Not a file`); then `tests/check_comment_refs.cmake`, all 20 green. The real tree (110 files) cites flywheel-dag#31 and flywheel-dag#32 and nothing else. Beyond the plan: the address forms of a reference, a rule that every number in `OPEN_ISSUES` is cited by some file, "nothing to scan" as a problem, and refusal of an unset or malformed argument (see "As built" under Steps). 27 hand-made mutants in a scratch copy, each killed by exactly the tests predicted: allowlist ignored and allowlist accepting all; plan rule removed; each of the six directories and the top-level files unread; number pattern cut to one digit and to two; address forms and the hash form removed; unused-number rule and nothing-to-scan rule removed; fixture skip removed and widened; line count broken two ways; documents and directories at the top read; each argument check removed; cited numbers not recorded. A first run of M12 (directories at the top read) survived, because CMake reads a directory as an empty file: the `rejects_nothing_to_scan` tree gained a `docs/` directory, which makes the file count the observable difference. A `.DS_Store` filter proved unnecessary (CMake reads a binary file up to its first NUL) and was removed. `CLAUDE.md` gains one bullet, 6,475 of 6,500 bytes. Strict build prints no warning; ctest 75 of 75. |
-| 12 — Close out | Not started | |
+| 12 — Close out | Done | Checks 1 to 4 over the whole tree, and the leak audit: see the Outcome. The pre-push audit refused one push, for a comment in `tests/CMakeLists.txt` that named an open issue by its bare number, which the audit reads as an issue reference; the comment was reworded and the push went through. No closing keyword in any commit; flywheel-dag#71 is closed by hand with a summary comment. |
+
+## Outcome
+
+Eleven commits to `main` and no release: `74c8052`, `7a3b5b2`, `9828e77`, `f133afd`, `966b570`,
+`73da523`, `5f6d5f4`, `5793e71`, `3aeda13`, `f34b1eb` and `931257a`. The engine's code is unchanged:
+the comment-stripped text of 92 of the 93 files read is identical to `6cf5282`, and the 93rd,
+`tests/CMakeLists.txt`, differs by the registration of `test_comment_refs` and nothing else.
+
+| | At `6cf5282` | Now |
+|---|---|---|
+| `flywheel-dag#N` in comments | 72: 69 to 23 closed issues, 3 to open ones | 3: flywheel-dag#31 twice, flywheel-dag#32 once |
+| Pointers into `docs/plans/` | 3 | 0 |
+| Comments rewritten because they told history (Steps 1, 2, 3, 5, 6, 7, 8 and 10) | 27 | 0 |
+| Full-line comment lines | 6,302 in 93 files | 6,317 in the same 93 files, and 36 in the new script |
+| Characters in them | 394,229 | 394,641, and 2,179 in the new script |
+| ctest | 55 of 55 | 75 of 75: the 20 new tests |
+
+The figures in the Problem section (6,309 lines, 524,424 characters, 94 files) came from the first
+survey. The table recounts both ends with the lexer every step used, so the two columns are
+comparable. The sweep cut references and rewrote sentences; it did not shorten the comments. The
+15 lines of growth are the 17 comment lines Step 11 adds to `tests/CMakeLists.txt`, less the 2 that
+Steps 1 to 10 removed on balance (140 added and 142 removed across 31 files).
+
+**Checks 1 to 4 over the whole tree.**
+
+1. *Code identical.* 93 files compared with the snapshot: one code difference, the Step 11
+   registration, and no changed assertion message.
+2. *Build and tests.* Strict configure and build print no warning; ctest 75 of 75 on the final
+   commit.
+3. *Names resolve.* 43 words in comments name nothing the code defines. Each is English or a
+   plural of a type (`ComputeNodes`, `weak_ptrs`), a standard-library or CMake name (`char_traits`,
+   `stable_sort`, `enable_testing`, `multiplies`), a file a build writes (`compile_commands.json`,
+   `DartConfiguration`), a tool's option (`WarningsAsErrors`) or an identifier in an example
+   (`ratioNode`, `my_app`, `MyModule`).
+4. *No history.* The scan returns 67 tier-A hits. 45 are the English "prefix" and "fixed table";
+   the other 22 were each read, and the ones that keep a history word are listed below. The test
+   holds the references and the plan pointers from here on.
+
+**Comments that keep a history word or a citation, and why.**
+
+- `dag.hpp` and `test_value_slot.cpp` cite flywheel-dag#31, and `test_engine_stateful_discovery.cpp`
+  cites flywheel-dag#32: both are open and each comment states the limitation the issue tracks.
+- `bench_hot_path.cpp` names GCC bug 103993 for its workaround, and `test_dag_async.cpp` keeps the
+  compiler behaviour behind the `std::function` workaround (no issue number) and clangd's Include
+  Cleaner note for `std::construct_at`. `CLAUDE.md` requires a compiler bug to be named.
+- `dag.hpp:455` ("keep the old value") and `dag.inl:470` ("no longer applies") describe what the
+  engine does at the moment they are read, not a change to the code. `dag_state_store.hpp:132`
+  ("a previously saved snapshot") is the contract of the store's `restore()`. `test_json_state_store.cpp:184`
+  ("The .tmp was renamed away") is a step in the test's sequence.
+- `test_dag_async.cpp:2062` ("the test would pass on the very bug it is for") is the reason for the
+  0xFF fill: a hook that locks a dead `Engine`'s mutex would otherwise find it intact. It names a
+  class of bug the test is built to catch, not one that was fixed.
+- Reasons given as a figure a reader can check stay: the 1% to 3% that storing the mean costs
+  `bench_hot_path`'s rows (`dag_engine.inl`), the 21 translation units a newer clang-tidy stops on
+  (`tests/CMakeLists.txt`), and why `tanh′` is `1/cosh/cosh` and not `1 − tanh²` (`dag_aad.inl`,
+  `test_aad_dual.cpp`).
+- A design rule stated in the present tense stays: "STRUCTURALLY PURE" in `dag_ops.hpp`, "matching
+  DivideNode's precedent" over the unguarded ops, and the root `CMakeLists.txt`'s sentence that a
+  request for 0.3 is refused because that release predates C++23 and CMake 4.
+
+**Issues opened:** none. No comment contradicted its code.
+
+**Left for later.** A build in `ubuntu-dev` (the GCC leg of CI sees every commit). Test and
+identifier names that mention an issue (`IssueGraph`, `TheIssuesSequenceSeesTheLaterChange`,
+`Step5aFixesTheStructurallyPureFamiliesLazy`) are code and were left alone. `README.md`,
+`CLAUDE.md`, `docs/engine_rules.md`, `docs/releasing.md` and the older plans still cite closed
+issues: Decision 2 left them out.
