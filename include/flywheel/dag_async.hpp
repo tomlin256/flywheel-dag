@@ -46,15 +46,15 @@ namespace dag::async {
 //
 // The engine flushes a source once per cycle, however many groups hold it. A
 // second flush in a cycle finds nothing staged, and an AsyncQueue then rebinds
-// its value to [] before any node has read the batch the first flush made
-// (flywheel-dag#36). Two things keep it so:
+// its value to [] before any node has read the batch the first flush made.
+// Two things keep it so:
 //
 //   - The engine and a registry hold a source once, and includes() is how they
 //     tell they already do. That keeps a plain repeat out of all() and
 //     pendingCount(), and its wake hook from going in twice. It sees only what
 //     one holder holds.
 //   - The engine flushes from a list it builds out of the sources and groups it
-//     holds, with each source listed once (flywheel-dag#37). members() is how a
+//     holds, with each source listed once. members() is how a
 //     group lets it see inside, and the list closes what includes() cannot: a
 //     source in two groups that cannot see each other.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +240,7 @@ using QueuePtr = std::shared_ptr<AsyncQueue<T>>;
 // hook again. The check sees only this registry. A source that another registry
 // holds, or that the engine flushes outside this one, is held again, and the
 // engine flushes it once all the same: it lists each source once, at the first
-// place it reaches it (flywheel-dag#37). setWakeHook() reaches such a source
+// place it reaches it. setWakeHook() reaches such a source
 // once for each registry that holds it. A registry flushed on its own, outside
 // an engine, flushes each member as it holds it, so a source that it and one of
 // its member registries both hold is flushed twice there.

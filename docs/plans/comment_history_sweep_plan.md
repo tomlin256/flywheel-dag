@@ -208,8 +208,8 @@ Each has a default. Approving the plan as written takes the default.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Baseline and tools | Not started | |
-| 1 — `dag.*`, `dag_async.*` | Not started | |
+| 0 — Baseline and tools | Done | The compare script passes its own check, and 39 translation units preprocess to the same text with every comment blanked. Strict build prints no warning; ctest 55 of 55. |
+| 1 — `dag.*`, `dag_async.*` | Done | Four closed-issue references cut and one tense corrected. The citation of flywheel-dag#31 over ValueSlot's thread rule stays. |
 | 2 — `dag_engine.*` and neighbours | Not started | |
 | 3 — Replay, utilities, AAD | Not started | |
 | 4 — Ops and time series | Not started | |

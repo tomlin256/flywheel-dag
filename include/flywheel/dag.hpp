@@ -9,7 +9,7 @@
 
 #pragma once
 
-// flywheel-dag is C++23 (flywheel-dag#56). Linking flywheel::dag from CMake asks for it
+// flywheel-dag is C++23. Linking flywheel::dag from CMake asks for it
 // (cxx_std_23); a build that does not use CMake must pass -std=c++23 itself. This tests for
 // newer than C++20, not for C++23's own value: GCC 13 reports 202100L for -std=c++23. A header
 // that does not reach dag.hpp, directly or through another header, needs this guard too;
@@ -597,7 +597,7 @@ using ComputeNodePtr = std::shared_ptr<ComputeNode<Out, Ins...>>;
 //
 // ComputeNode's Fn returns Out BY VALUE, and publish() emits it with
 // slot_.emit(std::move(result)). For a heap-owning Out that move-assign FREES the
-// buffer ValueSlot was recycling and takes the temporary's instead, so a node
+// buffer ValueSlot is recycling and takes the temporary's instead, so a node
 // whose output is a std::vector or a struct of them allocates on every cycle
 // however warm its slot is. ValueSlot's copy-assigning emit(const T&) avoids
 // that, but needs an lvalue the caller keeps, which ComputeNode, building a
