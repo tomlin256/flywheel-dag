@@ -21,6 +21,7 @@ A release is a commit, an annotated tag and a GitHub release. A consumer that fe
    then Added or Changed, Not covered, Tests and Not changed, with issues linked by full URL. No workflow runs on a tag.
 6. **CI, afterwards.** The gate in step 4 is the release's check: do not wait for CI before the tag. Read the run on the
    release commit once it finishes. A failure the release carries gets a patch release; a pushed tag is not moved.
-7. **Record.** The plan's status and Outcome go in a docs commit. Quote a commit subject there without its scope
+7. **Record.** The plan's status and Outcome go in a docs commit, pushed once the release commit's run has finished (a push
+   cancels the earlier run: `ci.yml` has `cancel-in-progress`). Quote a commit subject there without its scope
    (`build: release vX.Y.Z`): plans and docs cite issues as `flywheel-dag#N`, and a number after a bare `#` reads as an
    issue of another repository.
