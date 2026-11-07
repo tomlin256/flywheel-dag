@@ -18,10 +18,9 @@
 // All twenty, because a sanitizer supplies its own for every one a program
 // leaves out, and the standard library pairs them across forms.
 // std::stable_sort takes its buffer from operator new(size_t, std::nothrow_t)
-// and returns it with operator delete(void*). A test that replaced only the
-// plain functions counted nothing from the first, and AddressSanitizer aborted
-// on the second, for memory from its own operator new given to free()
-// (flywheel-dag#47).
+// and returns it with operator delete(void*). A counter that replaced only the
+// plain functions would count nothing from the first, and AddressSanitizer would
+// abort on the second, for memory from its own operator new given to free().
 //
 // Link it into the suites that count, and no others: the replacement is the
 // whole program's. A suite that links it must not define an operator new or

@@ -9,7 +9,7 @@
 
 // test_wake_state.cpp — unit tests for dag::async::detail::BasicWakeState, the flags, mutex
 // and condition variable that Engine::run() waits on and that a source's wake hook, poke() and
-// stop() set (flywheel-dag#43).
+// stop() set.
 //
 // Coverage
 // ────────
@@ -88,9 +88,9 @@ TEST(WakeState, ASecondBeginRunIsRefusedAndLeavesTheFlagSet) {
 // The window between a waiter's test and its block
 //
 // A condition variable drops a notification that finds nobody waiting, so a write to what the
-// waiter's predicate reads must wait for the mutex the waiter holds from its test to its block
-// (flywheel-dag#43). The gap is a few instructions wide, and no schedule aimed at it from outside
-// reached it in a million tries. These tests hold the waiter in it.
+// waiter's predicate reads must wait for the mutex the waiter holds from its test to its block.
+// The gap is a few instructions wide, and no schedule aimed at it from outside reaches it
+// reliably. These tests hold the waiter in it.
 //
 // The waiter must be let go once the writer has either finished or been seen blocked on the mutex.
 // "Finished" alone is not enough: a writer that takes the mutex cannot finish while the waiter

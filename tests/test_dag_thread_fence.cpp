@@ -8,7 +8,7 @@
 // =============================================================================
 
 // test_dag_thread_fence.cpp — dag::threadFence<Order>(), the standalone fence that a GCC build under
-// -fsanitize=thread and -Werror accepts (flywheel-dag#49).
+// -fsanitize=thread and -Werror accepts.
 //
 // Coverage
 // ────────

@@ -14,14 +14,14 @@
 //
 //   1. All twenty replaceable functions are the counter's own. A sanitizer
 //      supplies its own for any that are not, and the standard library pairs
-//      them across forms (flywheel-dag#47).
+//      them across forms.
 //   2. An allocation counts once, in every form, and a release never counts.
 //   3. What an allocating form returns, its release takes back, aligned or not.
 //
 // The sized releases, ::operator delete(p, std::size_t{8}) and the like, are
 // declared by libstdc++'s <new> only when __cpp_sized_deallocation is defined,
 // and Clang leaves that off before version 19. This file does not compile on
-// that pair, which is not a supported build (flywheel-dag#58).
+// that pair, which is not a supported build.
 //
 // Each function is called by name, ::operator new(8, std::nothrow) and so on,
 // so that no test depends on which form the compiler picks for an expression.

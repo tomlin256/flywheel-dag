@@ -650,8 +650,8 @@ private:
 
 // A wake hook for a test that only needs one installed, and never calls it. A function, not an empty
 // lambda: nothing writes the storage of a std::function that holds an empty class, and GCC 15 reports
-// the copy of one as a read of uninitialised memory (-Wmaybe-uninitialized, flywheel-dag#44). A
-// function's address is written there.
+// the copy of one as a read of uninitialised memory (-Wmaybe-uninitialized). A function's address
+// is written there.
 void ignoreWake() {}
 
 }  // namespace
@@ -707,7 +707,7 @@ TEST(FeedRegistry, ARegistryIsAMemberOfAnother) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A source held twice (flywheel-dag#36)
+// A source held twice
 //
 // flush() drains, so a second flush in a cycle finds nothing, and an AsyncQueue's
 // rebinds its value to [] before any node has read the batch the first made.
@@ -779,7 +779,7 @@ TEST(FeedRegistry, ARegistryAddedToItselfIsIgnored) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A group's members (flywheel-dag#37)
+// A group's members
 //
 // A group says which sources it flushes through members(), so that a caller can see through it.
 // A plain source flushes no others, and a class derived from FeedRegistry may override flush(),
@@ -826,7 +826,7 @@ TEST(FeedRegistry, AClassDerivedFromItHasNoMembers) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // A registry is a source like any other, so the engine flushes it whole: a member added after
-// addSource() is flushed too (flywheel-dag#27).
+// addSource() is flushed too.
 TEST(EngineFeedRegistry, AMemberAddedAfterAddSourceIsFlushed) {
     Engine engine;
     auto reg = std::make_shared<FeedRegistry>();
@@ -887,7 +887,7 @@ TEST(EngineFeedRegistry, ALateMemberFlushesInTheRegistrysPlace) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine and a source added twice (flywheel-dag#36)
+// Engine and a source added twice
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(EngineSources, ASourceAddedTwiceIsFlushedOncePerCycle) {
@@ -902,8 +902,8 @@ TEST(EngineSources, ASourceAddedTwiceIsFlushedOncePerCycle) {
     EXPECT_EQ(s->hooks(), 1) << "the repeat must not install the hook again";
 }
 
-// The issue's sequence: the queue was flushed twice in the second cycle, and the second flush
-// replaced its batch with [] before the output read it.
+// A queue added twice delivers its batch. Flushed a second time in the cycle, the queue would
+// replace its batch with [] before the output read it.
 TEST(EngineSources, AnAsyncQueueAddedTwiceDeliversItsBatch) {
     Engine engine;
     auto q = AsyncQueue<int>::make("q");
@@ -987,7 +987,7 @@ TEST(EngineSources, ARegistryAddedTwiceIsFlushedOnce) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine and a source held where the holders cannot see each other (flywheel-dag#37)
+// Engine and a source held where the holders cannot see each other
 //
 // `E` is the engine, `R` a registry, and `X:Y` means X.add(Y), which is addSource() for E. In each
 // wiring the second holder cannot see the first, so no check at registration catches it. The engine
@@ -1055,8 +1055,8 @@ TEST(EngineSources, ASourceInARegistryAndItsMemberRegistryIsFlushedOncePerCycle)
     EXPECT_EQ(s->flushes(), 2) << "one flush per cycle, over two cycles";
 }
 
-// The issue's sequence, with the queue in two registries: the second flush in a cycle replaced
-// the queue's batch with [] before the output read it.
+// A queue in two registries delivers its batch. Flushed a second time in the cycle, the queue
+// would replace its batch with [] before the output read it.
 TEST(EngineSources, AnAsyncQueueInTwoRegistriesDeliversItsBatch) {
     Engine engine;
     auto first  = std::make_shared<FeedRegistry>();
@@ -1209,7 +1209,7 @@ TEST(EngineSources, AGroupThatReturnsItsMembersIsSeenThrough) {
 }
 
 // The engine builds its list when a source is added or a group grows, and reuses it otherwise.
-// Nothing is rebuilt in a cycle where nothing changed, which is what keeps the hot path as it was.
+// Nothing is rebuilt in a cycle where nothing changed, so the hot path pays for no rebuild.
 TEST(EngineSources, TheEngineRebuildsItsFlushListOnlyWhenAGroupGrows) {
     auto memberCalls = std::make_shared<int>(0);
     auto group = std::make_shared<ListGroup>(memberCalls);
@@ -2045,7 +2045,7 @@ TEST(EngineRun, ARunCalledWhileRunningThrowsAndLeavesTheRunGoing) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The wake hook outlives the Engine (flywheel-dag#42)
+// The wake hook outlives the Engine
 //
 // A source keeps the wake hook the Engine gave it, and whatever else holds the source can post()
 // after the Engine is gone. The hook must then touch nothing the Engine owned.
@@ -2066,7 +2066,7 @@ namespace {
 //
 // The Engine is made with std::construct_at and unmade with std::destroy_at, not with a placement
 // new-expression and a destructor call: clangd's Include Cleaner does not count a placement new as
-// a use of <new>, and hints that the include a placement new needs is unused (flywheel-dag#61).
+// a use of <new>, and hints that the include a placement new needs is unused.
 template <typename Wire>
 void wireThenDestroyTheEngine(Wire&& wire) {
     alignas(Engine) unsigned char storage[sizeof(Engine)];
@@ -2118,10 +2118,10 @@ TEST(EngineWakeHook, MakeInputSetAfterTheEngineIsGone) {
     EXPECT_EQ(input->get(), 1);
 }
 
-// Guards the fix, not the bug: the hook must still wake a run() that is waiting. The first cycle
-// delivers the queue's empty starting batch, and its callback releases the test thread, so the post
-// comes after run() has delivered it and is about to wait. A hook that no longer sets the flag run()
-// waits on, or no longer signals it, leaves run() asleep for ever, which ctest reports as a timeout.
+// The hook wakes a run() that is waiting. The first cycle delivers the queue's empty starting batch,
+// and its callback releases the test thread, so the post comes after run() has delivered it and is
+// about to wait. A hook that does not set the flag run() waits on, or does not signal it, leaves
+// run() asleep for ever, which ctest reports as a timeout.
 TEST(EngineWakeHook, APostStillWakesARunningEngine) {
     Engine engine;
     auto queue = AsyncQueue<int>::make("q");
@@ -2151,7 +2151,7 @@ TEST(EngineWakeHook, APostStillWakesARunningEngine) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Engine::stop() from another thread (flywheel-dag#43)
+// Engine::stop() from another thread
 //
 // Every other stop() in these tests comes from the thread that runs the cycles, from a callback or
 // a flush. This one comes from outside, as a thread that waits for a signal, or a watchdog, would
@@ -2159,8 +2159,8 @@ TEST(EngineWakeHook, APostStillWakesARunningEngine) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // It cannot aim at the gap between run()'s test of its wait and its block, which is a few
-// instructions wide (test_wake_state.cpp holds a waiter there). It guards the wiring: a stop() that no
-// longer reaches the wait leaves run() asleep for ever, which ctest reports as a timeout, not a wrong
+// instructions wide (test_wake_state.cpp holds a waiter there). It pins the wiring: a stop() that does
+// not reach the wait leaves run() asleep for ever, which ctest reports as a timeout, not a wrong
 // value. The first cycle delivers the queue's empty starting batch, and its callback releases the test
 // thread, so the stop comes while run() is idle or about to be.
 TEST(EngineStop, AStopFromAnotherThreadEndsAnIdleRun) {
@@ -2487,8 +2487,8 @@ TEST(EngineRegistrationInCycle, ACallbackThatAddsOutputsIsRefused) {
     EXPECT_EQ(engine.outputNodes().size(), 1u);   // nothing was registered
 }
 
-// The typed overload wraps the callback in a lambda too big for the buffer, so it never read freed
-// memory: it registered without error.
+// The typed overload wraps the callback in a lambda too big for the buffer, so without the refusal
+// it would register without error and read no freed memory. It is refused all the same.
 TEST(EngineRegistrationInCycle, ATypedCallbackThatAddsAnOutputIsRefused) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -2613,8 +2613,8 @@ TEST(EngineRegistrationInCycle, AnotherEnginesOutputMayBeAddedFromACallback) {
     EXPECT_EQ(seen, std::vector<double>{5.0});
 }
 
-// A refused step() changes nothing (flywheel-dag#39): it counts no cycle and takes no scope on the
-// lock, so the cycle in flight stays in flight, and a registration after the refusal is refused too.
+// A refused step() changes nothing: it counts no cycle and takes no scope on the lock, so the cycle
+// in flight stays in flight, and a registration after the refusal is refused too.
 TEST(EngineRegistrationInCycle, ARegistrationAfterANestedStepIsStillRefused) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
@@ -2670,8 +2670,9 @@ struct SteppingSource : IFlushable {
 
 }  // namespace
 
-// The issue's program. A cycle begun inside the cycle flushed every source a second time, and the
-// queue, which the outer cycle had flushed already, found nothing staged: its batch was gone.
+// A cycle begun inside a cycle would flush every source a second time, and a queue the outer cycle
+// had flushed already would find nothing staged: its batch would be gone. The step() is refused, so
+// the outer cycle delivers the batch.
 TEST(EngineNestedCycle, ACallbackThatStepsTheEngineIsRefused) {
     Engine engine;
     auto trigger = engine.makeInput<int>("trigger", 0);
@@ -2727,7 +2728,7 @@ TEST(EngineNestedCycle, ANodeThatStepsTheEngineInEvalIsRefused) {
     EXPECT_TRUE(seen.empty());
     EXPECT_EQ(engine.cycleCount(), 1u);
 
-    engine.step();   // the node is evaluated again, and no longer steps
+    engine.step();   // the node is evaluated again, and steps only on its first evaluation
     EXPECT_EQ(seen, std::vector<double>{2.0});
     EXPECT_EQ(engine.cycleCount(), 2u);
 }
@@ -2819,8 +2820,8 @@ TEST(EngineNestedCycle, ARefusedStepLeavesTheEngineUsable) {
 }
 
 // CycleSeqLock records the cycle's thread, so that a read from inside the cycle returns at once. A
-// cycle begun inside it cleared the record when it ended, and a read after that waited for ever for
-// a cycle that could not finish.
+// refused step() inside the cycle must leave that record alone: cleared, it would make a read after
+// the refusal wait for ever for a cycle that could not finish.
 TEST(EngineNestedCycle, AReadAfterARefusedStepInTheCallbackReturnsAtOnce) {
     Engine engine;
     auto x = engine.makeInput<double>("x", 1.0);
