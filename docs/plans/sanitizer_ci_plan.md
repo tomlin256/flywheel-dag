@@ -423,7 +423,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
 | 5 The workflow and its check | Done | Red then green; 34 hand-made changes, the control and a comment-only change; actionlint clean; default 83 of 83 on the Mac and in `ubuntu-dev`, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; GCC 15.2 builds warning-free, `asan` 86 of 86 there, `tsan` 83 of 85 (the two known `SIGILL`) |
 | 6 First dispatches, schedule, docs | Done | Dispatch 1: the `tsan` leg stopped at the `vm.mmap_rnd_bits` step (no sudo), fixed test first; `asan` 86 of 86 (7 min 43 s), then 87 of 87 with the leak canary (7 min 38 s); `tsan` 85 of 85 in five consecutive dispatches (4 min 12 s to 6 min 58 s); `timeout-minutes` 15; `asan` nightly; docs pushed |
-| 7 `tsan` joins the nightly; close | In progress | Red then green; 6 red, 3 green and the control; default 83, `asan` 86 (87 in `ubuntu-dev`), `tsan` 85. Waiting for the first scheduled run (03:17 UTC, 2026-11-08); the issue stays open until both jobs are green in one |
+| 7 `tsan` joins the nightly; close | In progress | Red then green; 6 red, 3 green and the control; default 83, `asan` 86 (87 in `ubuntu-dev`), `tsan` 85; pushed, with `CI`, `clang-tidy` and dispatches of `which=both` and `which=asan` green on the pushed commit. Waiting for the first scheduled run (03:17 UTC, 2026-11-08); the issue stays open until both jobs are green in one |
 
 ## Outcome
 
@@ -802,6 +802,15 @@ unchanged against the new check: 34 red and 2 green, 5 red and 2 green (the `sud
 *Checkpoint.* The default tree is 83 of 83, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; in `ubuntu-dev` the default tree is 83 of
 83, `asan-linux-arm64` 87 of 87 and `tsan-linux-arm64` 85 of 85, with no sanitizer report line. actionlint is clean on all the
 workflows. No C++ changed, so no object was recompiled in any tree.
+
+*Pushed, then run on the runner.* The push started `CI` (two jobs) and `clang-tidy` (two legs), and all four finished green. A dispatch
+with `which=both` on the pushed commit (https://github.com/tomlin256/flywheel-dag/actions/runs/42401765531) created both jobs, `asan`
+87 of 87 in 7 min 31 s and `tsan` 85 of 85 in 4 min 40 s. A dispatch with `which=asan`
+(https://github.com/tomlin256/flywheel-dag/actions/runs/42401964862) created the `asan` job alone: 87 of 87 in 9 min 55 s, with a build of
+413 s against 309 s in the other run on the same commit. No report line and no warning in either run, and the stale `ubuntu-latest`
+notice is the only annotation. `which=tsan` was not dispatched again: its alternative is unchanged, and it is the one that the five
+runs of Step 6 took. Over four runs the `asan` job takes 7 min 31 s to 9 min 55 s, so the 15-minute bound is 1.5 times the slowest
+run and about twice the usual one.
 
 *The scheduled run is not in.* The first tick is at 03:17 UTC on 2026-11-08, after the last run of the session that wrote this.
 `gh run list --workflow sanitizers.yml --event schedule` shows it. flywheel-dag#45 stays open until a scheduled run on `main` shows
