@@ -1,0 +1,2 @@
+The check skips tests/comment_refs/, whose files cite issues on purpose.
+flywheel-dag#99 is not read here, and nor is docs/plans/skipped.md.

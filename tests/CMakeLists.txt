@@ -326,6 +326,87 @@ if(_flywheel_dag_top_level)
     "${_over_claude_md}|${_over_rules}|${_over_nested}|${_missing_claude_md}")
 endif()
 
+# Comments state what is true of the code now. History lives in the commit, the issue and the plan, so a comment cites no
+# closed issue and points at no plan. check_comment_refs.cmake reads every file under include/, tests/, benchmarks/,
+# examples/, cmake/ and .github/ and every file at the top that is not a document, and fails on a reference to an issue
+# that OPEN_ISSUES does not name, on a pointer into the plans, and on a number in OPEN_ISSUES that no file cites.
+# OPEN_ISSUES is the one place the issues the code may cite are written: a comment cites an open issue only where it
+# states the limitation the issue tracks, and the number leaves the list with the last such comment. The check is a
+# plain cmake -P script, so it runs in every tree.
+#
+# Its own behaviour is held by fixtures in tests/comment_refs/, which the scan skips because they cite issues on
+# purpose: a tree it must accept, a tree with a problem of every kind, and a tree with nothing to scan. Each problem has
+# a test of its own that passes on the text of that problem, because a PASS_REGULAR_EXPRESSION ignores the exit status:
+# a script that accepts the tree, or one that dies of something else, fails every one of them. The patterns spell a
+# reference with a bracket expression, [#] and [/], so that this file holds no reference itself.
+# Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  set(_comment_refs_script   ${CMAKE_CURRENT_SOURCE_DIR}/check_comment_refs.cmake)
+  set(_comment_refs_fixtures ${CMAKE_CURRENT_SOURCE_DIR}/comment_refs)
+
+  add_test(NAME test_comment_refs
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOPEN_ISSUES=31,32
+      -P ${_comment_refs_script})
+
+  add_test(NAME test_comment_refs_accepts
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${_comment_refs_fixtures}/accepts -DOPEN_ISSUES=31,32
+      -P ${_comment_refs_script})
+
+  # A run the check must refuse: the test's name, the text of the one problem it must print, and the arguments of the run.
+  function(flywheel_dag_comment_refs_refuses name problem)
+    add_test(NAME test_comment_refs_${name}
+      COMMAND ${CMAKE_COMMAND} ${ARGN} -P ${_comment_refs_script})
+    set_tests_properties(test_comment_refs_${name} PROPERTIES PASS_REGULAR_EXPRESSION "${problem}")
+  endfunction()
+
+  # tests/comment_refs/rejects names issue 31, which no file cites, and cites other issues line by line.
+  function(flywheel_dag_comment_refs_rejects name problem)
+    flywheel_dag_comment_refs_refuses(rejects_${name} "${problem}"
+      -DSOURCE_DIR=${_comment_refs_fixtures}/rejects -DOPEN_ISSUES=31)
+  endfunction()
+
+  flywheel_dag_comment_refs_rejects(include
+    "include/flywheel/refs\\.hpp:13 cites flywheel-dag[#]12, which")
+  flywheel_dag_comment_refs_rejects(second_reference_in_a_file
+    "include/flywheel/refs\\.hpp:15 cites flywheel-dag[#]13, which")
+  flywheel_dag_comment_refs_rejects(issue_url
+    "include/flywheel/refs\\.hpp:16 cites flywheel-dag[/]issues[/]21, which")
+  flywheel_dag_comment_refs_rejects(pull_request_url
+    "include/flywheel/refs\\.hpp:17 cites flywheel-dag[/]pull[/]22, which")
+  flywheel_dag_comment_refs_rejects(longer_number
+    "include/flywheel/refs\\.hpp:18 cites flywheel-dag[#]310, which")
+  flywheel_dag_comment_refs_rejects(tests
+    "tests/CMakeLists\\.txt:2 cites flywheel-dag[#]14, which")
+  flywheel_dag_comment_refs_rejects(plan_pointer
+    "tests/CMakeLists\\.txt:3 points into the plans directory")
+  flywheel_dag_comment_refs_rejects(benchmarks
+    "benchmarks/CMakeLists\\.txt:2 cites flywheel-dag[#]15, which")
+  flywheel_dag_comment_refs_rejects(examples
+    "examples/CMakeLists\\.txt:2 cites flywheel-dag[#]16, which")
+  flywheel_dag_comment_refs_rejects(cmake
+    "cmake/refs\\.cmake:2 cites flywheel-dag[#]17, which")
+  flywheel_dag_comment_refs_rejects(github
+    "\\.github/workflows/ci\\.yml:2 cites flywheel-dag[#]18, which")
+  flywheel_dag_comment_refs_rejects(root_cmake
+    "[ ]CMakeLists\\.txt:2 cites flywheel-dag[#]19, which")
+  flywheel_dag_comment_refs_rejects(tool_config
+    "\\.clang-tidy:2 cites flywheel-dag[#]20, which")
+  flywheel_dag_comment_refs_rejects(unused_open_issue
+    "flywheel-dag[#]31 is in OPEN_ISSUES and no file cites it")
+
+  # A tree with nothing to read, and the arguments the check refuses.
+  flywheel_dag_comment_refs_refuses(rejects_nothing_to_scan "nothing to scan under"
+    -DSOURCE_DIR=${_comment_refs_fixtures}/rejects_nothing_to_scan -DOPEN_ISSUES=)
+  flywheel_dag_comment_refs_refuses(rejects_no_source_dir "SOURCE_DIR is not set"
+    -DOPEN_ISSUES=31)
+  flywheel_dag_comment_refs_refuses(rejects_no_open_issues "OPEN_ISSUES is not set"
+    -DSOURCE_DIR=${_comment_refs_fixtures}/accepts)
+  flywheel_dag_comment_refs_refuses(rejects_malformed_open_issues "OPEN_ISSUES is '31,x', not issue numbers"
+    -DSOURCE_DIR=${_comment_refs_fixtures}/accepts -DOPEN_ISSUES=31,x)
+endif()
+
 # clang-tidy over this project's own sources, as a gate. The root sets _flywheel_dag_clang_tidy when
 # FLYWHEEL_DAG_CLANG_TIDY names a tool, and has already refused a configure that asked for one it cannot run, so
 # nothing here checks again. Nothing is built: clang-tidy reads compile_commands.json and the sources the build would

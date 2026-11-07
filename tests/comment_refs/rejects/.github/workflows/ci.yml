@@ -1,0 +1,3 @@
+name: Fixture
+# Tracked by flywheel-dag#18.
+on: push
