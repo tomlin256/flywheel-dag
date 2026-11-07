@@ -272,7 +272,7 @@ closed.
 | Step | Status | Notes |
 |---|---|---|
 | 0 Approval | Done | Approved as written on 2026-11-07, with the defaults of D1 to D4. |
-| 1 Start from green | Not started | |
-| 2 The filter and the units script | Not started | |
+| 1 Start from green | Done | The last runs on `3aa98fd` (`CI` and `clang-tidy`) were green. The Mac tree at `aed3ff7` built with no warning and passed 77 of 77. |
+| 2 The filter and the units script | Done | Red first ("does not exist"), then green: 78 of 78, no warning, 32 cases. Hand-made changes: a to t, 20 runs as expected (n green); o to t are rows the plan did not have. |
 | 3 The walk, the registration moves, `clang_tidy_units` | Not started | |
 | 4 Docs, close | Not started | |

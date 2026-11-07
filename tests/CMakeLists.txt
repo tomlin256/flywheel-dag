@@ -279,6 +279,18 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ci_clang_tidy.cmake)
 endif()
 
+# The unit filter of cmake/flywheel_dag_clang_tidy.cmake, and tests/check_clang_tidy_units.cmake, which compares a list of
+# registered units with a tree's compile database. The filter is held to a table of invented paths and the script to databases that
+# the driver writes, so neither needs clang-tidy, a configure or a build, and both run in every tree. Registered at the top level,
+# where the checkout they read is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_clang_tidy_module
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/clang_tidy_module
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_clang_tidy_module.cmake)
+endif()
+
 # What CI ignores. A workflow that skips a push because it changed only documentation is right
 # when its run reads none of it, and silently wrong when it reads some. This holds every
 # paths-ignore list to the checkout: the two triggers of a workflow agree, each entry matches a
