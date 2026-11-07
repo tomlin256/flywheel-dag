@@ -14,8 +14,10 @@
 #     the registration could not read (one inside a generator expression), so a unit that is built is not checked;
 #   - registered and not in the database: a unit that the tree does not build.
 #
-# A gate that silently checks fewer files than the tree builds passes, which is why this is a test. CMake writes the "file" of each
-# entry as an absolute path, and the script reads it so. It needs no clang-tidy and no build.
+# A gate that silently checks fewer files than the tree builds passes, which is why this is a test: the gate registers it as
+# clang_tidy_units (flywheel_dag_clang_tidy_add_tests), with the units it registered, and test_clang_tidy_module runs it over
+# databases that it writes. CMake writes the "file" of each entry as an absolute path, and the script reads it so. It needs no
+# clang-tidy and no build.
 
 cmake_minimum_required(VERSION 4.0)
 

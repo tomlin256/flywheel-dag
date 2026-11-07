@@ -1,19 +1,19 @@
 # clang-tidy over this project's own sources, as a workflow of its own. The tests are the clang_tidy_ ones that
-# FLYWHEEL_DAG_CLANG_TIDY registers (tests/CMakeLists.txt).
+# FLYWHEEL_DAG_CLANG_TIDY registers (cmake/flywheel_dag_clang_tidy.cmake).
 #
 # What it runs. Nothing is built: clang-tidy reads <tree>/compile_commands.json, so each leg configures a tree with the gate on
-# and runs the tests whose names begin clang_tidy_: one per translation unit under tests/, examples/ and benchmarks/, through
-# which the engine's headers are checked, and the ones that prove the gate bites (the version, the checks, three canaries). The
-# macOS leg is the only gate on what the macOS SDK adds.
+# and runs the tests whose names begin clang_tidy_: one per translation unit that a target of the project compiles, through which
+# the engine's headers are checked; clang_tidy_units, which holds that list to the tree's compile database; and the ones that
+# prove the gate bites (the version, the checks, three canaries). The macOS leg is the only gate on what the macOS SDK adds.
 #
 # A workflow of its own, so that a red lint run cannot mask whether the build in ci.yml is green. It has no cache and no
 # concurrency group: nothing is built, and every push keeps its own result, so a red one names its commit.
 #
 # The LLVM major is written once, in the env below, and test_ci_clang_tidy holds it to the number beside the gate's registration
-# in tests/CMakeLists.txt; clang_tidy_version fails a run on any other major. On Ubuntu the tool comes from apt.llvm.org, the LLVM
-# project's own apt repository, one per major and Ubuntu codename. Its signing key is checked against the fingerprint LLVM
-# publishes before apt is told to trust it, and if the repository has no source for a new codename, apt-get update fails and
-# there is no fallback to another major. On macOS the tool is Homebrew's llvm, keg-only and the latest major: when that moves past
+# in cmake/flywheel_dag_clang_tidy.cmake; clang_tidy_version fails a run on any other major. On Ubuntu the tool comes from
+# apt.llvm.org, the LLVM project's own apt repository, one per major and Ubuntu codename. Its signing key is checked against the
+# fingerprint LLVM publishes before apt is told to trust it, and if the repository has no source for a new codename, apt-get
+# update fails and there is no fallback to another major. On macOS the tool is Homebrew's llvm, keg-only and the latest major: when that moves past
 # LLVM_MAJOR, clang_tidy_version fails the leg on purpose, and the commit that moves the major moves LLVM_MAJOR with it.
 #
 # When it runs. For a push or a pull request to main that changes more than documentation, and on demand: Actions > clang-tidy >

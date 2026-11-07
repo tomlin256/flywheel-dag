@@ -308,10 +308,14 @@ ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8
 ```
 
 `FLYWHEEL_DAG_CLANG_TIDY` is a command on `PATH` or a path to one, and a configure that names a tool it cannot run
-fails; `FLYWHEEL_DAG_CLANG_TIDY_ARGS` adds arguments, as a list. There is one test per source file, and a few that
-prove the gate bites. On a Mac, `brew install llvm` has LLVM 23; it is keg-only, so link its `clang-tidy` and
-`clangd` into a directory on your `PATH`. On Ubuntu, `clang-tidy-23` is in LLVM's own apt repository,
-apt.llvm.org, and `.github/workflows/clang-tidy.yml` shows the install.
+fails; `FLYWHEEL_DAG_CLANG_TIDY_ARGS` adds arguments, as a list. There is one test per unit, a unit being a `.cpp`,
+`.cc` or `.cxx` that a target of the project compiles, so a switched-off example or benchmark has no test, and a few tests
+that prove the gate bites. `clang_tidy_units` holds the list to the tree's `compile_commands.json` and names a file
+that is built and not checked, or the reverse. A dependency's sources are not units, so keep a local clone of one
+outside the checkout or under a directory called `_deps`. A `.cpp` in `tests/`, `examples/` or `benchmarks/` that no
+target compiles fails `test_clang_tidy_wiring`, which needs no clang-tidy. On a Mac, `brew install llvm` has LLVM 23; it
+is keg-only, so link its `clang-tidy` and `clangd` into a directory on your `PATH`. On Ubuntu, `clang-tidy-23` is in
+LLVM's own apt repository, apt.llvm.org, and `.github/workflows/clang-tidy.yml` shows the install.
 
 ## Benchmark
 

@@ -1,6 +1,6 @@
 # clang-tidy units from the targets, held to the compile database
 
-**Status: In progress (2026-11-07).** Approved as written, so D1 to D4 stand at their defaults. Rob asked for flywheel-dag#65 to be
+**Status: Done (2026-11-07).** Approved as written, so D1 to D4 stand at their defaults. Rob asked for flywheel-dag#65 to be
 fixed if it still applies. It does: the gate's list still comes from a glob, and it differs from what the tree compiles whenever
 the examples or the benchmark are switched off (measured below).
 
@@ -275,4 +275,70 @@ closed.
 | 1 Start from green | Done | The last runs on `3aa98fd` (`CI` and `clang-tidy`) were green. The Mac tree at `aed3ff7` built with no warning and passed 77 of 77. |
 | 2 The filter and the units script | Done | Red first ("does not exist"), then green: 78 of 78, no warning, 32 cases. Hand-made changes: a to t, 20 runs as expected (n green); o to t are rows the plan did not have. |
 | 3 The walk, the registration moves, `clang_tidy_units` | Done | Red first (the stubs fail to configure on the missing `flywheel_dag_clang_tidy_add_tests`; the real roots lack `clang_tidy_units`; the examples-off tree lists `clang_tidy_aad` and `clang_tidy_quickstart`), then green: 79 of 79, no warning, 31 cases. Gate on, Mac: 42, 40, 39 and 37 `clang_tidy_` tests green, with 36, 34, 33 and 31 units that `clang_tidy_units` finds exactly the tree's. Hand-made changes: 27 red and the control green, for the plan's a to m and 14 more (the Outcome lists them). |
-| 4 Docs, close | Not started | |
+| 4 Docs, close | Done | The README, `CLAUDE.md` (6,493 of 6,500 bytes), `.clang-tidy`, `clang-tidy.yml`, the units script's header and this Outcome name the module. 79 of 79 on the Mac. flywheel-dag#65 is closed by hand, with a comment that lists the commits and the runs. |
+
+## Outcome
+
+Done on 2026-11-07, as approved. Counts are from the Mac tree `relwithdebinfo-macos-arm64`, configured with CI's flags
+(`-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`); no step built with a warning. No header and no engine
+file changed, so there is no tag and no version.
+
+| Step | Count | The push's runs |
+|---|---|---|
+| 1 start from green | 77 of 77 | |
+| 2 the filter and the units script | **78 of 78** | `CI` [run 42380599371](https://github.com/tomlin256/flywheel-dag/actions/runs/42380599371) and `clang-tidy` [run 42380599247](https://github.com/tomlin256/flywheel-dag/actions/runs/42380599247) green. |
+| 3 the walk, the registration moves, `clang_tidy_units` | **79 of 79** | `CI` [run 42382755732](https://github.com/tomlin256/flywheel-dag/actions/runs/42382755732) green: 79 of 79 on both legs, `test_clang_tidy_wiring` 6.1 s on Ubuntu and 14.8 s on macOS. `clang-tidy` [run 42382755764](https://github.com/tomlin256/flywheel-dag/actions/runs/42382755764) green: 42 tests per leg, `clang_tidy_units` among them (macOS 17.6 s, Ubuntu 72.3 s of test time). |
+| 4 docs | 79 of 79 | Starts both workflows: the README and `clang-tidy.yml` are in neither list. The runs are in the closing comment on flywheel-dag#65. |
+
+**The gate before and after** (Mac, the four option sets of the table in "What I checked"):
+
+| Option set | Units in the compile database | `clang_tidy_` tests before | Units registered after | `clang_tidy_` tests after |
+|---|---|---|---|---|
+| defaults | 36 | 41 | 36 | 42 |
+| `-DFLYWHEEL_DAG_BUILD_EXAMPLES=OFF` | 34 | 41 | 34 | 40 |
+| `-DFLYWHEEL_DAG_BUILD_BENCHMARKS=OFF` | 33 | 41 | 33 | 39 |
+| both off | 31 | 41 | 31 | 37 |
+
+Each of the four runs with the real clang-tidy (`-j8`, about 8 s) was green, and `clang_tidy_units` said "the N units the gate
+checks are exactly the N that the tree compiles". Always-on tests: gate off, 77 then 79; `test_clang_tidy_module` is 32 cases in
+0.1 s and `test_clang_tidy_wiring` 31 cases in about 7 s, offline.
+
+**Red first, as planned.** Step 2: the module driver with no module and no script ("does not exist"), then 78 of 78. Step 3: the
+wiring driver against the tree as Step 2 left it: the three stubs failed to configure ("Unknown CMake command
+`flywheel_dag_clang_tidy_add_tests`"), the real roots lacked `clang_tidy_units`, and the trees with the examples or the benchmarks
+off listed `clang_tidy_aad`, `clang_tidy_quickstart` and the benchmark's three. Then 79 of 79.
+
+**Hand-made changes**, on a scratch copy of the working tree (no `build*`), each through the real driver, with a change that did
+not apply, or applied more than once, stopping the harness. Step 2: 20 runs, all as expected; a to m are red and n green, and o to
+t are rows the plan did not have (a script that takes any top level, one that ignores a database that is not JSON or an entry
+without a file or a missing argument, one that does not normalise the registered paths, a filter that does not refuse a missing
+root). Step 3: 28 runs, all as expected: 27 red and the control green.
+
+**Where it differs from the plan.**
+
+- **Row c of Step 3.** The walk has no build-tree rule of its own: the filter drops what is under the tree. The change is now the
+  filter given a build tree that is not the tree (c), and the filter without its rule (c2). Both are red in the stub.
+- **Row e.** The first stub put its generator-expression source in the whole name (`$<1:path>`), and removing the walk's skip left
+  every test green: the extension rule drops a path that ends in `>`. The source is now `src/$<1:genex>.cpp`, which the skip is
+  the only thing to refuse, and e is red.
+- **Row h** (a target made after the call) is a stub variant that must make `clang_tidy_units` fail, naming its source. The change
+  is j2: the script ignores a unit that nothing registered, and the variant, and the generator-expression one, go green. Row j of
+  the plan, `clang_tidy_units` not registered, is h in the harness.
+- **Fourteen more**: c2, f2 (relative sources taken against the top directory), i2 (`BUILD_DIR` is not the tree), and n1 to n11
+  (the caller's arguments, `--quiet`, a canary include path, the dependency canary's `FAIL_REGULAR_EXPRESSION`, the dependency
+  fixture, the checks' `FAIL_REGULAR_EXPRESSION`, the longest stem, a semicolon-separated list, the root not passing the arguments,
+  the root passing `tests/` as the root, the macOS SDK).
+- **The stub has ten units**, not the seven the plan listed: a `.cc`, a name with a dot, and a directory two levels down are in
+  it, and a header is listed with a source.
+- **`ctest --show-only=json-v1`**, not `ctest -N` and a read of `CTestTestfile.cmake`: it gives the command and the properties of
+  each test as data.
+- **What the wiring test pins of the moved tests.** Every unit's command and the commands of the version, the checks, the canaries
+  and the units test, exactly; of the regular expressions, that each is there (and that the version's starts `LLVM version `), not
+  their text. The gate-on runs are what read the text.
+- **The tests run from the tree's top directory** (`WORKING_DIRECTORY`), as the self-review said; every command names absolute
+  paths, and all 42 passed on the Mac, in `ubuntu-dev` and on both CI legs.
+
+**Linux.** `ubuntu-dev` (aarch64, GCC 13.3, the container's clang-tidy 23.1.6): 79 of 79 with no warning, `test_clang_tidy_wiring`
+4.5 s, and the gate on in a tree of its own: 42 of 42, with `clang_tidy_units` finding 36 units.
+
+**Left for later.** Nothing.
