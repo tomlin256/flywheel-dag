@@ -207,6 +207,61 @@ if(_flywheel_dag_top_level
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitize_option.cmake)
 endif()
 
+# The two scripts that the tests below are run by: tests/run_sanitizer_canary.cmake against stand-ins for a canary, and
+# tests/check_sanitizer_coverage.cmake against fixture build trees written at run time. Each is held to the outcomes it must tell
+# apart, so a regression in either shows in an ordinary build, with no sanitizer, compiler or network. Registered at the top level, in
+# every tree, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_sanitizer_scripts
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/sanitizer_scripts
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitizer_scripts.cmake)
+endif()
+
+# In a sanitizer tree only: what proves the options are live. FLYWHEEL_DAG_SANITIZE is a build option, so only the tree it is set in
+# registers these.
+#
+# A canary commits one deliberate violation and is registered only in the mode that must catch it. run_sanitizer_canary.cmake requires
+# a non-zero exit AND the sanitizer's own report, so a tree whose options never reached the compiler goes red here while every real
+# test stays green. The expectation is a regex taken from the first line of the report, the same text from GCC's runtime and Clang's. The
+# canaries sit in a directory of their own, sanitizer_canary/, because test_clang_tidy_wiring expects every source directly in tests/
+# to be compiled by a target in every tree.
+#
+# test_sanitizer_coverage shows that no other unit was left out: every compile unit and every executable carries the mode's options,
+# the fetched dependencies' included. It reads the compile_commands.json and the link.txt files that the Makefiles generator writes.
+if(_flywheel_dag_top_level
+   AND (FLYWHEEL_DAG_SANITIZE STREQUAL "asan" OR FLYWHEEL_DAG_SANITIZE STREQUAL "tsan"))
+  function(flywheel_dag_add_sanitizer_canary name expected_report)
+    add_executable(${name} sanitizer_canary/${name}.cpp)
+    if(ARGN)
+      target_link_libraries(${name} PRIVATE ${ARGN})
+    endif()
+    add_test(NAME ${name}
+      COMMAND ${CMAKE_COMMAND}
+        -DCANARY=$<TARGET_FILE:${name}>
+        "-DEXPECT=${expected_report}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitizer_canary.cmake)
+  endfunction()
+
+  if(FLYWHEEL_DAG_SANITIZE STREQUAL "asan")
+    flywheel_dag_add_sanitizer_canary(sanitizer_canary_asan  "AddressSanitizer: heap-use-after-free")
+    flywheel_dag_add_sanitizer_canary(sanitizer_canary_ubsan "runtime error: signed integer overflow")
+  else()
+    find_package(Threads REQUIRED)
+    flywheel_dag_add_sanitizer_canary(sanitizer_canary_tsan "ThreadSanitizer: data race" Threads::Threads)
+  endif()
+
+  if(CMAKE_GENERATOR MATCHES "Makefiles")
+    add_test(NAME test_sanitizer_coverage
+      COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -DBUILD_DIR=${CMAKE_BINARY_DIR}
+        -DMODE=${FLYWHEEL_DAG_SANITIZE}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_sanitizer_coverage.cmake)
+  endif()
+endif()
+
 # Every public header refuses to compile below C++23, and says why. The suite
 # builds as C++23, so nothing else would notice a guard that stopped working:
 # this compiles each header at C++17 and at C++20 and expects the guard's message.

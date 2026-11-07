@@ -21,6 +21,10 @@
 #   - a parent project that pulls the engine in, with the option on its command line, has no -fsanitize option on any unit: the option
 #     is the top level's alone.
 #
+# The tests are off here, so the units are the examples', the benchmarks' and spdlog's: that is enough to prove that the root applies
+# the options at all, and before it makes the dependencies. The units of the tests and the link line of every executable are held in
+# a sanitizer tree by test_sanitizer_coverage.
+#
 # SOURCE_DIR is a parameter so that a hand-made change to a copy of the module or of the root is passed here, and must fail.
 
 cmake_minimum_required(VERSION 4.0)

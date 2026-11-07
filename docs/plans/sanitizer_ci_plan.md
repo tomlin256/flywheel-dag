@@ -254,7 +254,11 @@ names it, and the control passes.
 
 *Tests (new):* `sanitizer_canary_asan`, `sanitizer_canary_ubsan`, `sanitizer_canary_tsan` and `test_sanitizer_coverage`, registered
 in `tests/CMakeLists.txt` only in the tree they apply to; the scripts `tests/run_sanitizer_canary.cmake` and
-`tests/check_sanitizer_coverage.cmake`; the sources in `tests/sanitizer_canary/`.
+`tests/check_sanitizer_coverage.cmake`; the sources in `tests/sanitizer_canary/`. And `test_sanitizer_scripts`
+(`tests/check_sanitizer_scripts.cmake`), registered in every tree, which holds those two scripts to the outcomes they must tell apart:
+the runner against stand-in canaries (`sh` scripts), the coverage check against fixture build trees written at run time. Without it
+the runner's third branch (a stop with no report), the floors and the link side would be pinned by hand only, and a regression in
+either script would show only in a nightly sanitizer run.
 
 *By hand,* trees named `scratch-asan` and `scratch-tsan` under `build/` (the presets come in Step 4): the canaries and the coverage test
 pass in the tree that registers them, and the default tree's `ctest -N` lists none. *Mutations,* each in a scratch copy configured
@@ -273,7 +277,7 @@ section 5 (on the Mac without `detect_leaks`, with `symbolize=0`). Every report 
 class, location, ours or a dependency's, disposition (D5). The expected table is empty, as today's runs say. The canaries also pass the
 clang-tidy gate: a sanitizer tree configured with `-DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy` passes `ctest -R '^clang_tidy_'`.
 
-*Checkpoint.* Default tree 81 of 81; the asan tree 84 of 84 and the tsan tree 83 of 83. *Done when:* red then green, A to E as stated,
+*Checkpoint.* Default tree 82 of 82; the asan tree 85 of 85 and the tsan tree 84 of 84. *Done when:* red then green, A to E as stated,
 the first pass recorded, pushed.
 
 ### Step 3 — The guard (test first), one commit
@@ -291,7 +295,7 @@ passes `"${FLYWHEEL_DAG_SANITIZE}"` as it reads the cache before the option is d
 tests: the rule deleted; the kind matched without its dash (so that `asanx-…` is refused); the message hiding the value. A comment on
 a new cryptocogs issue gives the one sentence of its header that stops being true (D7).
 
-*Checkpoint.* Expected 81 of 81. *Done when:* red then green, the mutations red, pushed.
+*Checkpoint.* Expected 82 of 82. *Done when:* red then green, the mutations red, pushed.
 
 ### Step 4 — The presets (test first), one commit
 
@@ -304,8 +308,8 @@ README's trees table and count ("the fifteen in use"). The hand-made trees are r
 must fail `test_presets` naming the rule: `tsan` setting `asan`; `asan` setting `Release`; `release` setting a mode; `asan-linux-arm64`
 inheriting `tsan`; a build preset missing; a test preset that sets `noTestsAction` to `ignore`.
 
-*Checkpoint.* Expected 81 of 81; `cmake --list-presets` on the Mac lists `asan-macos-arm64` and `tsan-macos-arm64`; the preset trees
-`cmake --preset asan-macos-arm64`, build and `ctest --preset` pass 84 of 84, and `tsan` 83 of 83, and in `ubuntu-dev`
+*Checkpoint.* Expected 82 of 82; `cmake --list-presets` on the Mac lists `asan-macos-arm64` and `tsan-macos-arm64`; the preset trees
+`cmake --preset asan-macos-arm64`, build and `ctest --preset` pass 85 of 85, and `tsan` 84 of 84, and in `ubuntu-dev`
 `asan-linux-arm64` and `tsan-linux-arm64` do the same with CI's runtime options; the scratch trees of Step 2 are deleted. *Done when:*
 as stated, mutations red, pushed.
 
@@ -325,7 +329,7 @@ on the ctest line; `ctest … -R '^test_dag'`; `-E`; an `actions/cache` step; `A
 Outcome); every `uses:` in every workflow is re-audited (`actions/checkout@v6` is `using: node24`); the workflow's commands are
 rehearsed by hand: the presets on the Mac and in a fresh `ubuntu:26.04` container (GCC 15.2, CI's compiler, with `-Werror`).
 
-*Checkpoint.* Expected 82 of 82. *Done when:* red then green, every change as stated, actionlint clean, the GCC 15.2 builds
+*Checkpoint.* Expected 83 of 83. *Done when:* red then green, every change as stated, actionlint clean, the GCC 15.2 builds
 warning-free, pushed. The push starts `CI` (two jobs) and `clang-tidy` (two legs) and no sanitizer run.
 
 ### Step 6 — The first dispatches, the cost, the schedule, the docs
@@ -404,7 +408,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
   audit runs before every push.
 - **Disk.** A sanitizer tree is about 0.3 to 0.4 GB here. `df -h /` before building each, and delete scratch copies as soon as their
   result is recorded.
-- **Behaviour change:** one option, six presets (and two hidden kinds), one workflow, seven tests added (three in every tree, four in
+- **Behaviour change:** one option, six presets (and two hidden kinds), one workflow, eight tests added (four in every tree, four in
   the sanitizer trees) and four modified (`test_platform_name`, `test_tree_name`, `test_presets`, `test_cmake_diagnostics`). No
   header, no engine file, no default configure changes.
 
@@ -414,7 +418,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 |---|---|---|
 | 0 Approval | Done | Approved 2026-11-07; the plan is on `main` and flywheel-dag#45 has a comment that links it |
 | 1 The option | Done | Red then green for both tests, 14 hand-made changes, 81 of 81 on the Mac and in `ubuntu-dev` |
-| 2 Canaries, coverage, first pass | Not started | |
+| 2 Canaries, coverage, first pass | Done | Five tests added; 17 script mutants and A to E red; no report in four first-pass runs; default 82 of 82, asan 85 of 85, tsan 84 of 84, on the Mac and in `ubuntu-dev` |
 | 3 The guard | Not started | |
 | 4 The presets | Not started | |
 | 5 The workflow and its check | Not started | |
@@ -462,3 +466,81 @@ so no object was rebuilt and nothing new was compiled. `test_sanitize_option` ta
 
 *Deviation.* `test_sanitize_option` is registered for the Makefiles and Ninja generators, not in every tree (the plan said every
 tree); the default presets use Makefiles, so the count is the planned 81.
+
+### Step 2 — Canaries, the coverage check, and the first pass (2026-11-07)
+
+*Added.* `sanitizer_canary_asan` and `sanitizer_canary_ubsan` (asan trees), `sanitizer_canary_tsan` (tsan trees),
+`test_sanitizer_coverage` (either sanitizer tree, Makefiles generator) and `test_sanitizer_scripts` (every tree): the runner
+`tests/run_sanitizer_canary.cmake`, the check `tests/check_sanitizer_coverage.cmake`, the driver `tests/check_sanitizer_scripts.cmake`
+and the three canaries in `tests/sanitizer_canary/`. The default tree lists `test_sanitizer_scripts` and none of the others.
+
+*Red then green: not as the plan words it.* What these tests hold, the root's block, has existed since Step 1, so no test of this
+step could be red before its implementation. Their red is the mutants below: A removes the block's effect, and each Part 1 mutant
+removes one branch of a script. From Step 3 on the order is the plan's.
+
+*Part 1: the two scripts, through `test_sanitizer_scripts`.* Each mutant is a scratch copy of the tree with one text change in a
+script; the control passes all 19 cases, and every mutant makes the case that names its branch go red.
+
+| Mutation | A case that goes red |
+|---|---|
+| runner: the no-report branch dead | a stop with no report: accepted, want refused |
+| runner: the report-and-exit-0 branch dead | the report and exit 0: lacks "printed the sanitizer's report and exited 0" |
+| runner: the exit-status test inverted | a stop with the report: refused, want accepted |
+| runner: `EXPECT` ignored | no report and exit 0: lacks "exited 0 with no report" |
+| runner: standard error dropped | a stop with the report: refused, want accepted |
+| coverage: `-fno-sanitize=` on a unit not reported | a unit with `-fno-sanitize=`: accepted, want refused |
+| coverage: `-fno-sanitize=` on an executable not reported | an executable with `-fno-sanitize=`: accepted, want refused |
+| coverage: a missing link option not reported | an executable without a link option: accepted, want refused |
+| coverage: a missing compile option not reported | a unit without one option: accepted, want refused |
+| coverage: unit floor 0 | one unit under the floor: accepted, want refused |
+| coverage: executable floor 0 | one executable under the floor: accepted, want refused |
+| coverage: static libraries counted as executables | a tree that carries every option: refused, want accepted |
+| coverage: the link side skipped | a tree that carries every option: refused, want accepted |
+| coverage: only the first unit read | a unit without one option: accepted, want refused |
+| coverage: an entry with no command not reported | an entry with no command: accepted, want refused |
+| coverage: a mode with no options accepted | a mode with no options: accepted, want refused |
+| coverage: the `-fno-sanitize=` matcher dead | a unit with `-fno-sanitize=`: accepted, want refused |
+
+*Part 2: A to E in real trees.* Each mutant is a scratch copy configured offline and built for real, then the named tests run in it
+with the workflow's runtime options (`symbolize=0` on the Mac); the controls (asan and tsan, no change) pass everything.
+
+| # | Mutation | Red | Green |
+|---|---|---|---|
+| A | asan: the root's two `add_*_options` calls removed | `test_sanitize_option`, both canaries, `test_sanitizer_coverage` (88 findings: all 52 compile units and all 36 executable link lines) | `test_sanitize_flags`, `test_sanitizer_scripts` |
+| A | tsan: the same | `test_sanitize_option`, `sanitizer_canary_tsan`, `test_sanitizer_coverage` | `test_sanitize_flags`, `test_sanitizer_scripts` |
+| B | asan: `-fno-sanitize-recover=undefined` removed from the module | `sanitizer_canary_ubsan`, `test_sanitize_flags` | `sanitizer_canary_asan`, `test_sanitize_option`, `test_sanitizer_coverage`, `test_sanitizer_scripts` |
+| C | asan: the block moved below the spdlog fetch | `test_sanitize_option`, `test_sanitizer_coverage` (7 findings, every one a spdlog unit) | both canaries, `test_sanitize_flags`, `test_sanitizer_scripts` |
+| C | tsan: the same | `test_sanitize_option`, `test_sanitizer_coverage` | `sanitizer_canary_tsan`, `test_sanitize_flags`, `test_sanitizer_scripts` |
+| D | asan and tsan: the link options replaced by `-g` | the build stops at link (`ld: symbol(s) not found`), and `test_sanitize_flags` | |
+| E | asan: `test_dag` given `-fno-sanitize=all` after the block | `test_sanitizer_coverage` alone (1 finding: `tests/test_dag.cpp: has -fno-sanitize=all`) | everything else |
+
+C is the row that justifies the coverage check: the canaries pass in a tree whose dependency is uninstrumented. B passes
+`test_sanitizer_coverage` by design, as it reads the expected options from the module; `test_sanitize_flags` and the ubsan canary
+hold the text. D never reaches a test of the canary, because the executable does not link.
+
+*The first pass.* The whole suite, before `test_sanitizer_scripts` joined it, in both trees on the Mac (Apple clang 21, no
+`detect_leaks`, `symbolize=0`) and in `ubuntu-dev` (GCC 13.3, `detect_leaks=1`), with CI's strict flags and no warning:
+
+| Run | Tests | Sanitizer reports |
+|---|---|---|
+| Mac, asan | 84 of 84 | none |
+| Mac, tsan | 83 of 83 | none |
+| `ubuntu-dev`, asan | 84 of 84 | none |
+| `ubuntu-dev`, tsan | 83 of 83 | none |
+
+The findings table (sanitizer, test, class, location, ours or a dependency's, disposition) is empty: there is nothing to dispose of
+and no issue to open. The runs took, from empty trees, 107 and 102 s on the Mac (build 27 and 17 s, `ctest` 61 and 59 s) and 248 and
+165 s in `ubuntu-dev` (build 159 and 79 s, `ctest` 69 and 66 s).
+
+*clang-tidy.* A sanitizer tree configured with `-DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy` (LLVM 23.1.4, configure only) passes
+`ctest -R '^clang_tidy_'`: asan 44 of 44 and tsan 43 of 43, the canaries' units (`clang_tidy_sanitizer_canary_asan`,
+`clang_tidy_sanitizer_canary_ubsan`, `clang_tidy_sanitizer_canary_tsan`) and `clang_tidy_units` among them.
+
+*Checkpoint.* On the final tree, the Mac (Apple clang 21) and `ubuntu-dev` (GCC 13.3) each pass the default tree 82 of 82, the
+asan tree 85 of 85 and the tsan tree 84 of 84, with CI's strict flags, no warning and no sanitizer report line in any `ctest` log
+(`detect_leaks=1` in the container). The trees were current from the first pass, so no object was rebuilt in that run.
+
+*Deviation.* `test_sanitizer_scripts` is an addition to the approved plan (the Step 2 text above now names it): the runner's
+no-report branch, the floors and the link side of the coverage check would otherwise be held by the mutants alone, and a regression
+in either script would first show in a nightly sanitizer run. It costs one test in every tree (about 0.5 s), so the counts of
+Steps 2 to 5 are one higher than they were.
