@@ -90,6 +90,8 @@ endfunction()
 expect_runner("a stop with the report" "${report}" 1 accepted "stopped (1) with a report matching")
 expect_runner("the report and exit 0" "${report}" 0 refused "printed the sanitizer's report and exited 0")
 expect_runner("no report and exit 0" "" 0 refused "exited 0 with no report")
+expect_runner("no report and exit 0 names the runtime option that switches a sanitizer off" "" 0 refused
+              "ASAN_OPTIONS=detect_leaks=0")
 expect_runner("a stop with no report" "Segmentation fault" 3 refused "died of something other than the sanitizer")
 expect_runner("a stop with another sanitizer's report" "${other_report}" 1 refused
               "died of something other than the sanitizer")

@@ -247,6 +247,11 @@ if(_flywheel_dag_top_level
   if(FLYWHEEL_DAG_SANITIZE STREQUAL "asan")
     flywheel_dag_add_sanitizer_canary(sanitizer_canary_asan  "AddressSanitizer: heap-use-after-free")
     flywheel_dag_add_sanitizer_canary(sanitizer_canary_ubsan "runtime error: signed integer overflow")
+    # LeakSanitizer is part of AddressSanitizer's runtime on Linux, and Apple's has none. The canary runs with the environment of
+    # ctest, so ASAN_OPTIONS=detect_leaks=0 turns the leak detector off and this test red.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      flywheel_dag_add_sanitizer_canary(sanitizer_canary_lsan "LeakSanitizer: detected memory leaks")
+    endif()
   else()
     find_package(Threads REQUIRED)
     flywheel_dag_add_sanitizer_canary(sanitizer_canary_tsan "ThreadSanitizer: data race" Threads::Threads)

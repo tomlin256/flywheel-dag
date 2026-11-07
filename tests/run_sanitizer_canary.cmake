@@ -46,7 +46,7 @@ if("${status}" STREQUAL "0")
     endif()
     message(FATAL_ERROR
         "${CANARY} exited 0 with no report: the sanitizer caught nothing. Its options probably never reached the compiler or the "
-        "linker.\n${output}")
+        "linker, or a runtime option switched it off (ASAN_OPTIONS=detect_leaks=0 does, for the leak canary).\n${output}")
 endif()
 if(NOT reported)
     message(FATAL_ERROR
