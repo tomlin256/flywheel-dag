@@ -11,7 +11,8 @@ A release is a commit, an annotated tag and a GitHub release. A consumer that fe
    `project(FLYWHEEL_DAG VERSION X.Y.Z …)`; in `README.md`, the `GIT_TAG vX.Y.Z)` snippet. `test_package_version` derives its
    table from `PROJECT_VERSION`, and `find_package(flywheel_dag 1 …)` keeps its request.
 4. **Gate**, on the tree as committed, on macOS and in the Linux container: configure with
-   `-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, build, `ctest --preset …`, the clang-tidy tests,
+   `-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON -DFLYWHEEL_DAG_CLANG_TIDY=clang-tidy`, build, `ctest --preset …`
+   (the `clang_tidy_` tests exist only with that last option),
    and `bench_hot_path --invariants` against `benchmarks/expected_invariants.txt`.
 5. **Commit and tag.** The release commit is `build(#N): release vX.Y.Z`, where N is the last issue of the batch, and its
    body gives the scope, the access of each change and the results. Push it once, then
