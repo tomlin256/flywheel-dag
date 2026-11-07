@@ -422,7 +422,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 3 The guard | Done | Red then green for both tests, 9 hand-made changes, 82 of 82 on the Mac and in `ubuntu-dev` |
 | 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
 | 5 The workflow and its check | Done | Red then green; 34 hand-made changes, the control and a comment-only change; actionlint clean; default 83 of 83 on the Mac and in `ubuntu-dev`, `asan` 86 of 86 and `tsan` 85 of 85 on the Mac; GCC 15.2 builds warning-free, `asan` 86 of 86 there, `tsan` 83 of 85 (the two known `SIGILL`) |
-| 6 First dispatches, schedule, docs | Not started | |
+| 6 First dispatches, schedule, docs | In progress | Dispatch 1: the `tsan` leg stopped at the `vm.mmap_rnd_bits` step (no sudo), fixed test first |
 | 7 `tsan` joins the nightly; close | Not started | |
 
 ## Outcome
@@ -700,3 +700,18 @@ The two that fail are `test_dag_async` and `test_wake_state`, with `Illegal inst
 measurement above, which read it as a property of this aarch64 container's runtime and kernel. They are not a finding, and the
 x86_64 runner is the first place that GCC 15.2's ThreadSanitizer runs them (Step 6). Both trees list `sanitizer_canary_*`,
 `test_sanitizer_coverage` and `test_ci_sanitizers` as passed.
+
+### Step 6 — The first dispatches, the cost, the schedule, the docs (2026-11-07)
+
+*First dispatch,* `gh workflow run sanitizers.yml --ref main -f which=both` on the Step 5 commit
+(https://github.com/tomlin256/flywheel-dag/actions/runs/42398626594). The runner: Ubuntu 26.04.1, image `ubuntu26/20261101.186`,
+kernel 7.0.0-1019-azure, CMake 4.4.5, GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1), 4 cores.
+
+*The `tsan` leg stopped at the step of its own.* `Address-space randomisation (tsan)` read the sysctl without sudo:
+`cat: /proc/sys/vm/mmap_rnd_bits: Permission denied`, exit 1, and Configure, Build and Test were skipped. That is a mistake in the
+workflow and not a finding about the engine; it is what a dispatch is for, since nothing run by hand sees the runner's permissions.
+Test first: `test_ci_sanitizers` learned that every command on the sysctl goes through sudo (an echo of the value is not one, unless
+it substitutes a command), and went red against the workflow as pushed, naming the two reads. The step now reads with
+`sudo sysctl -n`, and the check is green. Five hand-made changes are red for the new rule (a read without sudo, a read of the
+`/proc` file, a write without sudo, the "after" echo without sudo, an echo with a backtick substitution); the control and a reworded
+echo are green; the 34 changes of Step 5 are unchanged, 34 red and the two green.

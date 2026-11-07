@@ -25,7 +25,8 @@
 #   - ASAN_OPTIONS has detect_leaks=1, and TSAN_OPTIONS has halt_on_error=1 (ThreadSanitizer then stops at its first report, so the
 #     finding is the end of the log and not buried under what follows).
 #   - The job has a timeout-minutes, and fail-fast is off, so that one sanitizer red does not hide the other.
-#   - The step that reads and lowers vm.mmap_rnd_bits comes before the configure, and only the tsan job runs it.
+#   - The step that reads and lowers vm.mmap_rnd_bits comes before the configure, and only the tsan job runs it. Every command on the
+#     sysctl goes through sudo: the runner's user cannot read /proc/sys/vm/mmap_rnd_bits.
 #
 # It reads the workflow's code and not its comments (whole-line ones are dropped first), so a rule is not met by a comment, and a
 # comment that mentions a rule does not break it.
@@ -253,6 +254,16 @@ if(NOT rnd_at EQUAL -1)
         string(APPEND failures "\n  the vm.mmap_rnd_bits step does not say 'if: matrix.kind == 'tsan'': only the tsan job needs it")
     endif()
 endif()
+# The runner's user cannot read /proc/sys/vm/mmap_rnd_bits (ubuntu-latest answers "Permission denied"), and a write needs root, so a
+# command on the sysctl goes through sudo. An echo of the value is not a command on it, unless it substitutes one.
+string(REGEX MATCHALL "[^\n]*mmap_rnd_bits[^\n]*" rnd_lines "${code}")
+foreach(line IN LISTS rnd_lines)
+    if(NOT line MATCHES "sudo" AND (NOT line MATCHES "^[ \t]*echo[ \t]" OR line MATCHES "[$][(]|`"))
+        string(STRIP "${line}" shown)
+        string(APPEND failures
+            "\n  a command on vm.mmap_rnd_bits does not go through sudo, and the runner's user cannot read it:\n      ${shown}")
+    endif()
+endforeach()
 
 # ── the triggers ─────────────────────────────────────────────────────────────
 if(NOT code MATCHES "\n[ \t]*workflow_dispatch:")

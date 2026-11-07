@@ -73,16 +73,16 @@ jobs:
 
     # ThreadSanitizer maps its shadow memory at fixed addresses, and a kernel with more address-space randomisation than the
     # mapping allows makes every instrumented program die at start-up. The value is logged before and after, so that a run says
-    # whether the image needed it.
+    # whether the image needed it. The runner's user cannot read the sysctl, so every command on it goes through sudo.
     - name: Address-space randomisation (tsan)
       if: matrix.kind == 'tsan'
       run: |
-        bits=$(cat /proc/sys/vm/mmap_rnd_bits)
+        bits=$(sudo sysctl -n vm.mmap_rnd_bits)
         echo "vm.mmap_rnd_bits before: $bits"
         if [ "$bits" -gt 28 ]; then
           sudo sysctl -w vm.mmap_rnd_bits=28
         fi
-        echo "vm.mmap_rnd_bits after: $(cat /proc/sys/vm/mmap_rnd_bits)"
+        echo "vm.mmap_rnd_bits after: $(sudo sysctl -n vm.mmap_rnd_bits)"
 
     # -Werror=author -Werror=deprecated: any CMake author or deprecation warning fails the run, as in ci.yml;
     # test_cmake_diagnostics holds the spelling and the effect, and test_ci_sanitizers that this line carries them.
