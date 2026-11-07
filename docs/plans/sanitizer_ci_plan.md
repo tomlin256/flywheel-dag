@@ -420,7 +420,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 1 The option | Done | Red then green for both tests, 14 hand-made changes, 81 of 81 on the Mac and in `ubuntu-dev` |
 | 2 Canaries, coverage, first pass | Done | Five tests added; 17 script mutants and A to E red; no report in four first-pass runs; default 82 of 82, asan 85 of 85, tsan 84 of 84, on the Mac and in `ubuntu-dev` |
 | 3 The guard | Done | Red then green for both tests, 9 hand-made changes, 82 of 82 on the Mac and in `ubuntu-dev` |
-| 4 The presets | Not started | |
+| 4 The presets | Done | Red then green (23 rules red), 11 hand-made changes, 6 presets added; default 82 of 82, `asan` 85 of 85, `tsan` 84 of 84, on the Mac and in `ubuntu-dev` |
 | 5 The workflow and its check | Not started | |
 | 6 First dispatches, schedule, docs | Not started | |
 | 7 `tsan` joins the nightly; close | Not started | |
@@ -589,3 +589,62 @@ deleted. The header comment of `cmake/flywheel_dag_sanitize.cmake` and the root'
 
 *Sibling repo.* The header of cryptocogs's platform module says that flywheel-dag's copy has no sanitizer rule, which is no longer
 true; tomlin256/cryptocogs#63 records it, with a suggested sentence. Nothing in that repository was edited.
+
+### Step 4 — The presets (2026-11-07)
+
+*The hand-made trees (D6).* Looked at first: `build/asan-linux-arm64` (2.9 GB, last configured 3 November), `build/tsan-linux-arm64`
+(1.5 GB, 6 November) and `build/tsan-macos-arm64` (43 MB, 6 November), each with the sanitizer in `CMAKE_CXX_FLAGS` and none with
+`FLYWHEEL_DAG_SANITIZE`. No process on the Mac or in `ubuntu-dev` named any of them. Deleted, 4.4 GB: a preset configure over a cache
+that holds the flags would have doubled them.
+
+*Red then green.* `tests/check_presets.cmake` was changed first: the table of kinds is now rows of
+`<kind>:<build type>:<mode or none>`, with `asan:RelWithDebInfo:asan` and `tsan:RelWithDebInfo:tsan` added, R4 checks the mode, and
+each mode in the table is run through the module (which stops, naming the value, on one it does not accept). Against the unchanged
+`CMakePresets.json`, 23 rules were red: R4 twice (no `asan`, no `tsan`), R5 six times, R6 twelve times, R7 three times. R7 and R8
+needed no change: R7 builds its expectation from the table of kinds, so it now expects five presets per section on Darwin and ten
+on Linux, and R8 holds the README to the presets. With the two hidden kind presets and six visible ones, each with a build and a test
+preset, R1 to R8 hold.
+
+*Also tightened,* beyond the plan: R5 now requires that a visible configure preset sets no `cacheVariables` of its own, so the mode
+can come only from the kind's preset (M8 below).
+
+*Hand-made changes.* Each is a scratch copy of the working tree with one text change, run through the real check; the control
+passes. M1 to M6 are the plan's six (M5 renames a build preset, which also leaves an extra one).
+
+| # | Change | `test_presets` |
+|---|---|---|
+| M1 | `tsan` sets `asan` | R4: `'tsan' sets FLYWHEEL_DAG_SANITIZE 'asan', not 'tsan'` |
+| M2 | `asan` sets `Release` | R4: `'asan' sets CMAKE_BUILD_TYPE 'Release', not 'RelWithDebInfo'` |
+| M3 | `release` sets a mode | R4: `'release' sets FLYWHEEL_DAG_SANITIZE 'asan', and only a sanitizer kind sets one` |
+| M4 | `asan-linux-arm64` inherits `tsan` | R5: `inherits 'base,linux-arm64,tsan', not 'asan,base,linux-arm64'` |
+| M5 | a build preset missing | R6: `there is no build preset 'asan-macos-arm64'`, the extra one, and R7 |
+| M6 | a test preset sets `noTestsAction` to `ignore` | R6: `the test preset 'tsan-linux-arm64' sets output or execution, only 'base' does` |
+| M7 | the base test preset sets `noTestsAction` to `ignore` | R6: `sets execution.noTestsAction 'ignore', not 'error'` |
+| M8 | a visible preset sets a mode of its own | R5: `'release-linux-arm64' sets cacheVariables of its own` |
+| M9 | the mode misspelt in the `asan` preset | R4: `'asan' sets FLYWHEEL_DAG_SANITIZE 'adress', not 'asan'` |
+| M10 | the module stops accepting `tsan` | the module's error: `FLYWHEEL_DAG_SANITIZE='tsan' is not a sanitizer mode` |
+| M11 | `tsan-linux-x86_64` inherits the arm64 host | R5: `inherits 'base,linux-arm64,tsan', not 'base,linux-x86_64,tsan'` |
+
+*Docs, earlier than planned.* The sentence "the presets set the tree and the build type and nothing else" was false from this
+commit, so the README and `CLAUDE.md` change here and not in Step 6: the README's count is the fifteen in use, its table of kinds has
+`asan` and `tsan`, and both files say that a sanitizer kind also sets its mode. `CLAUDE.md` stays inside its budget (6,499 of 6,500
+bytes) by two tightenings in the same bullet (`the root CMakeLists.txt`, and `rules and reasons: cmake/flywheel_dag_platform.cmake`).
+
+*Checkpoint.* The default tree is 82 of 82 on the Mac (Apple clang 21) and in `ubuntu-dev` (GCC 13.3), and `cmake --list-presets` on
+the Mac lists `asan-macos-arm64` and `tsan-macos-arm64`. The preset trees, each from `cmake --preset` with CI's strict flags
+(`-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`), `cmake --build --preset` and `ctest --preset`, with no
+warning:
+
+| Tree | Host | Build | ctest | Sanitizer report lines |
+|---|---|---|---|---|
+| `asan-macos-arm64` | Mac | 27 s, 50 objects | 85 of 85, 62 s | 0 |
+| `tsan-macos-arm64` | Mac | 17 s, 49 objects | 84 of 84, 62 s | 0 |
+| `asan-linux-arm64` | `ubuntu-dev` | 160 s, 50 objects | 85 of 85, 65 s | 0 |
+| `tsan-linux-arm64` | `ubuntu-dev` | 80 s, 49 objects | 84 of 84, 26 s | 0 |
+
+Each cache shows `CMAKE_BUILD_TYPE=RelWithDebInfo`, an empty `CMAKE_CXX_FLAGS` and `FLYWHEEL_DAG_SANITIZE` of the tree's kind. The
+`ubuntu-dev` runs use the runtime options that the workflow will set (`ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1:detect_leaks=1`,
+`UBSAN_OPTIONS=print_stacktrace=1`, `TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1`); the Mac runs leave `detect_leaks` out,
+since macOS has no LeakSanitizer, and set `symbolize=0`. The six scratch trees of Step 2 (`build/scratch-{asan,tsan}`, `-ctr` and
+`-tidy`, 5.9 GB) are deleted, after looking at each: a cache that names this repository, configured today, no process using it.
+CI for the Step 3 commit finished green (CI and clang-tidy).

@@ -18,15 +18,18 @@
 # the name of its tree, and the guard in CMakeLists.txt (flywheel_dag_tree_problem)
 # reads <kind>-<os>-<arch>. The shape is a hidden `base` preset that sets the
 # directory from the preset's own name, a hidden preset per kind that sets the
-# build type the kind's name says, a hidden preset per host that says which OS it
-# is for, and one visible preset for each kind on each host that inherits all
-# three. A preset cannot see the CPU: ${hostSystemName} is the only host fact a
-# condition can read, so the two Linux hosts are both listed on any Linux host and
-# the guard is what makes the wrong one an error. Each visible configure preset
-# has a build preset and a test preset of the same name. The test presets carry
-# what CI passes today: --output-on-failure, --timeout 120, and an error for a
-# test preset that finds no tests, which ctest otherwise reports as success. No
-# preset sets a warning flag (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is the caller's).
+# build type of the kind (a sanitizer kind, asan or tsan, builds RelWithDebInfo
+# and also sets its own FLYWHEEL_DAG_SANITIZE mode, which the guard requires of a
+# tree with that name), a hidden preset per host that says which OS it is for,
+# and one visible preset for each kind on each host that inherits all three and
+# sets nothing of its own. A preset cannot see the CPU: ${hostSystemName} is the
+# only host fact a condition can read, so the two Linux hosts are both listed on
+# any Linux host and the guard is what makes the wrong one an error. Each visible
+# configure preset has a build preset and a test preset of the same name. The
+# test presets carry what CI passes today: --output-on-failure, --timeout 120,
+# and an error for a test preset that finds no tests, which ctest otherwise
+# reports as success. No preset sets a warning flag
+# (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is the caller's).
 #
 # The file's cmakeMinimumRequired is 3.21, the CMake that can read a version 3 file,
 # and not the project's floor, which is CMake 4.0 (test_cmake_floor). Raised to the
@@ -46,9 +49,12 @@
 #   R2  `base` is hidden and its binaryDir is ${sourceDir}/build/${presetName}
 #   R3  one hidden host preset per known host, named <os>-<arch> in the module's
 #       spelling, whose condition is ${hostSystemName} equal to that OS's CMake name
-#   R4  one hidden kind preset per kind, and it sets CMAKE_BUILD_TYPE
+#   R4  one hidden kind preset per kind, and it sets CMAKE_BUILD_TYPE and, for a
+#       sanitizer kind, its own FLYWHEEL_DAG_SANITIZE (no other kind sets one);
+#       the mode is one that cmake/flywheel_dag_sanitize.cmake accepts
 #   R5  the visible configure presets are exactly the pairs of a kind and a host,
-#       each inheriting base, that kind and that host, with no binaryDir of its own
+#       each inheriting base, that kind and that host, with no binaryDir and no
+#       cacheVariables of its own
 #   R6  each has a build preset and a test preset of the same name, which name it
 #       as configurePreset and inherit their host's hidden preset; the test presets
 #       carry the three settings above, and only `base` sets them
@@ -74,12 +80,31 @@ if(NOT README_DIR)
 endif()
 
 include("${SOURCE_DIR}/cmake/flywheel_dag_platform.cmake")
+include("${SOURCE_DIR}/cmake/flywheel_dag_sanitize.cmake")
 
 # ── the vocabulary: kinds, and hosts as CMake reports them ───────────────────
-set(kinds relwithdebinfo release debug)
-set(build_type_of_relwithdebinfo RelWithDebInfo)
-set(build_type_of_release        Release)
-set(build_type_of_debug          Debug)
+# One row per kind: <kind>:<CMAKE_BUILD_TYPE>:<FLYWHEEL_DAG_SANITIZE, or none>. A sanitizer kind builds RelWithDebInfo, which is what
+# CI builds and carries the line information a report needs, and sets its own mode; no other kind sets one.
+set(kind_rows
+    relwithdebinfo:RelWithDebInfo:none
+    release:Release:none
+    debug:Debug:none
+    asan:RelWithDebInfo:asan
+    tsan:RelWithDebInfo:tsan)
+set(kinds "")
+foreach(row IN LISTS kind_rows)
+    string(REPLACE ":" ";" fields "${row}")
+    list(GET fields 0 kind)
+    list(GET fields 1 build_type_of_${kind})
+    list(GET fields 2 mode_of_${kind})
+    if("${mode_of_${kind}}" STREQUAL "none")
+        set(mode_of_${kind} "")
+    else()
+        # The module stops, naming the value, if it is not a mode: the table cannot drift from the module.
+        flywheel_dag_sanitizer_flags("${mode_of_${kind}}" ignored_compile ignored_link)
+    endif()
+    list(APPEND kinds "${kind}")
+endforeach()
 
 set(known_systems  Darwin Linux   Linux)
 set(known_machines arm64  aarch64 x86_64)
@@ -237,11 +262,19 @@ foreach(kind IN LISTS kinds)
     endif()
     json_member(hidden "${preset}" hidden)
     json_member(type "${preset}" cacheVariables CMAKE_BUILD_TYPE)
+    json_member(mode "${preset}" cacheVariables FLYWHEEL_DAG_SANITIZE)
     if(NOT hidden)
         rule_failed(R4 "'${kind}' is not hidden")
     endif()
     if(NOT "${type}" STREQUAL "${build_type_of_${kind}}")
         rule_failed(R4 "'${kind}' sets CMAKE_BUILD_TYPE '${type}', not '${build_type_of_${kind}}'")
+    endif()
+    if(NOT "${mode}" STREQUAL "${mode_of_${kind}}")
+        if("${mode_of_${kind}}" STREQUAL "")
+            rule_failed(R4 "'${kind}' sets FLYWHEEL_DAG_SANITIZE '${mode}', and only a sanitizer kind sets one")
+        else()
+            rule_failed(R4 "'${kind}' sets FLYWHEEL_DAG_SANITIZE '${mode}', not '${mode_of_${kind}}'")
+        endif()
     endif()
 endforeach()
 
@@ -257,6 +290,7 @@ foreach(kind IN LISTS kinds)
         endif()
         json_member(hidden "${preset}" hidden)
         json_member(dir "${preset}" binaryDir)
+        json_member(variables "${preset}" cacheVariables)
         inherits_list(parents "${preset}")
         set(wanted base ${kind} ${host})
         list(SORT parents)
@@ -266,6 +300,9 @@ foreach(kind IN LISTS kinds)
         endif()
         if(NOT "${dir}" STREQUAL "")
             rule_failed(R5 "'${kind}-${host}' sets a binaryDir of its own: '${dir}'")
+        endif()
+        if(NOT "${variables}" STREQUAL "")
+            rule_failed(R5 "'${kind}-${host}' sets cacheVariables of its own: the kind's preset is the one place")
         endif()
         if(NOT "${parents}" STREQUAL "${wanted}")
             rule_failed(R5 "'${kind}-${host}' inherits '${parents}', not '${wanted}'")

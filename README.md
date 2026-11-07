@@ -240,7 +240,7 @@ deallocation off until 19, so libstdc++'s `<new>` does not declare the sized `op
 
 A build tree belongs to one OS and one architecture, so a checkout that is built natively on a Mac and
 in a Linux container needs a tree for each. The trees are named `build/<kind>-<os>-<arch>`.
-`CMakePresets.json` spells out the nine in use, and `cmake --list-presets` shows the ones for your host:
+`CMakePresets.json` spells out the fifteen in use, and `cmake --list-presets` shows the ones for your host:
 
 ```bash
 cmake --preset relwithdebinfo-macos-arm64        # relwithdebinfo-linux-arm64 or -linux-x86_64 on Linux
@@ -248,13 +248,15 @@ cmake --build --preset relwithdebinfo-macos-arm64
 ctest --preset relwithdebinfo-macos-arm64
 ```
 
-The kind says how the tree is built, and is a CMake build type in lower case:
+The kind says how the tree is built, and is a CMake build type in lower case or a sanitizer:
 
 | Kind | Build type | Compiled with | |
 |---|---|---|---|
 | `relwithdebinfo` | `RelWithDebInfo` | `-O2 -g -DNDEBUG` | The project's default, and what CI builds. `assert()` never runs. |
 | `release` | `Release` | `-O3 -DNDEBUG` | |
 | `debug` | `Debug` | `-g`, no optimisation | `assert()` runs. |
+| `asan` | `RelWithDebInfo` | `-O2 -g -DNDEBUG`, `-fsanitize=address,undefined` | AddressSanitizer and UBSan: `FLYWHEEL_DAG_SANITIZE=asan`. |
+| `tsan` | `RelWithDebInfo` | `-O2 -g -DNDEBUG`, `-fsanitize=thread` | ThreadSanitizer: `FLYWHEEL_DAG_SANITIZE=tsan`. |
 
 The OS is `macos` or `linux`, and the architecture is `arm64` or `x86_64` (`aarch64` is spelled
 `arm64`, `amd64` is spelled `x86_64`), so a Linux container on an Apple Silicon Mac builds
@@ -270,7 +272,7 @@ with `-DFLYWHEEL_DAG_SANITIZE=asan` (or `tsan`) to match, since a tree that is n
 is not built with it runs its tests uninstrumented and passes. Other names (`build`, `scratch`) claim
 nothing and are yours.
 
-The presets set the tree and the build type and nothing else. CI also passes
+The presets set the tree, the build type and a sanitizer kind's mode, and nothing else. CI also passes
 `-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local
 configure:
 
