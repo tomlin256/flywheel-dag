@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// canary.cpp — a unit with one defect of its own, which clang-tidy must report (flywheel-dag#60).
+// canary.cpp — a unit with one defect of its own, which clang-tidy must report.
 //
 // The clang_tidy_canary_* tests run clang-tidy on this file, with the real .clang-tidy, after configure has copied
 // it and the two headers under the build tree. It is in no compile database and no target, so the gate over the

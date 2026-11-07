@@ -195,10 +195,10 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # The CRTP bases (OpNodeImpl, NodeImpl, StatefulNodeBase) keep their constructors private to the class they are the
-# base of, so that `class Wrong : public OpNodeImpl<Other>` does not compile (flywheel-dag#60). The suite derives them
-# correctly, so nothing else would notice a constructor that went back to public or protected: this compiles a wrong
-# derivation of each, with -std=c++23 and -fsyntax-only, and expects an access error. Registered for GCC and Clang,
-# at the top level, like test_standard_guard.
+# base of, so that `class Wrong : public OpNodeImpl<Other>` does not compile. The suite derives them correctly, so
+# nothing else would notice a constructor that is public or protected: this compiles a wrong derivation of each, with
+# -std=c++23 and -fsyntax-only, and expects an access error. Registered for GCC and Clang, at the top level, like
+# test_standard_guard.
 if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_test(NAME test_crtp_access
     COMMAND ${CMAKE_COMMAND}
@@ -211,11 +211,11 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that
-# orders atomics only (flywheel-dag#49). Nothing else would notice a fence that went back to std::atomic_thread_fence,
-# or a pragma that stopped working: the suite is not built under ThreadSanitizer, and the default build is not -Werror.
-# This scans the headers for a bare fence, compiles the helper and an engine unit with -fsanitize=thread (compile only,
-# so no ThreadSanitizer runtime is needed), and on GCC checks that a bare fence still draws the warning. Registered for
-# GCC and Clang, at the top level, like test_crtp_access.
+# orders atomics only. Nothing else would notice a bare std::atomic_thread_fence, or a pragma that does not work: the
+# suite is not built under ThreadSanitizer, and the default build is not -Werror. This scans the headers for a bare
+# fence, compiles the helper and an engine unit with -fsanitize=thread (compile only, so no ThreadSanitizer runtime is
+# needed), and on GCC checks that a bare fence draws the warning. Registered for GCC and Clang, at the top level, like
+# test_crtp_access.
 if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_test(NAME test_tsan_fences
     COMMAND ${CMAKE_COMMAND}
@@ -265,7 +265,7 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
 endif()
 
-# The files Claude Code loads stay small (flywheel-dag#70). CLAUDE.md and the engine rules it imports are in every
+# The files Claude Code loads stay small. CLAUDE.md and the engine rules it imports are in every
 # session's context, so they have byte budgets; a CLAUDE.md anywhere in the checkout loads on demand, and Claude Code
 # keeps only the start of one past 40,000 characters, so none may pass 38,000. The budgets are these three numbers,
 # the one place they are written. The check is a plain cmake -P script, so it runs in every tree.
@@ -326,7 +326,7 @@ if(_flywheel_dag_top_level)
     "${_over_claude_md}|${_over_rules}|${_over_nested}|${_missing_claude_md}")
 endif()
 
-# clang-tidy over this project's own sources, as a gate (flywheel-dag#60). The root sets _flywheel_dag_clang_tidy when
+# clang-tidy over this project's own sources, as a gate. The root sets _flywheel_dag_clang_tidy when
 # FLYWHEEL_DAG_CLANG_TIDY names a tool, and has already refused a configure that asked for one it cannot run, so
 # nothing here checks again. Nothing is built: clang-tidy reads compile_commands.json and the sources the build would
 # compile, and FetchContent has put the dependencies' headers in place by now.
@@ -336,7 +336,9 @@ endif()
 #   clang_tidy_version   the tool is LLVM 23. The Mac, the Ubuntu container and CI run one major, and this is what
 #                        stops them drifting apart unseen. Moving to another is one commit: this number, the workflow,
 #                        the Ubuntu image, and whatever the new major reports.
-#   clang_tidy_checks    .clang-tidy enables the families it should, and none of the checks .clangd used to remove.
+#   clang_tidy_checks    .clang-tidy enables the families it should, and none that it leaves out:
+#                        bugprone-easily-swappable-parameters, bugprone-narrowing-conversions, readability-* and
+#                        modernize-*.
 #   clang_tidy_canary_*  three proofs that the gate bites, on fixtures that are in no compile database.
 #
 # A lint gate that silently checks nothing passes CI, which is why the gate itself is tested.

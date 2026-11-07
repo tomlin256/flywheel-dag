@@ -1,5 +1,5 @@
 # check_claude_md_budget.cmake — test_claude_md_budget: the files Claude Code loads stay
-# small (flywheel-dag#70).
+# small.
 #
 # Run by ctest as
 #

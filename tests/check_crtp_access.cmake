@@ -1,5 +1,5 @@
 # check_crtp_access.cmake — test_crtp_access: the engine's three CRTP bases keep their
-# constructors private to the class they are the base of (flywheel-dag#60).
+# constructors private to the class they are the base of.
 #
 # Run by ctest as
 #

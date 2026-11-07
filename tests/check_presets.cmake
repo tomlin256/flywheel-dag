@@ -9,9 +9,8 @@
 #
 # PRESETS_DIR is the directory whose CMakePresets.json is read (default
 # SOURCE_DIR); a hand-made change to a copy of the file is passed here, and must
-# fail the rule that names it (docs/plans/platform_build_dirs_plan.md). README_DIR
-# is the same for R8: the directory whose README.md is read (default SOURCE_DIR)
-# (docs/plans/readme_build_snippets_plan.md). SOURCE_DIR is the checkout whose
+# fail the rule that names it. README_DIR is the same for R8: the directory whose
+# README.md is read (default SOURCE_DIR). SOURCE_DIR is the checkout whose
 # cmake/flywheel_dag_platform.cmake spells the hosts.
 #
 # CMake rejects a field it does not know, so the file cannot carry its own

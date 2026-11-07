@@ -1,6 +1,6 @@
 # check_tsan_fences.cmake — test_tsan_fences: the engine issues its standalone fences through
 # dag::threadFence(), and a translation unit that uses them compiles under -fsanitize=thread without
-# GCC's -Wtsan (flywheel-dag#49).
+# GCC's -Wtsan.
 #
 # Run by ctest as
 #
@@ -11,8 +11,8 @@
 # std::atomic_thread_fence, and GCC (11 and later) says so with -Wtsan at every fence it compiles under
 # -fsanitize=thread, which -Werror makes an error. CycleSeqLock's four fences order atomics only, where the
 # warning costs nothing, so they go through dag::threadFence<Order>() (dag_thread_fence.hpp), which turns
-# the warning off for that one call on GCC. Nothing else would notice a fence that went back to
-# std::atomic_thread_fence, or a pragma that stopped working: the suite is not built under ThreadSanitizer,
+# the warning off for that one call on GCC. Nothing else would notice a bare
+# std::atomic_thread_fence, or a pragma that does not work: the suite is not built under ThreadSanitizer,
 # and the default build is not -Werror.
 #
 # Four things are held:

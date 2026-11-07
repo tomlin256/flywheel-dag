@@ -1,6 +1,6 @@
 # check_cmake_diagnostics.cmake — test_cmake_diagnostics: the strict configure flags are
 # spelled the way CMake 4.4 spells them wherever they are written, and they make a CMake
-# author warning and a deprecation fail a configure (flywheel-dag#59).
+# author warning and a deprecation fail a configure.
 #
 # Run by ctest as
 #
@@ -8,7 +8,7 @@
 #         -P check_cmake_diagnostics.cmake
 #
 # CI configures with -Werror=author -Werror=deprecated, so any CMake author or
-# deprecation warning, ours or a dependency's, fails the run. CMake 4.4 renamed the
+# deprecation warning, ours or a dependency's, fails the run. CMake 4.4 calls the
 # "dev" category "author": -Werror=dev still works there and prints "The error=dev
 # option is deprecated". A CMake before 4.4 has no categories and ignores
 # -Werror=author, or any other -W it does not know, without a word. So a gate spelled
@@ -99,7 +99,7 @@ if(CMAKE_VERSION VERSION_LESS 4.4)
 else()
     set(cases 0)
 
-    # The issue's symptom: a clean project, the strict flags, and no notice.
+    # A clean project, configured with the strict flags, exits 0 and prints no notice.
     probe(rc out clean STATUS ${strict_flags})
     if(NOT rc STREQUAL "0")
         string(APPEND problems "  ${strict_text} on a clean project exited ${rc}:\n${out}\n")
@@ -134,7 +134,8 @@ else()
     endif()
     math(EXPR cases "${cases} + 1")
 
-    # The old spelling is not clean on this CMake, so the first case can fail.
+    # -Werror=dev draws a notice or fails on this CMake. Were it clean, the clean run
+    # of the strict flags in the first case would prove nothing.
     probe(rc out stale STATUS ${stale_flag})
     failed(rc did_fail)
     if(NOT did_fail AND NOT out MATCHES "option is deprecated")

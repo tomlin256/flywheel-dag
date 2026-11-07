@@ -7,8 +7,8 @@
 // full license information.
 // =============================================================================
 
-// canary_dep.hpp — a header that clang-tidy must not report on, because it sits where a dependency's would
-// (flywheel-dag#60). See canary.cpp.
+// canary_dep.hpp — a header that clang-tidy must not report on, because it sits where a dependency's would.
+// See canary.cpp.
 
 #pragma once
 

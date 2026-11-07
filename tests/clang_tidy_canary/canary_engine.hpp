@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// canary_engine.hpp — a header that clang-tidy must report on when it sits under include/flywheel/ (flywheel-dag#60).
+// canary_engine.hpp — a header that clang-tidy must report on when it sits under include/flywheel/.
 // See canary.cpp.
 
 #pragma once

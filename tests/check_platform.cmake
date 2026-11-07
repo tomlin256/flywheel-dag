@@ -9,7 +9,7 @@
 # SOURCE_DIR is the checkout whose module is under test. The module's two
 # functions are pure; a "name" below is a tree's own name, the last component
 # of its path. A hand-made change to a copy of the module is passed here, and
-# must fail the row that names it (docs/plans/platform_build_dirs_plan.md).
+# must fail the row that names it.
 
 cmake_minimum_required(VERSION 4.0)
 
