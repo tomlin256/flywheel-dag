@@ -164,8 +164,7 @@ TEST(ReplayCoordinator, EngineRunCompletesUnattended) {
 }
 
 // A coordinator the engine already flushes inside a registry is not added again: flushed twice,
-// it would advance two groups in a cycle, and a replayed source would never see the one between
-// (flywheel-dag#36).
+// it would advance two groups in a cycle, and a replayed source would never see the one between.
 TEST(ReplayCoordinator, ACoordinatorAddedAgainAdvancesOneGroupPerCycle) {
     Engine engine;
     auto coord = ReplayCoordinator::make({{1, 100}, {2, 200}, {3, 300}}, /*drain*/ 1);
@@ -181,7 +180,7 @@ TEST(ReplayCoordinator, ACoordinatorAddedAgainAdvancesOneGroupPerCycle) {
 }
 
 // A coordinator two registries hold is flushed once a cycle, though neither registry can see the
-// other (flywheel-dag#37).
+// other.
 TEST(ReplayCoordinator, ACoordinatorInTwoRegistriesAdvancesOneGroupPerCycle) {
     Engine engine;
     auto coord = ReplayCoordinator::make({{1, 100}, {2, 200}, {3, 300}}, /*drain*/ 1);

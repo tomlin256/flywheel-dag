@@ -116,7 +116,7 @@ TEST(RingBuffer, PopBackRemovesTheNewest) {
 TEST(RingBuffer, OrderingSurvivesRepeatedWraps) {
     constexpr std::size_t kCap = 5;
     RingBuffer<int> rb(kCap);
-    std::deque<int> reference;   // the container this replaces, as the oracle
+    std::deque<int> reference;   // the oracle: a std::deque slid the same way
 
     for (int i = 0; i < 200; ++i) {
         if (rb.full()) {

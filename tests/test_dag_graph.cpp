@@ -304,7 +304,7 @@ TEST(DagGraph, AKindWithNoEntryIsDrawnAsAWhiteBox) {
 
 // ── toSvg() ───────────────────────────────────────────────────────────────────
 // toSvg() starts `dot` without a shell, so the paths it is given are arguments
-// and nothing else (flywheel-dag#62). Each test builds a scratch directory of
+// and nothing else. Each test builds a scratch directory of
 // its own and puts a stand-in `dot` first on PATH: a /bin/sh script that
 // records the arguments it receives, NUL-separated so that a newline in a path
 // survives, and the variable FLYWHEEL_DAG_TEST_ENV; writes "<svg/>" to the file
@@ -681,7 +681,7 @@ TEST_F(DagGraphToSvg, RefusesAPathWithANul) {
 
 // ── Test 31: dotPathFor() is the file toSvg() keeps, when there is no dot ────
 // A caller that could not render learns where the DOT text is from dotPathFor()
-// and from nothing else (flywheel-dag#68). For each name that tells a case of the
+// and from nothing else. For each name that tells a case of the
 // rule apart (an extension replaced, one gained, a name that is only an extension,
 // a dot in a directory name, .dot in either case) it is the string the documented
 // rule gives and the one file toSvg() left. Each name has a directory of its own,

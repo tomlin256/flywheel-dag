@@ -38,9 +38,9 @@ public:
 
     /// Splice in an input this node does not own, to close a cycle in the
     /// inputs() graph. inputs_ owns what it lists, so a back edge held there
-    /// would leave the two nodes keeping each other alive after the test
-    /// (flywheel-dag#48); a weak one is listed by inputs() for as long as its
-    /// target lives, which is all a walk needs.
+    /// would leave the two nodes keeping each other alive after the test; a
+    /// weak one is listed by inputs() for as long as its target lives, which is
+    /// all a walk needs.
     void appendWeakInput(const NodePtr& extra) {
         weakInputs_.push_back(extra);
     }
@@ -127,8 +127,8 @@ TEST(DagTraversal, DiamondDedupes) {
 // node once and reaches end().
 //
 // The back edge is weak, so the pair does not keep itself alive: both nodes
-// have expired once the block that owns them ends. A strong one leaks them
-// (flywheel-dag#48), which a build with no leak checker only sees here.
+// have expired once the block that owns them ends. A strong one leaks them,
+// which a build with no leak checker only sees here.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(DagTraversal, FeedbackCycleTerminates) {
     std::weak_ptr<TestNode> weakA;
