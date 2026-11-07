@@ -263,9 +263,12 @@ the compiler and the target. CMake itself stops with "The current CMakeCache.txt
 different than the directory …" when two platforms see the checkout at different paths, as a Mac and a
 container do. It cannot see a name that lies, or two platforms at one path, so the top-level
 `CMakeLists.txt` refuses both. A directory whose name claims a platform (`release-linux-arm64`,
-`linux-x86_64`, `asan-macos-arm64-clang`) must be `[<kind>-]<os>-<arch>` for the host, with anything
+`linux-x86_64`, `release-macos-arm64-clang`) must be `[<kind>-]<os>-<arch>` for the host, with anything
 after the architecture free, and every tree remembers the platform of its first configure and refuses a
-configure from another. Other names (`build`, `scratch`) claim nothing and are yours.
+configure from another. A kind of `asan` or `tsan` also claims a sanitizer: the tree must be configured
+with `-DFLYWHEEL_DAG_SANITIZE=asan` (or `tsan`) to match, since a tree that is named for a sanitizer and
+is not built with it runs its tests uninstrumented and passes. Other names (`build`, `scratch`) claim
+nothing and are yours.
 
 The presets set the tree and the build type and nothing else. CI also passes
 `-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local

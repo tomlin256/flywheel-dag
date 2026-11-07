@@ -14,6 +14,11 @@
 # CMakePresets.json spells out the ones in use. <kind> is one lower-case word,
 # usually a CMake build type, <os> is macos or linux, and <arch> is arm64 or
 # x86_64. The tree's name is the last component of its path.
+#
+# A kind may also be a sanitizer, asan or tsan, and the tree must then be
+# configured for it (FLYWHEEL_DAG_SANITIZE, flywheel_dag_sanitize.cmake): a tree
+# named for a sanitizer that is not on is a label that lies, and its tests run
+# uninstrumented and pass.
 
 # flywheel_dag_platform(<out> <system-name> <machine>)
 #
@@ -38,12 +43,13 @@ function(flywheel_dag_platform out system_name machine)
     set(${out} "${os}-${arch}" PARENT_SCOPE)
 endfunction()
 
-# flywheel_dag_tree_problem(<out> <name> <platform> <recorded>)
+# flywheel_dag_tree_problem(<out> <name> <platform> <recorded> <sanitize>)
 #
 # Sets <out> to empty, or to the error text for the first problem with a tree
 # called <name> on a host of <platform>. <recorded> is the platform the tree
-# remembers from its first configure, or empty on a first configure. There are
-# two kinds of problem, and the guard refuses a false claim and nothing else:
+# remembers from its first configure, or empty on a first configure. <sanitize>
+# is the tree's FLYWHEEL_DAG_SANITIZE, or empty for none. There are three kinds
+# of problem, and the guard refuses a false claim and nothing else:
 #
 #  - The name claims a platform that is not the host's. A name claims one when
 #    it has the shape of a platform tree, an optional kind and then macos or
@@ -53,10 +59,15 @@ endfunction()
 #    Names are compared in lower case, because the bind mount a container sees
 #    is case-insensitive. Any other name (build, scratch, release-linuxbrew)
 #    claims nothing and is not examined.
+#  - The name is a platform tree for the host whose kind is asan or tsan, and
+#    <sanitize> is not that mode. The mode is compared exactly, as the option
+#    compares it, and nothing else is required of a sanitizer tree:
+#    release-linux-arm64 may be configured for a sanitizer, and a name that
+#    claims no platform (asan-scratch) is not examined.
 #  - The tree remembers a platform that is not the host's. That covers a name
 #    that claims nothing, and two hosts that see the checkout at the same path,
 #    which CMake's own check of the source path cannot tell apart.
-function(flywheel_dag_tree_problem out name platform recorded)
+function(flywheel_dag_tree_problem out name platform recorded sanitize)
     set(${out} "" PARENT_SCOPE)
     string(TOLOWER "${name}" lowered)
 
@@ -72,6 +83,16 @@ function(flywheel_dag_tree_problem out name platform recorded)
             string(REGEX MATCH "(macos|linux)(-[a-z0-9_]+)?" claimed "${lowered}")
             set(${out} "flywheel-dag: the build directory \"${name}\" is for ${claimed}, but this host is ${platform}. ${advice}" PARENT_SCOPE)
             return()
+        elseif(lowered MATCHES "^(asan|tsan)-")
+            set(mode "${CMAKE_MATCH_1}")
+            if(NOT "${sanitize}" STREQUAL "${mode}")
+                set(shown "${sanitize}")
+                if("${shown}" STREQUAL "")
+                    set(shown OFF)
+                endif()
+                set(${out} "flywheel-dag: the build directory \"${name}\" is named for the ${mode} sanitizer, but FLYWHEEL_DAG_SANITIZE is '${shown}'. A tree named for a sanitizer must be configured for it, or its tests run uninstrumented and pass for nothing: use -DFLYWHEEL_DAG_SANITIZE=${mode}, or name the tree for what it is." PARENT_SCOPE)
+                return()
+            endif()
         endif()
     endif()
 

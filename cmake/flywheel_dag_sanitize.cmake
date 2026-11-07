@@ -22,6 +22,9 @@
 # The options go in front of every FetchContent dependency (see the root CMakeLists.txt), so third-party code is instrumented too.
 # ThreadSanitizer needs that: it only sees synchronisation it can intercept or instrument, so a lock-free handshake inside
 # uninstrumented code reads as a race on our side.
+#
+# The build-tree guard (flywheel_dag_platform.cmake) compares a tree's name with these modes: a platform tree whose kind is asan or
+# tsan must be configured for that mode.
 
 # flywheel_dag_sanitizer_flags(<mode> <compile-out> <link-out>)
 #

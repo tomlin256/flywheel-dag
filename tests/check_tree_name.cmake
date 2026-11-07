@@ -1,6 +1,7 @@
 # check_tree_name.cmake — test_tree_name: the real top-level CMakeLists.txt
-# refuses a build tree named for another platform before it detects a compiler,
-# and records the platform of the first configure.
+# refuses a build tree named for another platform, or for a sanitizer it is not
+# configured for, before it detects a compiler, and records the platform of the
+# first configure.
 #
 # Run by ctest as
 #
@@ -15,8 +16,8 @@
 # under test, and the other architecture is the lie. test_platform_name holds the
 # module to a table; this holds CMakeLists.txt to its wiring: that the guard runs
 # at the top level only and before project(), that it reads the host's
-# architecture where CMake knows it, and that the first half and the second both
-# stop a configure.
+# architecture where CMake knows it, that it hands the guard the sanitizer mode
+# the configure was given, and that each kind of problem stops a configure.
 
 cmake_minimum_required(VERSION 4.0)
 
@@ -138,6 +139,14 @@ expect_configures("configure: relwithdebinfo-${host} configures again" "${tree}"
 expect_configures("configure: build configures and records the platform" "${SCRATCH_DIR}/build/build")
 expect_configures("configure: ${host} (no kind) configures" "${SCRATCH_DIR}/build/${host}")
 
+# A sanitizer tree configured for the mode in its name, a sanitizer in a tree that is not named for one, and a kind that only starts
+# like a sanitizer's.
+expect_configures("configure: asan-${host}-gcc13 with the asan mode configures"
+                  "${SCRATCH_DIR}/build/asan-${host}-gcc13" -DFLYWHEEL_DAG_SANITIZE=asan)
+expect_configures("configure: release-${host} with the asan mode configures"
+                  "${SCRATCH_DIR}/build/release-${host}" -DFLYWHEEL_DAG_SANITIZE=asan)
+expect_configures("configure: asanx-${host} with no mode configures" "${SCRATCH_DIR}/build/asanx-${host}")
+
 # ── trees that do not ───────────────────────────────────────────────────────
 expect_refused("configure: a free-form tree that remembers ${other} is refused"
                "${SCRATCH_DIR}/build/scratch"
@@ -152,6 +161,15 @@ expect_refused("configure: ${other} (no kind) is refused"
 expect_refused("configure: release-${os} is refused"
                "${SCRATCH_DIR}/build/release-${os}"
                "\"release-${os}\" is for ${os}, but this host is ${host}")
+# The text names the tree, the sanitizer in its name and the mode it was given. The second tree has the same name in another parent
+# directory, so that no case configures over what another left behind.
+expect_refused("configure: asan-${host} with no mode is refused and leaves no compiler entry"
+               "${SCRATCH_DIR}/build/asan-${host}"
+               "\"asan-${host}\" is named for the asan sanitizer, but FLYWHEEL_DAG_SANITIZE is 'OFF'")
+expect_refused("configure: asan-${host} with the tsan mode is refused"
+               "${SCRATCH_DIR}/tsan-mode/asan-${host}"
+               "\"asan-${host}\" is named for the asan sanitizer, but FLYWHEEL_DAG_SANITIZE is 'tsan'"
+               -DFLYWHEEL_DAG_SANITIZE=tsan)
 
 # ── a consumer is never examined ─────────────────────────────────────────────
 # The engine, pulled in as a subproject, sees a tree named for the other

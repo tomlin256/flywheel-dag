@@ -419,7 +419,7 @@ runs are not in, that is said in the Outcome, the issue stays open, and the rest
 | 0 Approval | Done | Approved 2026-11-07; the plan is on `main` and flywheel-dag#45 has a comment that links it |
 | 1 The option | Done | Red then green for both tests, 14 hand-made changes, 81 of 81 on the Mac and in `ubuntu-dev` |
 | 2 Canaries, coverage, first pass | Done | Five tests added; 17 script mutants and A to E red; no report in four first-pass runs; default 82 of 82, asan 85 of 85, tsan 84 of 84, on the Mac and in `ubuntu-dev` |
-| 3 The guard | Not started | |
+| 3 The guard | Done | Red then green for both tests, 9 hand-made changes, 82 of 82 on the Mac and in `ubuntu-dev` |
 | 4 The presets | Not started | |
 | 5 The workflow and its check | Not started | |
 | 6 First dispatches, schedule, docs | Not started | |
@@ -544,3 +544,48 @@ asan tree 85 of 85 and the tsan tree 84 of 84, with CI's strict flags, no warnin
 no-report branch, the floors and the link side of the coverage check would otherwise be held by the mutants alone, and a regression
 in either script would first show in a nightly sanitizer run. It costs one test in every tree (about 0.5 s), so the counts of
 Steps 2 to 5 are one higher than they were.
+
+### Step 3 — The guard (2026-11-07)
+
+*Red then green.* `test_platform_name` and `test_tree_name` were extended first and run on the unchanged module and root: 8 of 56
+cases red in the first (every refusal of a sanitizer tree was accepted) and 2 of 14 in the second (`asan-<host>` configured with no
+mode and with `tsan`). With the fifth argument, the rule and the root's call, 56 of 56 and 14 of 14. The first test had 34 cases and
+the second 9.
+
+*What a user sees.* `cmake -S . -B build/asan-macos-arm64` on the Mac stops before compiler detection with: the build directory
+"asan-macos-arm64" is named for the asan sanitizer, but `FLYWHEEL_DAG_SANITIZE` is 'OFF'; a tree named for a sanitizer must be
+configured for it, or its tests run uninstrumented and pass for nothing: use `-DFLYWHEEL_DAG_SANITIZE=asan`, or name the tree for what
+it is. With the mode it configures. A false platform claim is named before a missing sanitizer, and a name that claims no platform
+(`asan-scratch`, `tsan`) is not examined.
+
+*Hand-made changes.* Each is a scratch copy of the working tree with one text change, run through both real checks; the control
+passes both. M1 to M3 are the plan's three.
+
+| # | Change | `test_platform_name` | `test_tree_name` |
+|---|---|---|---|
+| | control | pass | pass |
+| M1 | the rule deleted | red: the 8 refusals accepted | red: `asan-<host>` configured, with no mode and with `tsan` |
+| M2 | the kind matched without its dash | red: `asanx-linux-arm64` refused | red: `asanx-<host>` does not configure |
+| M3 | the message hides the value of `FLYWHEEL_DAG_SANITIZE` | red: the text lacks it | red: the output lacks it |
+| M4 | the message hides the sanitizer in the name | red | red |
+| M5 | the message hides the tree | red | red |
+| M6 | any mode accepted once one is set | red: `tsan` for `asan-…`, `asan` for `tsan-…`, `OFF` for `tsan-…` accepted | red: `asan-<host>` with `tsan` configured |
+| M7 | the mode compared in lower case | red: `ASAN` accepted | pass |
+| M8 | the rule widened to names that claim no platform | red: `asan-scratch` refused | pass |
+| M9 | the root passes an empty mode | pass | red: `asan-<host>-gcc13` with `asan` refused, and the `tsan` case reports `OFF` |
+
+M7 and M8 are held by `test_platform_name` alone because the table has the cases and a real configure adds nothing; M9 only a real
+configure can see, since the function is pure.
+
+*Checkpoint.* Mac (Apple clang 21) 82 of 82 and `ubuntu-dev` (GCC 13.3) 82 of 82, CI's strict flags, no warning, both trees current
+so nothing was rebuilt; the two scratch sanitizer trees of Step 2 reconfigure under the new root (their names claim no platform) and
+pass their sanitizer tests. `test_tree_name` takes about 4.6 s for its 14 configures (2.7 s for 9 before).
+
+*Docs.* The README sentence on the guard names the sanitizer rule, and its example of a platform claim, `asan-macos-arm64-clang`, is
+now `release-macos-arm64-clang`: with the rule, the old example is refused without the mode. The plan's Step 3 did not list the
+README; the sentence would have been false after this commit. The three hand-made trees under `build/` are left for Step 4 (D6):
+re-running CMake in `asan-linux-arm64`, `tsan-linux-arm64` or `tsan-macos-arm64` now stops with the message above until they are
+deleted. The header comment of `cmake/flywheel_dag_sanitize.cmake` and the root's comment on the guard say what is true now.
+
+*Sibling repo.* The header of cryptocogs's platform module says that flywheel-dag's copy has no sanitizer rule, which is no longer
+true; tomlin256/cryptocogs#63 records it, with a suggested sentence. Nothing in that repository was edited.

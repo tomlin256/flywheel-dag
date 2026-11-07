@@ -45,14 +45,18 @@ endif()
 # A build tree belongs to one OS and one architecture, and a checkout that is
 # built on macOS and in a Linux container needs a tree for each:
 # build/<kind>-<os>-<arch>, which CMakePresets.json spells out. This refuses a
-# tree whose name claims another platform, and a tree that was first configured
-# on another, before project() detects a compiler. cmake/flywheel_dag_platform.cmake
-# has the rules and the reasons.
+# tree whose name claims another platform, a tree named for a sanitizer
+# (asan-..., tsan-...) that is not configured for it, and a tree that was first
+# configured on another platform, before project() detects a compiler.
+# cmake/flywheel_dag_platform.cmake has the rules and the reasons.
 #
 # It runs before project() so that a refused tree is left with no compiler
 # detected, and it asks for the architecture with cmake_host_system_information():
-# CMAKE_HOST_SYSTEM_PROCESSOR is empty until project(). The top level only: a
-# consumer's tree is the consumer's, and test_tree_name holds that.
+# CMAKE_HOST_SYSTEM_PROCESSOR is empty until project(). It reads
+# FLYWHEEL_DAG_SANITIZE from the cache, where the command line, a preset or an
+# earlier configure has put it, because the option is declared further down.
+# The top level only: a consumer's tree is the consumer's, and test_tree_name
+# holds that.
 # ─────────────────────────────────────────────────────────────────────────────
 if(_flywheel_dag_top_level)
     include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_platform.cmake)
@@ -60,7 +64,7 @@ if(_flywheel_dag_top_level)
     flywheel_dag_platform(_flywheel_dag_platform "${CMAKE_HOST_SYSTEM_NAME}" "${_flywheel_dag_machine}")
     get_filename_component(_flywheel_dag_tree_name "${CMAKE_BINARY_DIR}" NAME)
     flywheel_dag_tree_problem(_flywheel_dag_tree_problem "${_flywheel_dag_tree_name}"
-        "${_flywheel_dag_platform}" "${FLYWHEEL_DAG_TREE_PLATFORM}")
+        "${_flywheel_dag_platform}" "${FLYWHEEL_DAG_TREE_PLATFORM}" "${FLYWHEEL_DAG_SANITIZE}")
     if(NOT "${_flywheel_dag_tree_problem}" STREQUAL "")
         message(FATAL_ERROR "${_flywheel_dag_tree_problem}")
     endif()
