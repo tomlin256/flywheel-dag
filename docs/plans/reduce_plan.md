@@ -1,7 +1,7 @@
 # A Subgraph as a Function: `dag::reduce()`
 
-**Status: Proposed (2026-11-11), not yet approved to start.** D5 and D9 are answered (2026-11-11). Nothing in the
-repository has changed but this file.
+**Status: Approved 2026-11-11, in progress.** D5 and D9 are answered (2026-11-11). The Progress table says which step
+the work is at, and the Outcome at the end what each finished step measured and where it departed from this plan.
 
 Closes [flywheel-dag#55](https://github.com/tomlin256/flywheel-dag/issues/55).
 
@@ -394,6 +394,16 @@ calls).
 *Done when:* red then green; the checkpoint passes at 84 tests; `dag_reduce.hpp` compiles as a unit's only include under
 all three compilers; each change fails as stated; pushed. Commit: `feat: reduce a subgraph of ops to a function`.
 
+*As built* (the Outcome has the results). Four tests more than the table, for code the table does not name:
+`Reduction.MovesWithItsBinding`, for the move operations, and a suite for the two views a node and a step are handed,
+`ReduceContract.InputsAreAViewOfTheReductionsValues`, `ReduceContract.ReadsRecordsWhatANodeNames` (a deciding input
+stays one when the node then names it as read, and an input the node does not have is `std::out_of_range`) and
+`ReduceContract.ANodeReadsEveryInputUnlessItSaysOtherwise`. `Counted` is a template over the type its input holds, so
+that a step can read an int, and can be built to give no step, which is the second reason a node is a barrier.
+`IsUnboundUntilABindSucceeds` makes its bind throw at a barrier, part of the way through, where the table said nothing
+of how. `IReduceStep::partials()` arrives with the gradient in Step 4: until then nothing would call it, and no test
+could hold it.
+
 ### Step 2 — Compute nodes, and which functors may be called, one commit
 
 `dag.hpp` and `dag.inl`: `ComputeNode` and `InPlaceComputeNode` derive `IReducible`, with a step when `Lazy`; the
@@ -589,11 +599,51 @@ recorded here. Commit: `build: release v1.3.0`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 Approval | In progress | Pushed and linked from flywheel-dag#55; D5 and D9 answered 2026-11-11. Waiting for your word to start. |
-| 1 The contract, the ops, and a reduction's values | Not started | |
+| 0 Approval | Done | Pushed and linked from flywheel-dag#55; D5 and D9 answered, and the plan approved, 2026-11-11. |
+| 1 The contract, the ops, and a reduction's values | Done | 2026-11-11. 22 tests; the checkpoint at 84; 15 hand-made changes caught. See the Outcome. |
 | 2 Compute nodes, and which functors may be called | Not started | |
 | 3 Selection and tweaks | Not started | |
 | 4 The gradient | Not started | |
 | 5 In an engine, and the benchmark row | Not started | |
 | 6 Example, docs, follow-ups | Not started | |
 | 7 Release v1.3.0 | Not started | |
+
+## Outcome
+
+The prototype of "What I checked" was not kept, so the code is written again from this plan, test first.
+
+### Step 1 — the contract, the ops, and a reduction's values (2026-11-11)
+
+- **Red, then green.** With the suite written and registered, the build stopped at `'flywheel/dag_reduce.hpp' file not
+  found`. With the code, every test passed at the first build that compiled: 18 then, 22 with the four added since.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 84 of 84 | 43 of 43 (LLVM 23.1.4) | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 84 of 84 | 43 of 43 (LLVM 23.1.6) | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 22 of 22 | not run | equal |
+
+  The same Mac run on the commit before gave 83 of 83 and 42 of 42. `dag_reduce.hpp` compiles as a unit's only include
+  under all three compilers.
+- **The hand-made changes**, each on a scratch copy of `include/` and `tests/`, with each test run alone under a
+  watchdog and a control that passed 22 of 22. Each of the twelve fails the test its row names. Three fail other tests
+  too, for reasons read from their logs:
+  - *The walk follows every input* also fails `IsUnboundUntilABindSucceeds`, `ADecidingInputAnArgumentMovesIsABarrier`
+    and `ANodeThatReadsNothingIsAConstant`: every test whose graph holds a `Chooser`, the one node that reads fewer
+    inputs than it has.
+  - *A candidate with no `IReducible` is taken as a constant* also fails `IsUnboundUntilABindSucceeds`, whose failing
+    bind is a barrier.
+  - *The n-ary step folds from the last input* also fails `MatchesTheGraphAtEveryPoint`, by one unit in the last place
+    of a three-term sum.
+
+  Two rows were made in a form that keeps the rest of the suite meaningful: *the walk goes on above an argument* as "an
+  argument that has inputs is walked like any other node", and *a candidate that reads nothing an argument moves is
+  given a step* as "it counts as moved by the first argument".
+- **Three more changes**, for the tests the table did not name:
+
+  | Change made by hand, then reverted | Fails |
+  |---|---|
+  | `ReduceReads::reads()` overwrites a deciding input | `ReduceContract.ReadsRecordsWhatANodeNames` alone |
+  | `IReducible::reduceReads()` names no input by default | `ReduceContract.ANodeReadsEveryInputUnlessItSaysOtherwise`, and 16 of the `Reduction` tests |
+  | `ReduceInputs` ignores the positions it is given | `ReduceContract.InputsAreAViewOfTheReductionsValues`, and 7 of the `Reduction` tests |

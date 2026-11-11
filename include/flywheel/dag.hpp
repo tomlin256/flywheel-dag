@@ -27,7 +27,10 @@
 #include <utility>
 #include <optional>
 #include <type_traits>
+#include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
 
 namespace dag {
 
@@ -497,6 +500,101 @@ private:
 // hand, through listeners.
 // ─────────────────────────────────────────────────────────────────────────────
 void wire(const NodePtr& self, const std::vector<NodePtr>& ins);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The reduction contract — how a node lets a dag::Reduction (dag_reduce.hpp)
+// apply its function at values the graph does not hold.
+//
+// A Reduction turns the nodes between some argument nodes and a root into a
+// function of the arguments. It evaluates no node. It asks each node that an
+// argument reaches for a STEP: the node's function, applied to values the
+// reduction hands it, and published through storage the step owns. So a call
+// moves nothing in the graph: no node's cached value, slot, state or dirty
+// flag.
+//
+// IReducible is a mixin, like ITweakable, IStatefulNode and
+// aad::IDifferentiable. A Reduction finds it with dynamic_cast, so INode and
+// NodeBase do not change, and neither does a node that does not implement it.
+// A node without it is a BARRIER: a Reduction cannot be bound at a point where
+// an argument moves an input the node reads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The values a step applies its node's function to: one per input of the node,
+/// in inputs() order. A view of the reduction's values, good for the one call.
+class ReduceInputs {
+public:
+    /// Input i's value is values[positions[i]].
+    ReduceInputs(std::span<const ValuePtr> values, std::span<const std::size_t> positions) noexcept;
+
+    /// The number of inputs the node has.
+    std::size_t size() const noexcept;
+
+    /// Input i's value, for i < size(). Null for an input the node's
+    /// reduceReads() did not name at the point the reduction is bound to.
+    const ValuePtr& operator[](std::size_t i) const noexcept;
+
+private:
+    std::span<const ValuePtr>    values_;
+    std::span<const std::size_t> positions_;
+};
+
+/// What IReducible::reduceReads() writes: which of its inputs a node's value
+/// depends on at the values the graph holds now.
+class ReduceReads {
+public:
+    enum class Use : std::uint8_t { Unread, Read, Decides };
+
+    /// One Use per input of the node, each Unread until the node names it.
+    explicit ReduceReads(std::span<Use> inputs) noexcept;
+
+    /// The number of inputs the node has.
+    std::size_t size() const noexcept;
+
+    /// The node's value depends on inputs()[input] here. Throws
+    /// std::out_of_range for an input the node does not have.
+    void reads(std::size_t input);
+
+    /// The same, and the input's value chose which inputs the node reads, as
+    /// the input a node selects by does. A Reduction is bound to the choice the
+    /// graph made, so it refuses a point where an argument moves such an input.
+    void decides(std::size_t input);
+
+private:
+    Use& at(std::size_t input);
+
+    std::span<Use> inputs_;
+};
+
+/// One node's function, held by a Reduction and applied at each call.
+class IReduceStep {
+public:
+    virtual ~IReduceStep() = default;
+
+    /// The node's value at these input values. It applies the node's function
+    /// and nothing else: no equality policy, which compares with the value the
+    /// node last published and so has a history. It publishes through storage
+    /// of its own, never the node's, and a warm call should not allocate
+    /// (ValueSlot). Eval thread only, like eval().
+    virtual ValuePtr apply(const ReduceInputs& in) = 0;
+};
+
+class IReducible {
+public:
+    virtual ~IReducible() = default;
+
+    /// A step that applies this node's function, or null when nothing says the
+    /// function may be called at other values. A Reduction asks once, when it
+    /// is built, and keeps the step.
+    virtual std::unique_ptr<IReduceStep> reduceStep() = 0;
+
+    /// The inputs this node's value depends on at the values the graph holds
+    /// now. The default is every input. A node that reads fewer says so here:
+    /// a Reduction then never reads the others, which can be stale, and a
+    /// barrier among them is not one. It pulls what it must with eval(ctx), as
+    /// eval() does. A Reduction asks only a clean node, at each bind(), so
+    /// every pull returns a cached value.
+    virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input<T> — leaf node.

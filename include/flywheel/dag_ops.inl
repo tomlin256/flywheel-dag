@@ -77,6 +77,22 @@ bool UnaryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
     }
 }
 
+// The step holds nothing of the node: Op{} is built at each call, as in eval(),
+// and the value is published through a slot of the step's own.
+template<typename T, typename Op>
+class UnaryOpNode<T,Op>::Step final : public IReduceStep {
+public:
+    ValuePtr apply(const ReduceInputs& in) override {
+        return slot_.emit(Op{}(get_value<T>(in[0])));
+    }
+
+private:
+    ValueSlot<T> slot_;
+};
+
+template<typename T, typename Op>
+std::unique_ptr<IReduceStep> UnaryOpNode<T,Op>::reduceStep() { return std::make_unique<Step>(); }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BinaryOpNode<T, Op>
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +148,20 @@ bool BinaryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
         return false;
     }
 }
+
+template<typename T, typename Op>
+class BinaryOpNode<T,Op>::Step final : public IReduceStep {
+public:
+    ValuePtr apply(const ReduceInputs& in) override {
+        return slot_.emit(Op{}(get_value<T>(in[0]), get_value<T>(in[1])));
+    }
+
+private:
+    ValueSlot<T> slot_;
+};
+
+template<typename T, typename Op>
+std::unique_ptr<IReduceStep> BinaryOpNode<T,Op>::reduceStep() { return std::make_unique<Step>(); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NAryOpNode<T, Op>
@@ -199,6 +229,25 @@ bool NAryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
         return false;
     }
 }
+
+// eval()'s fold, in eval()'s order, from the identity: a sum of doubles depends
+// on the order it is taken in, and the step's value is the node's to the bit.
+template<typename T, typename Op>
+class NAryOpNode<T,Op>::Step final : public IReduceStep {
+public:
+    ValuePtr apply(const ReduceInputs& in) override {
+        T total = Op::identity();
+        Op op{};
+        for (std::size_t i = 0; i < in.size(); ++i) total = op(total, get_value<T>(in[i]));
+        return slot_.emit(std::move(total));
+    }
+
+private:
+    ValueSlot<T> slot_;
+};
+
+template<typename T, typename Op>
+std::unique_ptr<IReduceStep> NAryOpNode<T,Op>::reduceStep() { return std::make_unique<Step>(); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Derivative<Op>

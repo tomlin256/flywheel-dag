@@ -63,11 +63,16 @@ namespace dag::ops {
 // Every op is an aad::IDifferentiable. Each arity template implements
 // partials() from Derivative<Op>, and returns false for an op over a type
 // other than double or an Op with no specialisation.
+//
+// Every op is an IReducible too, and always gives a step: Op{}, applied to the
+// values a Reduction hands it. It reads every input, which is IReducible's
+// default.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Derived>
 class OpNodeImpl
     : public NodeBase
     , public aad::IDifferentiable
+    , public IReducible
     , public std::enable_shared_from_this<Derived>
 {
 public:
@@ -111,9 +116,12 @@ public:
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
     bool partials(EvalContext& ctx, aad::Partials& out) override;
+    std::unique_ptr<IReduceStep> reduceStep() override;
 
 private:
     UnaryOpNode(std::string name, NodePtr a, EqualityPolicyPtr eq);
+
+    class Step;
 
     std::string name_;
     NodePtr a_;
@@ -135,9 +143,12 @@ public:
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
     bool partials(EvalContext& ctx, aad::Partials& out) override;
+    std::unique_ptr<IReduceStep> reduceStep() override;
 
 private:
     BinaryOpNode(std::string name, NodePtr a, NodePtr b, EqualityPolicyPtr eq);
+
+    class Step;
 
     std::string name_;
     NodePtr a_, b_;
@@ -163,9 +174,12 @@ public:
     std::string name() const override;
     std::vector<NodePtr> inputs() const override;
     bool partials(EvalContext& ctx, aad::Partials& out) override;
+    std::unique_ptr<IReduceStep> reduceStep() override;
 
 private:
     NAryOpNode(std::string name, std::vector<NodePtr> ins, EqualityPolicyPtr eq);
+
+    class Step;
 
     std::string name_;
     std::vector<NodePtr> inputs_;

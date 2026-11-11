@@ -91,6 +91,43 @@ inline void wire(const NodePtr& self, const std::vector<NodePtr>& ins) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The reduction contract
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline ReduceInputs::ReduceInputs(std::span<const ValuePtr> values,
+                                  std::span<const std::size_t> positions) noexcept
+    : values_(values), positions_(positions) {}
+
+inline std::size_t ReduceInputs::size() const noexcept { return positions_.size(); }
+
+inline const ValuePtr& ReduceInputs::operator[](std::size_t i) const noexcept {
+    return values_[positions_[i]];
+}
+
+inline ReduceReads::ReduceReads(std::span<Use> inputs) noexcept : inputs_(inputs) {}
+
+inline std::size_t ReduceReads::size() const noexcept { return inputs_.size(); }
+
+// A deciding input stays one if the node then names it as read.
+inline void ReduceReads::reads(std::size_t input) {
+    Use& use = at(input);
+    if (use == Use::Unread) use = Use::Read;
+}
+
+inline void ReduceReads::decides(std::size_t input) { at(input) = Use::Decides; }
+
+inline ReduceReads::Use& ReduceReads::at(std::size_t input) {
+    if (input >= inputs_.size())
+        throw std::out_of_range("dag::ReduceReads: input " + std::to_string(input)
+            + " of a node that has " + std::to_string(inputs_.size()));
+    return inputs_[input];
+}
+
+inline void IReducible::reduceReads(EvalContext&, ReduceReads& out) {
+    for (std::size_t i = 0; i < out.size(); ++i) out.reads(i);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Input<T>
 // ─────────────────────────────────────────────────────────────────────────────
 
