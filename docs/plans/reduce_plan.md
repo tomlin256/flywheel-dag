@@ -515,6 +515,14 @@ shares) and `ConditionNode`; `Reduction::gradient()`.
 *Done when:* red then green; the checkpoint; the seven AAD suites pass unchanged; each change as stated; pushed. Commit:
 `feat: a reduction's gradient`.
 
+*As built* (the Outcome has the results). `IReduceStep::partials()` and its default arrive here, as Step 1 said. Three
+tests more than the table: `TheGradientIsInTheArgumentsOwnValues` (u·v over an intermediate argument and a leaf, and the
+identity over the root), `ANodeOfYourOwnHasAGradientThroughItsStep`, and
+`APartialOfAnInputTheNodeDoesNotHaveIsRefused`, which is `std::logic_error` by name, as on a tape. `RejectsBadArguments`
+also holds a gradient to one slot per argument. `GradientMatchesAnalyticDerivatives` holds the closed forms to 1e-12,
+and the tape to 1e-13 in its own test. `DifferentiableNode`'s helper takes the values as an array, so its `partials()`
+pulls them and the step reads them, and both seed and run the functor in the one place.
+
 ### Step 5 — In an engine, and the benchmark row, one commit
 
 Tests, in `tests/test_dag_reduce.cpp`, and `benchmarks/bench_hot_path.cpp`'s fourth row with its line in
@@ -619,7 +627,7 @@ recorded here. Commit: `build: release v1.3.0`.
 | 1 The contract, the ops, and a reduction's values | Done | 2026-11-11. 22 tests; the checkpoint at 84; 15 hand-made changes caught. See the Outcome. |
 | 2 Compute nodes, and which functors may be called | Done | 2026-11-11. 30 tests; 9 hand-made changes caught; the mixin stays by Step 2's rule, at a measured 0.37% on `chain` (D2 is open for you). See the Outcome. |
 | 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
-| 4 The gradient | Not started | |
+| 4 The gradient | Done | 2026-11-11. 52 tests; the checkpoint at 84; 10 hand-made changes caught. See the Outcome. |
 | 5 In an engine, and the benchmark row | Not started | |
 | 6 Example, docs, follow-ups | Not started | |
 | 7 Release v1.3.0 | Not started | |
@@ -770,3 +778,34 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   *`bind()` keeps the last point's values* fails `ABindHoldsOnlyWhatItsPointReads` and no other test.
 - **CI** on the commits of Steps 1 and 2: `CI` and `clang-tidy` green on both, which is the first x86-64 build of the
   new code.
+
+### Step 4 — the gradient (2026-11-11)
+
+- **Red, then green.** With the 14 tests written, the build stopped at `no member named 'gradient' in
+  'dag::Reduction'`. With the code, 52 of 52.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 52 of 52, and the seven AAD suites, 94 of 94 | not run | equal |
+
+  The seven AAD suites pass with no edit to any of them.
+- **The hand-made changes**, against the reduce suite and `test_aad_node` together, with a control that passed 59 of
+  59. Each of the seven fails the tests its row names. Four fail others too:
+  - *The sweep runs the steps in call order* and *a binary op's step swaps its two partials* each also fail
+    `GradientMatchesAnalyticDerivatives` and `NewtonFindsAnImpliedVol`, and one or two of the narrower tests.
+  - *A step with no partials counts as 0* also fails `ATweakedNodeHasDerivativeZero`, whose last lines untweak the
+    node and expect the refusal.
+  - *The dual helper seeds every argument with one unit vector* also fails `OneDualCallPerDifferentiableNode` and two
+    more of `test_aad_node`. As probed, it fails neither `GradientMatchesATape` nor the vega, nor the price's Greeks in
+    `test_aad_node`: the tape shares the helper, and the price's derivative through d1 is 0.
+- **Three more changes**, for what the table left out:
+
+  | Change made by hand, then reverted | Fails |
+  |---|---|
+  | `gradient()` does not check the room it is given | `RejectsBadArguments` |
+  | An argument the root does not reach keeps what its slot held | `TheGradientThroughAConditionIsItsBranchs` |
+  | The adjoints are not zeroed between gradients | `GradientMatchesATape` and three more |
+- **CI** on the commit of Step 3: `CI` and `clang-tidy` green.

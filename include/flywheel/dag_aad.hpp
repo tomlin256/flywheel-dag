@@ -120,6 +120,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
@@ -417,7 +418,7 @@ public:
     /// All N partials, from one call of the functor on duals.
     bool partials(EvalContext& ctx, Partials& out) override;
 
-    /// A step that runs the functor at double.
+    /// A step that runs the functor at double, and on duals for its partials.
     std::unique_ptr<IReduceStep> reduceStep() override;
 
 private:
@@ -428,8 +429,10 @@ private:
 
     template<std::size_t... Is>
     ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
-    template<std::size_t... Is>
-    void dualPartials(EvalContext& ctx, Partials& out, std::index_sequence<Is...>);
+    /// The functor's N partials at these values, from one run of it on duals.
+    /// partials() calls it at the values the graph holds, and the step at the
+    /// values a reduction hands it.
+    void dualPartials(const std::array<double, N>& at, Partials& out) const;
 
     std::string       name_;
     Inputs            inputs_;

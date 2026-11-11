@@ -37,6 +37,8 @@ namespace dag {
 class INode;
 using NodePtr = std::shared_ptr<INode>;
 
+namespace aad { class Partials; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // IValue — type-erased value container
 // ─────────────────────────────────────────────────────────────────────────────
@@ -582,6 +584,13 @@ public:
     /// of its own, never the node's, and a warm call should not allocate
     /// (ValueSlot). Eval thread only, like eval().
     virtual ValuePtr apply(const ReduceInputs& in) = 0;
+
+    /// The node's local partial derivatives at these input values, written as
+    /// aad::IDifferentiable::partials() writes them: an entry for each input
+    /// the value depends on, by its position in inputs(). False, the default,
+    /// when the step cannot say: a reduction that runs it then has a value and
+    /// no gradient. A Reduction asks after apply(), with the same values.
+    virtual bool partials(const ReduceInputs& in, aad::Partials& out);
 };
 
 class IReducible {

@@ -86,6 +86,17 @@ public:
         return slot_.emit(Op{}(get_value<T>(in[0])));
     }
 
+    // The node's own partials(), at the values a reduction hands it.
+    bool partials([[maybe_unused]] const ReduceInputs& in,
+                  [[maybe_unused]] aad::Partials& out) override {
+        if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+            out.add(0, Derivative<Op>::d(get_value<double>(in[0])));
+            return true;
+        } else {
+            return false;
+        }
+    }
+
 private:
     ValueSlot<T> slot_;
 };
@@ -154,6 +165,19 @@ class BinaryOpNode<T,Op>::Step final : public IReduceStep {
 public:
     ValuePtr apply(const ReduceInputs& in) override {
         return slot_.emit(Op{}(get_value<T>(in[0]), get_value<T>(in[1])));
+    }
+
+    bool partials([[maybe_unused]] const ReduceInputs& in,
+                  [[maybe_unused]] aad::Partials& out) override {
+        if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+            const auto [da, db] =
+                Derivative<Op>::d(get_value<double>(in[0]), get_value<double>(in[1]));
+            out.add(0, da);
+            out.add(1, db);
+            return true;
+        } else {
+            return false;
+        }
     }
 
 private:
@@ -242,8 +266,27 @@ public:
         return slot_.emit(std::move(total));
     }
 
+    // A product's partials need every value at once. The step keeps the two
+    // vectors, so a warm gradient allocates nothing, where the node's own
+    // partials() builds them each time.
+    bool partials([[maybe_unused]] const ReduceInputs& in,
+                  [[maybe_unused]] aad::Partials& out) override {
+        if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
+            x_.clear();
+            for (std::size_t i = 0; i < in.size(); ++i) x_.push_back(get_value<double>(in[i]));
+            dx_.resize(x_.size());
+            Derivative<Op>::d(x_, dx_);
+            for (std::size_t i = 0; i < dx_.size(); ++i) out.add(i, dx_[i]);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
 private:
-    ValueSlot<T> slot_;
+    ValueSlot<T>        slot_;
+    std::vector<double> x_;    ///< the input values of the last partials()
+    std::vector<double> dx_;   ///< and the partials
 };
 
 template<typename T, typename Op>

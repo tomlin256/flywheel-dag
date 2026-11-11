@@ -123,6 +123,8 @@ inline ReduceReads::Use& ReduceReads::at(std::size_t input) {
     return inputs_[input];
 }
 
+inline bool IReduceStep::partials(const ReduceInputs&, aad::Partials&) { return false; }
+
 inline void IReducible::reduceReads(EvalContext&, ReduceReads& out) {
     for (std::size_t i = 0; i < out.size(); ++i) out.reads(i);
 }
@@ -737,6 +739,12 @@ class ConditionNode::Step final : public IReduceStep {
 public:
     ValuePtr apply(const ReduceInputs& in) override {
         return in[get_value<bool>(in[0]) ? 1 : 2];
+    }
+
+    // 1 for the branch selected, as the node's own partials() says.
+    bool partials(const ReduceInputs& in, aad::Partials& out) override {
+        out.add(get_value<bool>(in[0]) ? 1 : 2, 1.0);
+        return true;
     }
 };
 

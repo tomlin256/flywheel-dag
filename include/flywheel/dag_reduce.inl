@@ -112,6 +112,7 @@ inline Reduction::Reduction(NodePtr root, std::vector<NodePtr> args)
     run_.reserve(candidates);
     live_.reserve(args_.size());
     argValues_.resize(args_.size());
+    adjoints_.assign(entries_.size(), 0.0);
 }
 
 inline bool Reduction::holdsDouble(const ValuePtr& v) noexcept {
@@ -257,6 +258,55 @@ inline double Reduction::operator()(std::span<const double> x) {
 
 inline double Reduction::operator()(std::initializer_list<double> x) {
     return (*this)(std::span<const double>(x.begin(), x.size()));
+}
+
+// The call leaves every step's inputs in values_. The root's adjoint is 1. Each
+// step, from the last run to the first, passes its adjoint times each partial
+// to the input the partial names. A step runs after every step it reads, so in
+// this order its adjoint is complete before it is passed on.
+//
+// Every step is asked for its partials, the ones whose adjoint is 0 included:
+// whether a reduction has a gradient is then a matter of its steps, and not of
+// the point it is asked at.
+inline double Reduction::gradient(std::span<const double> x, std::span<double> g) {
+    if (g.size() != args_.size())
+        throw std::invalid_argument("dag::Reduction: root " + root_->name() + " has "
+            + std::to_string(args_.size()) + " arguments, and its gradient was given room for "
+            + std::to_string(g.size()));
+    const double value = (*this)(x);
+
+    std::fill(adjoints_.begin(), adjoints_.end(), 0.0);
+    adjoints_[rootPosition_] = 1.0;
+    const std::span<const std::size_t> inputs(inputs_);
+    for (std::size_t r = run_.size(); r-- > 0;) {
+        const std::size_t i = run_[r];
+        const Entry& e = entries_[i];
+        const std::span<const std::size_t> ins =
+            inputs.subspan(e.firstInput, e.lastInput - e.firstInput);
+        partials_.clear();
+        if (!e.step->partials(ReduceInputs(values_, ins), partials_))
+            throw std::domain_error("dag::Reduction: " + args_[movedBy_[i]]->name()
+                + " reaches root " + root_->name() + " through " + e.node->name()
+                + ", whose step has no partials: the function can be called, and has no gradient");
+        const double adjoint = adjoints_[i];
+        for (const auto& p : partials_.entries()) {
+            if (p.input >= ins.size())
+                throw std::logic_error("dag::Reduction: the step of " + e.node->name()
+                    + " names input " + std::to_string(p.input) + " of its "
+                    + std::to_string(ins.size()));
+            // A partial times an adjoint is 0 when either is 0, so neither 0·∞
+            // nor 0·NaN makes a NaN. A NaN that is not multiplied by 0 does
+            // propagate.
+            if (adjoint != 0.0 && p.d != 0.0) adjoints_[ins[p.input]] += p.d * adjoint;
+        }
+    }
+    for (std::size_t k = 0; k < args_.size(); ++k)
+        g[k] = argPosition_[k] == kNone ? 0.0 : adjoints_[argPosition_[k]];
+    return value;
+}
+
+inline double Reduction::gradient(std::initializer_list<double> x, std::span<double> g) {
+    return gradient(std::span<const double>(x.begin(), x.size()), g);
 }
 
 inline std::size_t Reduction::arity() const noexcept { return args_.size(); }

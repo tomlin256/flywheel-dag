@@ -21,6 +21,8 @@
 //
 //   dag::Reduction f = dag::reduce(price, {vol});   // price as a function of vol
 //   f({0.30});                                      // the price, had vol been 0.30
+//   double vega = 0.0;
+//   f.gradient({0.30}, {&vega, 1});                 // the same, and ∂price/∂vol there
 //
 //   spot->set(101.0);                               // the point moves,
 //   price->eval(ctx);
@@ -123,6 +125,34 @@
 //     default policy the function at the arguments' own values is the root's
 //     value, to the bit. Under a tolerance policy a published value can lag
 //     its inputs, and the two can differ by less than the tolerance.
+//
+// The gradient
+// ────────────
+// gradient() runs the call, asks each step for its local partials at the values
+// the call left (IReduceStep::partials()), and sweeps them once in reverse. The
+// partials are the ones a tape uses (dag_aad.hpp), at values a tape cannot
+// reach: an op's from ops::Derivative<Op>, a DifferentiableNode's from one run
+// of its functor on duals, and 1 for the branch a ConditionNode selects.
+//
+//   • A partial times an adjoint counts as 0 when either one is 0, as on a
+//     tape. So neither an infinite partial under an adjoint of 0 nor a NaN
+//     that nothing depends on reaches the result: z·√x at z = 0 and x = 0 has
+//     ∂/∂x = 0. A NaN on a path the result depends on is kept.
+//   • A step with no partials makes gradient() throw std::domain_error, naming
+//     the argument, the root and the node: a Lazy ComputeNode,
+//     InPlaceComputeNode, TweakableComputeNode or MemoizedComputeNode, whose
+//     functor is opaque, and an op over a type other than double. Calls still
+//     work, so such a reduction serves a solver that needs no derivative.
+//   • The derivative is with respect to the arguments' own values. An argument
+//     the root does not depend on at the bound point has derivative 0, and so
+//     has one above a tweaked node, through that node.
+//   • Under the default equality policy the gradient at the arguments' own
+//     values is a tape's, to a few units in the last place: the two take their
+//     partials from the same code, inlined at two sites.
+//   • Once warm, a gradient allocates nothing.
+//
+// Holding values
+// ──────────────
 //   • A reduction holds the values it bound until the next bind(), which pins
 //     one of each producer's two buffers (ValueSlot). Bound in each cycle, that
 //     costs nothing. Left bound while the graph moves, a producer allocates
@@ -181,6 +211,13 @@ public:
     double operator()(std::span<const double> x);
     double operator()(std::initializer_list<double> x);
 
+    /// The same value, with its derivative with respect to argument i written
+    /// to g[i]: 0 for an argument the root does not depend on at the bound
+    /// point. Throws what a call throws, std::invalid_argument unless g has
+    /// arity() slots, and std::domain_error when a step has no partials.
+    double gradient(std::span<const double> x, std::span<double> g);
+    double gradient(std::initializer_list<double> x, std::span<double> g);
+
     /// The number of arguments.
     std::size_t arity() const noexcept;
 
@@ -238,6 +275,10 @@ private:
 
     /// One per argument: where a call publishes its value.
     std::vector<ValueSlot<double>> argValues_;
+
+    // ── A gradient's working storage, kept for its capacity ──────────────────
+    std::vector<double> adjoints_;   ///< one per entry: ∂root/∂(its value)
+    aad::Partials       partials_;   ///< the step being swept
 };
 
 /// A Reduction of root over args, bound to the point the graph holds. Throws

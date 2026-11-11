@@ -510,27 +510,32 @@ std::vector<NodePtr> DifferentiableNode<N>::inputs() const {
     return {inputs_.begin(), inputs_.end()};
 }
 
+// A tape asks only a clean node, so each pull, left to right as in eval(),
+// returns a cached value.
 template<std::size_t N>
 bool DifferentiableNode<N>::partials(EvalContext& ctx, Partials& out) {
-    dualPartials(ctx, out, std::make_index_sequence<N>{});
+    std::array<double, N> at{};
+    for (std::size_t i = 0; i < N; ++i) at[i] = get_value<double>(inputs_[i]->eval(ctx));
+    dualPartials(at, out);
     return true;
 }
 
-// Argument i arrives as its input's value with d = eᵢ, so the result's d holds
-// every partial. A tape asks only a clean node, so each pull returns a cached
-// value.
+// Argument i arrives as its value with d = eᵢ, so the result's d holds every
+// partial.
 template<std::size_t N>
-template<std::size_t... Is>
-void DifferentiableNode<N>::dualPartials(EvalContext& ctx, Partials& out,
-                                         std::index_sequence<Is...>) {
-    std::array<Dual<N>, N> x{ Dual<N>(get_value<double>(inputs_[Is]->eval(ctx)))... };
-    for (std::size_t i = 0; i < N; ++i) x[i].d[i] = 1.0;
-    const Dual<N> y = dualFn_(x[Is]...);
+void DifferentiableNode<N>::dualPartials(const std::array<double, N>& at, Partials& out) const {
+    std::array<Dual<N>, N> x{};
+    for (std::size_t i = 0; i < N; ++i) {
+        x[i] = Dual<N>(at[i]);
+        x[i].d[i] = 1.0;
+    }
+    const Dual<N> y = std::apply(dualFn_, x);
     for (std::size_t i = 0; i < N; ++i) out.add(i, y.d[i]);
 }
 
 // The functor at double, as eval() runs it, at the values a reduction hands
-// it, published through a slot of the step's own.
+// it, published through a slot of the step's own. Its partials are the node's:
+// one run of the functor on duals, at the same values.
 template<std::size_t N>
 class DifferentiableNode<N>::Step final : public IReduceStep {
 public:
@@ -538,6 +543,13 @@ public:
 
     ValuePtr apply(const ReduceInputs& in) override {
         return call(in, std::make_index_sequence<N>{});
+    }
+
+    bool partials(const ReduceInputs& in, Partials& out) override {
+        std::array<double, N> at{};
+        for (std::size_t i = 0; i < N; ++i) at[i] = get_value<double>(in[i]);
+        node_->dualPartials(at, out);
+        return true;
     }
 
 private:

@@ -21,9 +21,14 @@
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_reduce.hpp"
 #include "flywheel/dag_timeseries.hpp"
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <numbers>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -31,6 +36,7 @@
 #include <vector>
 
 using namespace dag;
+using aad_test::expectClose;
 using allocation_counter::allocations_during;
 
 namespace {
@@ -40,11 +46,13 @@ namespace {
 // does with what a node reads is held without any engine node.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Whether a Counted gives a step.
-enum class Callable : bool { No, Yes };
+/// What a Counted gives a reduction: no step, a step, or a step whose partials
+/// name an input the node does not have.
+enum class Gives : std::uint8_t { NoStep, AStep, AStepThatMisnamesItsInput };
 
 /// A pure function of one input, 2·a + 1, that counts each time it is computed:
-/// by its own eval() and by a step alike. In is the type its input holds.
+/// by its own eval() and by a step alike. In is the type its input holds. Its
+/// step has the one partial, 2.
 template<typename In = double>
 class Counted
     : public NodeBase
@@ -53,8 +61,8 @@ class Counted
 {
 public:
     static std::shared_ptr<Counted> make(std::string name, NodePtr in,
-                                         Callable callable = Callable::Yes) {
-        auto self = std::shared_ptr<Counted>(new Counted(std::move(name), std::move(in), callable));
+                                         Gives gives = Gives::AStep) {
+        auto self = std::shared_ptr<Counted>(new Counted(std::move(name), std::move(in), gives));
         wire(self, self->inputs());
         return self;
     }
@@ -76,14 +84,14 @@ public:
     NodeKind kind() const override { return NodeKind::Compute; }
 
     std::unique_ptr<IReduceStep> reduceStep() override {
-        if (callable_ == Callable::No) return nullptr;
+        if (gives_ == Gives::NoStep) return nullptr;
         return std::make_unique<Step>(this->shared_from_this());
     }
 
 private:
-    Counted(std::string name, NodePtr in, Callable callable)
+    Counted(std::string name, NodePtr in, Gives gives)
         : NodeBase(InvalidationMode::Lazy), name_(std::move(name)), in_(std::move(in))
-        , callable_(callable) {}
+        , gives_(gives) {}
 
     double compute(const In& a) {
         ++calls_;
@@ -96,6 +104,10 @@ private:
         ValuePtr apply(const ReduceInputs& in) override {
             return slot_.emit(node_->compute(get_value<In>(in[0])));
         }
+        bool partials(const ReduceInputs&, aad::Partials& out) override {
+            out.add(node_->gives_ == Gives::AStepThatMisnamesItsInput ? 1 : 0, 2.0);
+            return true;
+        }
     private:
         std::shared_ptr<Counted> node_;
         ValueSlot<double>        slot_;
@@ -103,7 +115,7 @@ private:
 
     std::string       name_;
     NodePtr           in_;
-    Callable          callable_;
+    Gives             gives_;
     ValuePtr          cached_;
     ValueSlot<double> slot_;
     int               calls_ = 0;
@@ -214,6 +226,42 @@ struct CallPrice {
 /// True when a generic functor is running on duals.
 template<typename T>
 constexpr bool isDual() { return !std::is_same_v<std::decay_t<T>, double>; }
+
+/// ∂call/∂vol of that call, in closed form: S·φ(d1)·√T.
+double vega(double s, double k, double v, double t, double r) {
+    const double d1 = (std::log(s / k) + (r + 0.5 * v * v) * t) / (v * std::sqrt(t));
+    return s * std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * std::numbers::pi) * std::sqrt(t);
+}
+
+void expectWithin(double actual, double expected, double relative) {
+    EXPECT_NEAR(actual, expected, relative * std::max(1.0, std::abs(expected)));
+}
+
+/// f.gradient() with respect to every input of a graph, at two points, each
+/// handed to check() once the graph holds that point: the point the graph holds
+/// to begin with, and another one, where the gradient is taken before the inputs
+/// are set there.
+template<typename Graph, typename Check>
+void atTwoPoints(const Graph& g, Check&& check) {
+    const std::vector<InputPtr<double>> ins = g.inputs();
+    EvalContext ctx;
+    const ValuePtr held = g.root->eval(ctx);
+    Reduction f = reduce(g.root, aad_test::asNodes(ins));
+
+    std::vector<double> x;
+    x.reserve(ins.size());
+    for (const auto& in : ins) x.push_back(in->get());
+    std::vector<double> gradient(ins.size(), 0.0);
+    EXPECT_EQ(f.gradient(x, gradient), get_value<double>(held));
+    check(gradient);
+
+    for (double& v : x) v = 1.1 * v + 0.05;
+    const double there = f.gradient(x, gradient);
+    for (std::size_t i = 0; i < ins.size(); ++i) ins[i]->set(x[i]);
+    const ValuePtr moved = g.root->eval(ctx);
+    EXPECT_EQ(there, get_value<double>(moved));
+    check(gradient);
+}
 
 /// The message of the E that fn() throws. An exception of another type leaves
 /// the test, and fails it.
@@ -464,6 +512,13 @@ TEST(Reduction, RejectsBadArguments) {
     EXPECT_THROW(f(none), std::invalid_argument);
     EXPECT_THROW(f({1.0, 2.0}), std::invalid_argument);
     EXPECT_EQ(f({1.0}), -1.0);
+
+    // A gradient takes one value and one slot per argument.
+    std::array<double, 2> slots{};
+    EXPECT_THROW(f.gradient({1.0}, slots), std::invalid_argument);
+    EXPECT_THROW(f.gradient({1.0, 2.0}, std::span<double>(slots).first(1)), std::invalid_argument);
+    EXPECT_EQ(f.gradient({1.0}, std::span<double>(slots).first(1)), -1.0);
+    EXPECT_EQ(slots[0], -1.0);
 }
 
 TEST(Reduction, RejectsADirtyRoot) {
@@ -938,6 +993,281 @@ TEST(Reduction, ABindHoldsOnlyWhatItsPointReads) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The gradient
+// ─────────────────────────────────────────────────────────────────────────────
+
+// To 1e-13 and not to the bit: a step and a node take their partials from one
+// Derivative<Op>, inlined at two sites, which a compiler may contract apart.
+TEST(Reduction, GradientMatchesATape) {
+    const auto againstATape = [](const auto& g) {
+        atTwoPoints(g, [&g](const std::vector<double>& gradient) {
+            const std::vector<double> tape = aad::adjoints(g.root, aad_test::asNodes(g.inputs()));
+            ASSERT_EQ(gradient.size(), tape.size());
+            for (std::size_t i = 0; i < tape.size(); ++i) expectClose(gradient[i], tape[i]);
+        });
+    };
+    againstATape(aad_test::SumOfTerms{});
+    againstATape(aad_test::LogTimesRoot{});
+    againstATape(aad_test::PowerOfDifference{});
+    againstATape(aad_test::TrigOfRatio{});
+    againstATape(aad_test::InverseTrig{});
+    againstATape(aad_test::PolarRoundTrip{});
+}
+
+TEST(Reduction, GradientMatchesAnalyticDerivatives) {
+    const auto againstTheClosedForm = [](const auto& g) {
+        atTwoPoints(g, [&g](const std::vector<double>& gradient) {
+            const std::vector<double> closed = g.gradient();
+            ASSERT_EQ(gradient.size(), closed.size());
+            for (std::size_t i = 0; i < closed.size(); ++i) expectWithin(gradient[i], closed[i], 1e-12);
+        });
+    };
+    againstTheClosedForm(aad_test::SumOfTerms{});
+    againstTheClosedForm(aad_test::LogTimesRoot{});
+    againstTheClosedForm(aad_test::PowerOfDifference{});
+    againstTheClosedForm(aad_test::TrigOfRatio{});
+    againstTheClosedForm(aad_test::InverseTrig{});
+    againstTheClosedForm(aad_test::PolarRoundTrip{});
+
+    // A call's vega, at the vol the graph holds and at another.
+    const CallPrice c;
+    EvalContext ctx;
+    c.call->eval(ctx);
+    Reduction f = reduce(c.call, {c.vol});
+    for (const double vol : {0.25, 0.30, 0.45}) {
+        SCOPED_TRACE(vol);
+        double slope = 0.0;
+        f.gradient({vol}, {&slope, 1});
+        expectWithin(slope, vega(100.0, 95.0, vol, 0.75, 0.03), 1e-11);
+    }
+}
+
+// u·v over exp(x) and x: each derivative is the other argument's value, and x
+// moves nothing through exp(x), which is an argument too.
+TEST(Reduction, TheGradientIsInTheArgumentsOwnValues) {
+    auto x    = Input<double>::make("x", 1.5);
+    auto ex   = ops::ExpNode<>::make("exp(x)", x);
+    auto root = ops::ProductNode<>::make("root", {ex, x});
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction ofBoth = reduce(root, {ex, x});
+    std::array<double, 2> g{9.0, 9.0};
+    EXPECT_EQ(ofBoth.gradient({2.0, 5.0}, g), 10.0);
+    EXPECT_EQ(g[0], 5.0);
+    EXPECT_EQ(g[1], 2.0);
+
+    // Over the root itself: the identity, whose derivative is 1.
+    Reduction ofRoot = reduce(root, {root});
+    double slope = 9.0;
+    EXPECT_EQ(ofRoot.gradient({42.0}, {&slope, 1}), 42.0);
+    EXPECT_EQ(slope, 1.0);
+}
+
+// A Lazy compute node can be called, and its functor is opaque.
+TEST(Reduction, AnOpaqueStepHasNoGradient) {
+    auto x      = Input<double>::make("arg.x", 2.0);
+    auto opaque = ComputeNode<double, double>::make("node.opaque", {x},
+        [](const double& a) { return a * a; }, InvalidationMode::Lazy);
+    auto root   = ops::NegateNode<>::make("root.out", opaque);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({3.0}), -9.0);
+    double slope = 0.0;
+    const std::string why = messageOf<std::domain_error>([&] { f.gradient({3.0}, {&slope, 1}); });
+    EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.opaque")) << why;
+    EXPECT_TRUE(mentions(why, "has no partials")) << why;
+    EXPECT_EQ(f({3.0}), -9.0);
+}
+
+// z·√x at z = 0 and x = 0. √'s partial is infinite there and its adjoint is 0,
+// and the product is 0 for every x, so ∂/∂x is 0 and not 0·∞.
+TEST(Reduction, AZeroPartialOrAdjointPropagatesNothing) {
+    auto z    = Input<double>::make("z", 0.0);
+    auto x    = Input<double>::make("x", 0.0);
+    auto root = ops::ProductNode<>::make("root", {z, ops::SqrtNode<>::make("sqrt(x)", x)});
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {z, x});
+    std::array<double, 2> g{9.0, 9.0};
+    EXPECT_EQ(f.gradient({0.0, 0.0}, g), 0.0);
+    EXPECT_EQ(g[0], 0.0);
+    EXPECT_EQ(g[1], 0.0);
+}
+
+// (−2)³. With respect to the exponent the derivative is a^b·ln a, and ln(−2)
+// is NaN: the true answer, and nothing multiplies it by 0.
+TEST(Reduction, ATrueNaNIsKept) {
+    auto a    = Input<double>::make("a", -2.0);
+    auto b    = Input<double>::make("b", 3.0);
+    auto root = ops::PowerNode<>::make("root", a, b);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {a, b});
+    std::array<double, 2> g{9.0, 9.0};
+    EXPECT_EQ(f.gradient({-2.0, 3.0}, g), -8.0);
+    EXPECT_EQ(g[0], 12.0);
+    EXPECT_TRUE(std::isnan(g[1]));
+}
+
+TEST(Reduction, TheGradientThroughAConditionIsItsBranchs) {
+    auto x     = Input<double>::make("x", 2.0);
+    auto y     = Input<double>::make("y", 5.0);
+    auto other = Input<double>::make("other", 1.0);   // a node of another graph
+    auto cond  = Input<bool>::make("cond", true);
+    auto root  = ConditionNode::make("root", cond, ops::ProductNode<>::make("x.x", {x, x}),
+                                     ops::ProductNode<>::make("y.y.y", {y, y, y}));
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x, y, other});
+    std::array<double, 3> g{9.0, 9.0, 9.0};
+    EXPECT_EQ(f.gradient({3.0, 7.0, 11.0}, g), 9.0);
+    EXPECT_EQ(g[0], 6.0);   // 2x, through the selection
+    EXPECT_EQ(g[1], 0.0);   // on the branch not taken
+    EXPECT_EQ(g[2], 0.0);   // the root does not reach it
+
+    cond->set(false);
+    root->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f.gradient({3.0, 7.0, 11.0}, g), 343.0);
+    EXPECT_EQ(g[0], 0.0);
+    EXPECT_EQ(g[1], 147.0);   // 3y²
+    EXPECT_EQ(g[2], 0.0);
+}
+
+// 100 + x while the node is tweaked: the argument moves nothing through it.
+// Untweaked it is 10x + x, through a functor that has no partials.
+TEST(Reduction, ATweakedNodeHasDerivativeZero) {
+    auto x      = Input<double>::make("x", 2.0);
+    auto frozen = TweakableComputeNode<double, double>::make("frozen", {x},
+        [](const double& a) { return 10.0 * a; }, InvalidationMode::Lazy);
+    auto root   = ops::SumNode<>::make("root", {frozen, x});
+    frozen->tweak(100.0);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    double slope = 9.0;
+    EXPECT_EQ(f.gradient({3.0}, {&slope, 1}), 103.0);
+    EXPECT_EQ(slope, 1.0);
+
+    frozen->clearTweak();
+    root->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f({3.0}), 33.0);
+    EXPECT_THROW(f.gradient({3.0}, {&slope, 1}), std::domain_error);
+}
+
+// a·eᵇ/c as one node of three inputs, away from the point the graph holds. Each
+// partial comes from the functor's one run on duals, argument i seeded with eᵢ.
+TEST(Reduction, ADifferentiableNodesPartialsAreItsFunctors) {
+    auto a    = Input<double>::make("a", 1.5);
+    auto b    = Input<double>::make("b", 0.4);
+    auto c    = Input<double>::make("c", 2.5);
+    auto root = aad::DifferentiableNode<3>::make("root", {a, b, c},
+        [](const auto& p, const auto& q, const auto& r) { using std::exp; return p * exp(q) / r; });
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {a, b, c});
+    std::array<double, 3> g{};
+    const double value = f.gradient({2.0, -0.3, 4.0}, g);
+    expectClose(value, 2.0 * std::exp(-0.3) / 4.0);
+    expectClose(g[0], std::exp(-0.3) / 4.0);
+    expectClose(g[1], 2.0 * std::exp(-0.3) / 4.0);
+    expectClose(g[2], -2.0 * std::exp(-0.3) / 16.0);
+}
+
+TEST(Reduction, OneDualCallPerDifferentiableNode) {
+    auto x = Input<double>::make("x", 1.5);
+    auto y = Input<double>::make("y", 0.5);
+    int doubles = 0, duals = 0;
+    auto root = aad::DifferentiableNode<2>::make("root", {x, y},
+        [&doubles, &duals](const auto& a, const auto& b) {
+            using std::exp;
+            if constexpr (isDual<decltype(a)>()) ++duals;
+            else ++doubles;
+            return a * exp(b);
+        });
+    EvalContext ctx;
+    root->eval(ctx);
+    ASSERT_EQ(doubles, 1);
+
+    Reduction f = reduce(root, {x, y});
+    std::array<double, 2> g{};
+    EXPECT_EQ(f.gradient({2.0, 0.0}, g), 2.0);
+    EXPECT_EQ(doubles, 2);
+    EXPECT_EQ(duals, 1);
+    EXPECT_EQ(g[0], 1.0);
+    EXPECT_EQ(g[1], 2.0);
+
+    f.gradient({3.0, 0.0}, g);
+    EXPECT_EQ(doubles, 3);
+    EXPECT_EQ(duals, 2);
+}
+
+// A node of the suite's own: 2·(2s + 1) with s = 2x + 1 is 8x + 6.
+TEST(Reduction, ANodeOfYourOwnHasAGradientThroughItsStep) {
+    auto x      = Input<double>::make("x", 1.0);
+    auto shared = Counted<>::make("shared", x);
+    auto root   = ops::SumNode<>::make("root", {Counted<>::make("left", shared),
+                                                Counted<>::make("right", shared)});
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    double slope = 0.0;
+    EXPECT_EQ(f.gradient({2.0}, {&slope, 1}), 22.0);
+    EXPECT_EQ(slope, 8.0);
+}
+
+// A step that names an input its node does not have is a bug in the step, and
+// is refused by name.
+TEST(Reduction, APartialOfAnInputTheNodeDoesNotHaveIsRefused) {
+    auto x    = Input<double>::make("x", 1.0);
+    auto root = Counted<>::make("node.misnamed", x, Gives::AStepThatMisnamesItsInput);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({2.0}), 5.0);
+    double slope = 0.0;
+    const std::string why = messageOf<std::logic_error>([&] { f.gradient({2.0}, {&slope, 1}); });
+    EXPECT_TRUE(mentions(why, "node.misnamed names input 1 of its 1")) << why;
+}
+
+// Newton's method on price(vol) − 12, from 0.2. The call is worth 12.34 at the
+// vol the graph holds, 0.25.
+TEST(Reduction, NewtonFindsAnImpliedVol) {
+    const CallPrice c;
+    EvalContext ctx;
+    c.call->eval(ctx);
+    Reduction f = reduce(c.call, {c.vol});
+
+    const double target = 12.0;
+    double vol = 0.2, slope = 0.0;
+    int steps = 0;
+    for (; steps < 8; ++steps) {
+        const double miss = f.gradient({vol}, {&slope, 1}) - target;
+        if (std::abs(miss) < 1e-12) break;
+        vol -= miss / slope;
+    }
+    EXPECT_LT(steps, 8);
+    EXPECT_GT(vol, 0.2);
+    EXPECT_LT(vol, 0.25);
+
+    // The graph agrees, once vol is set to the answer.
+    c.vol->set(vol);
+    const ValuePtr solved = c.call->eval(ctx);
+    EXPECT_NEAR(get_value<double>(solved), target, 1e-12);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Constants and barriers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -985,7 +1315,7 @@ TEST(Reduction, ANodeThatCannotBeCalledIsABarrier) {
     EXPECT_TRUE(mentions(why, "is not an IReducible")) << why;
 
     // An IReducible that gives no step is one too.
-    auto silent  = Counted<>::make("node.silent", x, Callable::No);
+    auto silent  = Counted<>::make("node.silent", x, Gives::NoStep);
     auto negated = ops::NegateNode<>::make("root.negated", silent);
     negated->eval(ctx);
     Reduction g(negated, {x});
@@ -1123,6 +1453,25 @@ TEST(Reduction, AWarmCallAndBindAllocateNothing) {
     Reduction unbound(g.root, {g.x, g.y});
     EXPECT_EQ(allocations_during([&] { unbound.bind(); }), 0);
     EXPECT_EQ(unbound.size(), 4u);
+}
+
+// x·y + exp(x)/y over both: an n-ary product and an n-ary sum, whose partials
+// need every input at once, and a quotient and an exponential.
+TEST(Reduction, AWarmGradientAllocatesNothing) {
+    const aad_test::SumOfTerms g;
+    EvalContext ctx;
+    g.root->eval(ctx);
+    Reduction f = reduce(g.root, {g.x, g.y});
+    std::array<double, 2> gradient{};
+    for (int i = 0; i < 3; ++i) f.gradient({1.0 + i, 0.5}, gradient);
+
+    double sum = 0.0;
+    const long allocs = allocations_during([&] {
+        for (int i = 0; i < 100; ++i)
+            sum += f.gradient({1.0 + 0.01 * i, 0.7}, gradient) + gradient[0] + gradient[1];
+    });
+    EXPECT_EQ(allocs, 0);
+    EXPECT_NE(sum, 0.0);
 }
 
 int main(int argc, char** argv) {
