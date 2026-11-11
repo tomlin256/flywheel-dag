@@ -593,6 +593,7 @@ public:
     virtual bool partials(const ReduceInputs& in, aad::Partials& out);
 };
 
+/// A node that a Reduction can call: the mixin of the block above.
 class IReducible {
 public:
     virtual ~IReducible() = default;

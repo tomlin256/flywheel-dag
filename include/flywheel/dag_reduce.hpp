@@ -125,6 +125,11 @@
 //     default policy the function at the arguments' own values is the root's
 //     value, to the bit. Under a tolerance policy a published value can lag
 //     its inputs, and the two can differ by less than the tolerance.
+//   • A reduction holds the values it bound until the next bind(), which pins
+//     one of each producer's two buffers (ValueSlot). Bound in each cycle, that
+//     costs nothing. Left bound while the graph moves, a producer allocates
+//     once or twice and then has two buffers again.
+//   • Eval thread only, like eval().
 //
 // The gradient
 // ────────────
@@ -139,10 +144,11 @@
 //     that nothing depends on reaches the result: z·√x at z = 0 and x = 0 has
 //     ∂/∂x = 0. A NaN on a path the result depends on is kept.
 //   • A step with no partials makes gradient() throw std::domain_error, naming
-//     the argument, the root and the node: a Lazy ComputeNode,
-//     InPlaceComputeNode, TweakableComputeNode or MemoizedComputeNode, whose
-//     functor is opaque, and an op over a type other than double. Calls still
-//     work, so such a reduction serves a solver that needs no derivative.
+//     the argument, the root and the node. The step of a ComputeNode, an
+//     InPlaceComputeNode, a TweakableComputeNode or a MemoizedComputeNode has
+//     none, because its functor is opaque, and neither has an op over a type
+//     other than double. Calls still work, so such a reduction serves a solver
+//     that needs no derivative.
 //   • The derivative is with respect to the arguments' own values. An argument
 //     the root does not depend on at the bound point has derivative 0, and so
 //     has one above a tweaked node, through that node.
@@ -150,14 +156,6 @@
 //     values is a tape's, to a few units in the last place: the two take their
 //     partials from the same code, inlined at two sites.
 //   • Once warm, a gradient allocates nothing.
-//
-// Holding values
-// ──────────────
-//   • A reduction holds the values it bound until the next bind(), which pins
-//     one of each producer's two buffers (ValueSlot). Bound in each cycle, that
-//     costs nothing. Left bound while the graph moves, a producer allocates
-//     once or twice and then has two buffers again.
-//   • Eval thread only, like eval().
 //
 // Never include dag_reduce.inl directly — always include this file.
 
