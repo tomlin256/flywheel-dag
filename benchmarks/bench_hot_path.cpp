@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// bench_hot_path.cpp — what one engine cycle costs, on three generic workloads.
+// bench_hot_path.cpp — what one engine cycle costs, on four generic workloads.
 //
 // A measurement tool, not a test: it is EXCLUDE_FROM_ALL and not registered
 // with ctest, because a wall-clock threshold would make ctest flaky. Run it by
@@ -83,6 +83,7 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 #include <flywheel/dag_async.hpp>
 #include <flywheel/dag_engine.hpp>
 #include <flywheel/dag_ops.hpp>
+#include <flywheel/dag_reduce.hpp>
 #include <flywheel/dag_timeseries.hpp>
 
 using namespace dag;
@@ -265,6 +266,57 @@ bench::Row ingest(long cycles) {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// solve — a node that solves on a reduction, once per cycle.
+//
+//   a ──┐
+//   x ──┴─ x·x − a ── six Newton steps from 1                           → out
+//
+// The solver is an Eager compute node over the residual. Each cycle moves `a`,
+// so the node runs: it binds a reduction of the residual over x to the point
+// the graph holds, then takes six Newton steps on it, each one a call with its
+// gradient. x itself never moves: the reduction evaluates the residual at each
+// guess on buffers of its own.
+//
+// Its allocs/cycle is 0, which holds the reduction and the source it reads: the
+// reduction keeps a's value from one bind to the next, and that pins one of the
+// source's two buffers. `a` runs through 2 … 98 and differs on every cycle, so
+// every callback fires. Six steps do not converge for the larger `a`, and need
+// not: each step is one +, −, × and ÷, so the checksum is the same everywhere.
+// ─────────────────────────────────────────────────────────────────────────────
+bench::Row solve(long cycles) {
+    async::Engine engine;
+    auto a = async::AsyncInput<double>::make("a", 1.0);
+    engine.addSource(a);
+
+    auto x        = Input<double>::make("x", 1.0);
+    auto residual = ops::DiffNode<double>::make(
+        "x.x-a", ops::ProductNode<double>::make("x.x", {x, x}), a);
+
+    auto f = std::make_shared<Reduction>(residual, std::vector<NodePtr>{x});
+    auto root = ComputeNode<double, double>::make(
+        "sqrt(a)", {residual},
+        [f](const double&) {
+            f->bind();   // the residual has just been pulled, so it is clean
+            double guess = 1.0;
+            double slope = 0.0;
+            for (int i = 0; i < 6; ++i) {
+                const double miss = f->gradient({guess}, {&slope, 1});
+                guess -= miss / slope;
+            }
+            return guess;
+        });   // Eager, the default: the point can move while the residual stands still
+
+    double sink  = 0.0;
+    long   fired = 0;
+    engine.addOutput<double>(root, [&](const double& v) { sink += v; ++fired; });
+
+    return measure("solve", cycles, sink, fired, [&](long i) {
+        a->post(2.0 + static_cast<double>(i % 97));
+        engine.step();
+    });
+}
+
 }  // namespace
 
 int main(int argc, char** argv) try {
@@ -281,6 +333,7 @@ int main(int argc, char** argv) try {
         chain(options.cycles),
         idleQueues(options.cycles),
         ingest(options.cycles),
+        solve(options.cycles),
     };
 
     const std::string out = options.invariants ? bench::invariants(options.cycles, rows)

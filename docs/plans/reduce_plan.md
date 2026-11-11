@@ -548,6 +548,13 @@ already hold with a narrower test:
 change as stated; pushed. CI's Ubuntu leg is the first x86-64 reading of the new checksum, and a difference there is
 fixed forward. Commit: `test: a reduction in an engine cycle, and a solve row for the benchmark`.
 
+*As built* (the Outcome has the results). The tests hold a pattern and no new engine code, so they passed as written,
+and the changes below are their red. The solver's reduction is built unbound, as in the snippet above, so a functor
+that never binds fails at the first cycle on the unbound call. A functor that binds once is the change that gives "the
+solution is the first point's", and it is in the Outcome too. The new line of `expected_invariants.txt` was not taken
+from the benchmark alone: the same six Newton steps, written as a plain loop with no engine, graph or reduction, give
+the same line.
+
 ### Step 6 — Example, docs, follow-ups, one commit
 
 - `examples/reduce.cpp`: an implied volatility by Newton on a reduction of the Black–Scholes graph, checked by setting
@@ -628,7 +635,7 @@ recorded here. Commit: `build: release v1.3.0`.
 | 2 Compute nodes, and which functors may be called | Done | 2026-11-11. 30 tests; 9 hand-made changes caught; the mixin stays by Step 2's rule, at a measured 0.37% on `chain` (D2 is open for you). See the Outcome. |
 | 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
 | 4 The gradient | Done | 2026-11-11. 52 tests; the checkpoint at 84; 10 hand-made changes caught. See the Outcome. |
-| 5 In an engine, and the benchmark row | Not started | |
+| 5 In an engine, and the benchmark row | Done | 2026-11-11. 55 tests; the `solve` row, its checksum the same on three compilers and from a plain loop; 5 hand-made changes as predicted. See the Outcome. |
 | 6 Example, docs, follow-ups | Not started | |
 | 7 Release v1.3.0 | Not started | |
 
@@ -809,3 +816,30 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   | An argument the root does not reach keeps what its slot held | `TheGradientThroughAConditionIsItsBranchs` |
   | The adjoints are not zeroed between gradients | `GradientMatchesATape` and three more |
 - **CI** on the commit of Step 3: `CI` and `clang-tidy` green.
+
+### Step 5 — in an engine, and the benchmark row (2026-11-11)
+
+- **The tests.** Three more, 55 in all. They hold a pattern, with no new engine code, so they passed as written.
+- **The `solve` row.** `solve allocs/cycle=0 callbacks=200000 checksum=1341290.0460180121`. The first three lines of
+  `benchmarks/expected_invariants.txt` did not change. The checksum was checked against the recurrence alone, as a
+  plain loop of six steps of x − (x·x − a)/(x + x) from 1, with no engine, graph or reduction: the same 17 digits, at
+  `-O0` and at `-O2`, with `-ffp-contract=off`.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants`, four rows |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 55 of 55 | not run | equal |
+
+  All three are arm64. CI's Ubuntu leg, on the commit this step pushes, is the first x86-64 reading of the new line.
+- **The hand-made changes**, against a control that passed 55 of 55:
+
+  | Change made by hand, then reverted | Fails |
+  |---|---|
+  | The test's solver node made `Lazy` | `ASolverNodeSeesAPointThatMovesWhileTheRootStandsStill` alone: the zero stays at 1 |
+  | The test's functor does not bind | `ASolverNodeInAnEngine`, at its first cycle: `root call is not bound` |
+  | The test's functor binds at its first run only | `ASolverNodeInAnEngine`: the second solution is the first point's, so it is not delivered |
+  | An argument's value published with `make_value` | `ASolvingCycleAllocatesNothing`, and the three other allocation tests |
+  | `bind()` keeps the last point's values | `ABindHoldsOnlyWhatItsPointReads` alone, as probed: the solving cycle still allocates nothing |
+- **CI** on the commit of Step 4: `CI` and `clang-tidy` green.

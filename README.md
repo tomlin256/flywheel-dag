@@ -351,13 +351,14 @@ supported on this platform"), so a run on a Mac leaves `detect_leaks` out.
 ## Benchmark
 
 [`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle
-costs on three generic workloads:
+costs on four generic workloads:
 
 | Row | Workload |
 |---|---|
 | `chain` | An `AsyncInput<double>` feeding 11 compute and time-series nodes, with 4 registered outputs |
 | `idle-queues` | 32 `AsyncQueue`s, stepped with nothing posted |
 | `ingest` | A heap-owning value, with one `post()` and one `flush()` per cycle |
+| `solve` | A node that binds a reduction of x·x − a over x, and takes six Newton steps on it, each cycle |
 
 It is built on demand and is not a ctest test:
 

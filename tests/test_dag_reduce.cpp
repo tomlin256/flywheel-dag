@@ -17,6 +17,8 @@
 #include "allocation_counter.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
+#include "flywheel/dag_async.hpp"
+#include "flywheel/dag_engine.hpp"
 #include "flywheel/dag_memoize.hpp"
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_reduce.hpp"
@@ -190,16 +192,19 @@ private:
 /// A Black–Scholes call, from ops and differentiable nodes: d1 is one
 /// differentiable node over all five inputs, d2 is ops over d1, and each normal
 /// CDF is a differentiable node over one input. Seventeen nodes, five of them
-/// inputs, and eight of the other twelve below vol.
+/// inputs, and eight of the other twelve below vol. The spot is an Input of 100
+/// unless the test brings a node of its own, such as an engine's source.
 struct CallPrice {
-    InputPtr<double> spot   = Input<double>::make("spot", 100.0);
+    NodePtr          spot;
     InputPtr<double> strike = Input<double>::make("strike", 95.0);
     InputPtr<double> vol    = Input<double>::make("vol", 0.25);
     InputPtr<double> expiry = Input<double>::make("expiry", 0.75);
     InputPtr<double> rate   = Input<double>::make("rate", 0.03);
     NodePtr call;
 
-    CallPrice() {
+    explicit CallPrice(NodePtr spotNode = Input<double>::make("spot", 100.0))
+        : spot(std::move(spotNode))
+    {
         auto d1 = aad::DifferentiableNode<5>::make("d1", {spot, strike, vol, expiry, rate},
             [](const auto& s, const auto& k, const auto& v, const auto& t, const auto& r) {
                 using std::log; using std::sqrt;
@@ -1268,6 +1273,105 @@ TEST(Reduction, NewtonFindsAnImpliedVol) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// In an engine
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A solver as a node: an Eager compute node over the quote and the price, which
+// binds a reduction of the price over vol in its functor and runs Newton's
+// method on it. The price is one of its inputs, so the functor runs with the
+// price just pulled, which is when a reduction can be bound.
+TEST(Reduction, ASolverNodeInAnEngine) {
+    async::Engine engine;
+    auto spot  = async::AsyncInput<double>::make("spot", 100.0);
+    auto quote = async::AsyncInput<double>::make("quote", 12.0);
+    engine.addSource(spot);
+    engine.addSource(quote);
+    const CallPrice c(spot);
+
+    auto f = std::make_shared<Reduction>(c.call, std::vector<NodePtr>{c.vol});
+    int solves = 0;
+    auto implied = ComputeNode<double, double, double>::make("implied vol", {quote, c.call},
+        [f, &solves](const double& target, const double&) {
+            ++solves;
+            f->bind();
+            double vol = 0.2, slope = 0.0;
+            for (int i = 0; i < 20; ++i) {
+                const double miss = f->gradient({vol}, {&slope, 1}) - target;
+                if (std::abs(miss) < 1e-12) break;
+                vol -= miss / slope;
+            }
+            return vol;
+        });   // Eager, the default
+    std::vector<double> delivered;
+    engine.addOutput<double>(implied, [&](const double& v) { delivered.push_back(v); });
+
+    // The price at a vol, from a reduction of the test's own, bound between
+    // cycles to what the last one left.
+    Reduction price(c.call, {c.vol});
+    const auto priceAt = [&price](double vol) {
+        price.bind();
+        return price({vol});
+    };
+
+    engine.step();
+    ASSERT_EQ(delivered.size(), 1u);
+    EXPECT_EQ(solves, 1);
+    EXPECT_NEAR(priceAt(delivered[0]), 12.0, 1e-11);
+
+    spot->post(101.0);   // the same price from a higher spot takes less vol
+    engine.step();
+    ASSERT_EQ(delivered.size(), 2u);
+    EXPECT_EQ(solves, 2);
+    EXPECT_LT(delivered[1], delivered[0]);
+    EXPECT_NEAR(priceAt(delivered[1]), 12.0, 1e-11);
+
+    quote->post(12.5);
+    engine.step();
+    ASSERT_EQ(delivered.size(), 3u);
+    EXPECT_EQ(solves, 3);
+    EXPECT_GT(delivered[2], delivered[1]);
+    EXPECT_NEAR(priceAt(delivered[2]), 12.5, 1e-11);
+
+    engine.step();   // nothing moved
+    EXPECT_EQ(delivered.size(), 3u);
+    EXPECT_EQ(solves, 3);
+}
+
+// a·x + b, and the x at which it is 0, by one Newton step from the x the graph
+// holds, 2. Moving (a, b) from (2, −2) to (4, −6) leaves the root at 2 and moves
+// its zero from 1 to 1.5. The root's value stands still, so its callback does
+// not fire, and only an Eager node solves again.
+TEST(Reduction, ASolverNodeSeesAPointThatMovesWhileTheRootStandsStill) {
+    async::Engine engine;
+    auto a = async::AsyncInput<double>::make("a", 2.0);
+    auto b = async::AsyncInput<double>::make("b", -2.0);
+    engine.addSource(a);
+    engine.addSource(b);
+    auto x    = Input<double>::make("x", 2.0);
+    auto root = ops::SumNode<>::make("a.x+b", {ops::ProductNode<>::make("a.x", {a, x}), b});
+
+    auto f = std::make_shared<Reduction>(root, std::vector<NodePtr>{x});
+    auto zero = ComputeNode<double, double>::make("zero", {root},
+        [f](const double&) {
+            f->bind();
+            double slope = 0.0;
+            const double value = f->gradient({2.0}, {&slope, 1});
+            return 2.0 - value / slope;
+        });   // Eager, the default
+    std::vector<double> roots, zeros;
+    engine.addOutput<double>(root, [&](const double& v) { roots.push_back(v); });
+    engine.addOutput<double>(zero, [&](const double& v) { zeros.push_back(v); });
+
+    engine.step();
+    a->post(4.0);
+    b->post(-6.0);
+    engine.step();
+
+    EXPECT_EQ(roots, (std::vector<double>{2.0}));
+    EXPECT_EQ(zeros, (std::vector<double>{1.0, 1.5}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Constants and barriers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1472,6 +1576,48 @@ TEST(Reduction, AWarmGradientAllocatesNothing) {
     });
     EXPECT_EQ(allocs, 0);
     EXPECT_NE(sum, 0.0);
+}
+
+// A cycle that moves `a`, in which a node binds a reduction of x·x − a over x
+// and runs six Newton steps on it from 1. The reduction holds a's value from one
+// bind to the next, which pins one of the source's two buffers, and the source
+// publishes through the other.
+TEST(Reduction, ASolvingCycleAllocatesNothing) {
+    async::Engine engine;
+    auto a = async::AsyncInput<double>::make("a", 2.0);
+    engine.addSource(a);
+    auto x        = Input<double>::make("x", 1.0);
+    auto residual = ops::DiffNode<>::make("x.x-a", ops::ProductNode<>::make("x.x", {x, x}), a);
+
+    auto f = std::make_shared<Reduction>(residual, std::vector<NodePtr>{x});
+    auto root = ComputeNode<double, double>::make("sqrt(a)", {residual},
+        [f](const double&) {
+            f->bind();
+            double guess = 1.0, slope = 0.0;
+            for (int i = 0; i < 6; ++i) {
+                const double miss = f->gradient({guess}, {&slope, 1});
+                guess -= miss / slope;
+            }
+            return guess;
+        });   // Eager, the default
+    double last = 0.0;
+    long delivered = 0;
+    engine.addOutput<double>(root, [&](const double& v) { last = v; ++delivered; });
+
+    for (int i = 0; i < 10; ++i) {   // every buffer of every slot
+        a->post(2.0 + i);
+        engine.step();
+    }
+    delivered = 0;
+    const long allocs = allocations_during([&] {
+        for (int i = 0; i < 200; ++i) {
+            a->post(3.0 + (i % 7));
+            engine.step();
+        }
+    });
+    EXPECT_EQ(allocs, 0);
+    EXPECT_EQ(delivered, 200);
+    EXPECT_NEAR(last * last, 6.0, 1e-9);   // the last `a` is 3 + 199 % 7
 }
 
 int main(int argc, char** argv) {
