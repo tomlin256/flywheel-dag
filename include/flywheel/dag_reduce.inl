@@ -120,9 +120,15 @@ inline bool Reduction::holdsDouble(const ValuePtr& v) noexcept {
 
 inline std::string Reduction::barrierMessage(std::size_t barrier, std::size_t by) const {
     const Entry& e = entries_[barrier];
-    const std::string why = e.reducible
-        ? "gives no step"
-        : "is not an IReducible, so a reduction has no function of it to call";
+    const auto* base = dynamic_cast<const NodeBase*>(e.node.get());
+    std::string why;
+    if (!e.reducible)
+        why = "is not an IReducible, so a reduction has no function of it to call";
+    else if (base != nullptr && base->invalidationMode() == InvalidationMode::Eager)
+        why = "is Eager. Only InvalidationMode::Lazy says that a functor is a pure function of"
+              " its inputs: build the node Lazy if its functor is one";
+    else
+        why = "gives no step";
     return "dag::Reduction: " + args_[by]->name() + " reaches root " + root_->name()
          + " through " + e.node->name() + ", which " + why;
 }

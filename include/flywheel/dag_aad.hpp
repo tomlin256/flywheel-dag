@@ -373,6 +373,11 @@ struct RepeatedFn<T, std::index_sequence<Is...>> {
 // it twice. Reading captured state is allowed, and makes the node Eager, as it
 // would a ComputeNode.
 //
+// That contract also makes the node an IReducible that always gives a step, in
+// either mode: a Reduction (dag_reduce.hpp) runs the functor at double, at
+// values the graph does not hold. Captured state is read when the functor
+// runs, at each call.
+//
 // Why a sibling and not another ComputeNode::make(): std::function erases a
 // generic callable to one signature, so ComputeNode would need a second callable
 // member. That is an extra member on the hottest class in the engine, for a
@@ -382,6 +387,7 @@ template<std::size_t N>
 class DifferentiableNode
     : public NodeBase
     , public IDifferentiable
+    , public IReducible
     , public std::enable_shared_from_this<DifferentiableNode<N>>
 {
     static_assert(N > 0, "DifferentiableNode needs an input: a constant is an Input");
@@ -411,9 +417,14 @@ public:
     /// All N partials, from one call of the functor on duals.
     bool partials(EvalContext& ctx, Partials& out) override;
 
+    /// A step that runs the functor at double.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
 private:
     DifferentiableNode(std::string name, Inputs ins, Fn fn, DualFn dualFn,
                        EqualityPolicyPtr eq, InvalidationMode mode);
+
+    class Step;
 
     template<std::size_t... Is>
     ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);

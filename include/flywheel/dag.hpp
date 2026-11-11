@@ -288,6 +288,12 @@ enum class Dirtiness : std::uint8_t { Clean, Maybe, Dirty };
 // Lazy   recompute only when an input's value actually changed. Requires the
 //        functor to be a pure function of its declared inputs.
 //
+//        The same statement lets a dag::Reduction (dag_reduce.hpp) call the
+//        functor of a ComputeNode or an InPlaceComputeNode at values the graph
+//        does not hold. A Lazy node gives a reduction a step. An Eager one gives
+//        none and is a barrier: a functor that mutates state it captured, which
+//        must be Eager, would advance once for every trial value.
+//
 // Which of the two a node wants is a property of its functor, and only the
 // functor's author knows it. So the mode is set in the factory that WRITES the
 // functor, with no setter: a setter would let a graph site vouch for the purity
@@ -635,9 +641,16 @@ using InputPtr = std::shared_ptr<Input<T>>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ComputeNode<Out, Ins...> — typed node with a functor over typed inputs.
+//
+// An IReducible: built Lazy, it gives a Reduction a step that calls the
+// functor. Built Eager, it gives none (InvalidationMode).
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
-class ComputeNode : public NodeBase, public std::enable_shared_from_this<ComputeNode<Out, Ins...>> {
+class ComputeNode
+    : public NodeBase
+    , public IReducible
+    , public std::enable_shared_from_this<ComputeNode<Out, Ins...>>
+{
 public:
     using Fn = std::function<Out(const Ins&...)>;
     using InputTuple = std::tuple<std::conditional_t<true, NodePtr, Ins>...>;
@@ -663,9 +676,15 @@ public:
     std::vector<NodePtr> inputs() const override;
     NodeKind kind() const override { return NodeKind::Compute; }
 
+    /// A step that calls the functor, when the node is Lazy. Null when it is
+    /// Eager.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
 private:
     ComputeNode(std::string name, InputTuple ins, Fn fn, EqualityPolicyPtr eq,
                 InvalidationMode mode);
+
+    class Step;
 
     /// Pull every input, resolve, and — unless the resolve says to skip — invoke
     /// fn_ and publish the result. Returns what eval() returns. See the
@@ -715,16 +734,20 @@ using ComputeNodePtr = std::shared_ptr<ComputeNode<Out, Ins...>>;
 // scratch for you could not recycle anything.
 //
 // Everything else is ComputeNode: the same invalidation protocol, equality
-// policy and NodeKind::Compute, and the same reference-binding rule for input
-// types that are not trivially copyable. It is a sibling rather than a second
+// policy and NodeKind::Compute, the same reference-binding rule for input
+// types that are not trivially copyable, and a step for a Reduction when it is
+// Lazy. The step's functor writes into a scratch of the step's own, under the
+// same contract. It is a sibling rather than a second
 // make() on ComputeNode because the alternative puts a runtime branch and an
 // extra Out member on the hottest class in the engine, in every instantiation,
 // to serve the few nodes whose output owns heap.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
 class InPlaceComputeNode
-    : public NodeBase,
-      public std::enable_shared_from_this<InPlaceComputeNode<Out, Ins...>> {
+    : public NodeBase
+    , public IReducible
+    , public std::enable_shared_from_this<InPlaceComputeNode<Out, Ins...>>
+{
 public:
     /// Writes this cycle's value into `out`. See the contract above: `out` holds
     /// the previous cycle's value on entry.
@@ -745,9 +768,15 @@ public:
     std::vector<NodePtr> inputs() const override;
     NodeKind kind() const override { return NodeKind::Compute; }
 
+    /// A step that calls the functor, when the node is Lazy. Null when it is
+    /// Eager.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
 private:
     InPlaceComputeNode(std::string name, InputTuple ins, Fn fn,
                        EqualityPolicyPtr eq, InvalidationMode mode);
+
+    class Step;
 
     /// Pull, resolve, invoke fn_ into scratch_, publish. The same two paths as
     /// ComputeNode::applyInputs, chosen the same way.

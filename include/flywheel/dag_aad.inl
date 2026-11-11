@@ -529,6 +529,32 @@ void DifferentiableNode<N>::dualPartials(EvalContext& ctx, Partials& out,
     for (std::size_t i = 0; i < N; ++i) out.add(i, y.d[i]);
 }
 
+// The functor at double, as eval() runs it, at the values a reduction hands
+// it, published through a slot of the step's own.
+template<std::size_t N>
+class DifferentiableNode<N>::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const DifferentiableNode> node) : node_(std::move(node)) {}
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return call(in, std::make_index_sequence<N>{});
+    }
+
+private:
+    template<std::size_t... Is>
+    ValuePtr call(const ReduceInputs& in, std::index_sequence<Is...>) {
+        return slot_.emit(node_->fn_(get_value<double>(in[Is])...));
+    }
+
+    std::shared_ptr<const DifferentiableNode> node_;
+    ValueSlot<double>                         slot_;
+};
+
+template<std::size_t N>
+std::unique_ptr<IReduceStep> DifferentiableNode<N>::reduceStep() {
+    return std::make_unique<Step>(this->shared_from_this());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GradientNode
 // ─────────────────────────────────────────────────────────────────────────────

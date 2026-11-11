@@ -16,13 +16,17 @@
 #include "aad_test_graphs.hpp"
 #include "allocation_counter.hpp"
 #include "flywheel/dag.hpp"
+#include "flywheel/dag_aad.hpp"
+#include "flywheel/dag_memoize.hpp"
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_reduce.hpp"
 #include "flywheel/dag_timeseries.hpp"
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -170,6 +174,46 @@ private:
     ValuePtr    cached_;
     bool        held_ = false;
 };
+
+/// A Black–Scholes call, from ops and differentiable nodes: d1 is one
+/// differentiable node over all five inputs, d2 is ops over d1, and each normal
+/// CDF is a differentiable node over one input. Seventeen nodes, five of them
+/// inputs, and eight of the other twelve below vol.
+struct CallPrice {
+    InputPtr<double> spot   = Input<double>::make("spot", 100.0);
+    InputPtr<double> strike = Input<double>::make("strike", 95.0);
+    InputPtr<double> vol    = Input<double>::make("vol", 0.25);
+    InputPtr<double> expiry = Input<double>::make("expiry", 0.75);
+    InputPtr<double> rate   = Input<double>::make("rate", 0.03);
+    NodePtr call;
+
+    CallPrice() {
+        auto d1 = aad::DifferentiableNode<5>::make("d1", {spot, strike, vol, expiry, rate},
+            [](const auto& s, const auto& k, const auto& v, const auto& t, const auto& r) {
+                using std::log; using std::sqrt;
+                return (log(s / k) + (r + 0.5 * v * v) * t) / (v * sqrt(t));
+            },
+            InvalidationMode::Lazy);
+        auto volRootT = ops::ProductNode<>::make("vol.sqrt(expiry)",
+            {vol, ops::SqrtNode<>::make("sqrt(expiry)", expiry)});
+        auto d2 = ops::DiffNode<>::make("d2", d1, volRootT);
+        const auto cdf = [](const auto& x) {
+            using std::erfc; using std::sqrt;
+            return 0.5 * erfc(-x / sqrt(2.0));
+        };
+        auto nd1 = aad::DifferentiableNode<1>::make("N(d1)", {d1}, cdf, InvalidationMode::Lazy);
+        auto nd2 = aad::DifferentiableNode<1>::make("N(d2)", {d2}, cdf, InvalidationMode::Lazy);
+        auto discount = ops::ExpNode<>::make("discount", ops::NegateNode<>::make("-rate.expiry",
+            ops::ProductNode<>::make("rate.expiry", {rate, expiry})));
+        call = ops::DiffNode<>::make("call",
+            ops::ProductNode<>::make("spot.N(d1)", {spot, nd1}),
+            ops::ProductNode<>::make("strike.discount.N(d2)", {strike, discount, nd2}));
+    }
+};
+
+/// True when a generic functor is running on duals.
+template<typename T>
+constexpr bool isDual() { return !std::is_same_v<std::decay_t<T>, double>; }
 
 /// The message of the E that fn() throws. An exception of another type leaves
 /// the test, and fails it.
@@ -482,6 +526,217 @@ TEST(Reduction, RunsEachNodeOncePerCall) {
 
     EXPECT_EQ(f({3.0}), 30.0);
     EXPECT_EQ(shared->calls(), 3);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compute nodes: which functors are called
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(Reduction, ALazyComputeNodeIsCalled) {
+    auto x = Input<double>::make("x", 2.0);
+    auto k = Input<double>::make("k", 10.0);
+    int calls = 0;
+    auto scaled = ComputeNode<double, double, double>::make("scaled", {x, k},
+        [&calls](const double& a, const double& b) { ++calls; return a * b + 1.0; },
+        InvalidationMode::Lazy);
+    EvalContext ctx;
+    const ValuePtr held = scaled->eval(ctx);
+    ASSERT_EQ(calls, 1);
+
+    Reduction f = reduce(scaled, {x});
+    EXPECT_EQ(f.size(), 1u);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(f({3.0}), 31.0);
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(f({4.0}), 41.0);
+    EXPECT_EQ(calls, 3);
+
+    // The node holds what it held, and is not evaluated again.
+    EXPECT_FALSE(scaled->dirty());
+    EXPECT_EQ(scaled->eval(ctx).get(), held.get());
+    EXPECT_EQ(get_value<double>(held), 21.0);
+    EXPECT_EQ(calls, 3);
+}
+
+// Eager is the default, and what a functor with captured state must be, so
+// nothing says an Eager functor may run at a trial value. It does not run.
+TEST(Reduction, AnEagerComputeNodeIsABarrier) {
+    auto x = Input<double>::make("arg.x", 2.0);
+    int calls = 0;
+    auto eager = ComputeNode<double, double>::make("node.eager", {x},
+        [&calls](const double& a) { ++calls; return a + 1.0; });
+    EvalContext ctx;
+    eager->eval(ctx);
+    Reduction f(eager, {x});
+    const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
+    EXPECT_TRUE(mentions(why, "arg.x reaches root node.eager through node.eager")) << why;
+    EXPECT_TRUE(mentions(why, "is Eager")) << why;
+    EXPECT_TRUE(mentions(why, "InvalidationMode::Lazy")) << why;
+    EXPECT_EQ(calls, 1);
+
+    auto inPlace = InPlaceComputeNode<std::vector<double>, double>::make("node.in-place", {x},
+        [](std::vector<double>& out, const double& a) { out.assign({a, a}); });
+    auto total = ComputeNode<double, std::vector<double>>::make("root.total", {inPlace},
+        [](const std::vector<double>& v) { return v[0] + v[1]; }, InvalidationMode::Lazy);
+    total->eval(ctx);
+    Reduction g(total, {x});
+    const std::string whyNot = messageOf<std::domain_error>([&] { g.bind(); });
+    EXPECT_TRUE(mentions(whyNot, "arg.x reaches root root.total through node.in-place")) << whyNot;
+    EXPECT_TRUE(mentions(whyNot, "is Eager")) << whyNot;
+    EXPECT_TRUE(mentions(whyNot, "InvalidationMode::Lazy")) << whyNot;
+
+    // An Eager node that no argument moves is a constant like any other.
+    auto y       = Input<double>::make("y", 5.0);
+    auto product = ops::ProductNode<>::make("product", {x, eager, y});
+    product->eval(ctx);
+    Reduction ofY = reduce(product, {y});
+    EXPECT_EQ(ofY.size(), 1u);
+    EXPECT_EQ(ofY({7.0}), 42.0);
+    EXPECT_EQ(calls, 1);
+}
+
+// Only the arguments and the root are doubles.
+TEST(Reduction, NodesBetweenHoldAnyType) {
+    auto x = Input<double>::make("x", 2.0);
+    auto ladder = InPlaceComputeNode<std::vector<double>, double>::make("ladder", {x},
+        [](std::vector<double>& out, const double& a) { out.assign({a, 2.0 * a, 3.0 * a}); },
+        InvalidationMode::Lazy);
+    auto total = ComputeNode<double, std::vector<double>>::make("total", {ladder},
+        [](const std::vector<double>& v) { return v[0] + v[1] + v[2]; }, InvalidationMode::Lazy);
+    EvalContext ctx;
+    const ValuePtr held = total->eval(ctx);
+    ASSERT_EQ(get_value<double>(held), 12.0);
+
+    Reduction f = reduce(total, {x});
+    EXPECT_EQ(f.size(), 2u);
+    EXPECT_EQ(f({5.0}), 30.0);
+    EXPECT_EQ(f({1.0}), 6.0);
+}
+
+// An in-place functor is handed the value of its last run. The functor here
+// records what it was handed, so the test can tell whose that was: the node's
+// own runs are handed the node's last value, and never a call's.
+TEST(Reduction, AnInPlaceStepHasAScratchOfItsOwn) {
+    auto x = Input<double>::make("x", 2.0);
+    std::vector<double> handed;
+    auto pair = InPlaceComputeNode<std::vector<double>, double>::make("pair", {x},
+        [&handed](std::vector<double>& out, const double& a) {
+            handed = out;
+            out.assign({a, a});
+        },
+        InvalidationMode::Lazy);
+    auto total = ComputeNode<double, std::vector<double>>::make("total", {pair},
+        [](const std::vector<double>& v) { return v[0] + v[1]; }, InvalidationMode::Lazy);
+    EvalContext ctx;
+    for (const double v : {2.0, 2.5, 3.0}) {   // both buffers of each slot
+        x->set(v);
+        total->eval(ctx);
+    }
+    ASSERT_EQ(handed, (std::vector<double>{2.5, 2.5}));
+
+    Reduction f = reduce(total, {x});
+    for (int i = 0; i < 3; ++i) EXPECT_EQ(f({10.0 + i}), 20.0 + 2.0 * i);
+    EXPECT_EQ(handed, (std::vector<double>{11.0, 11.0}));   // the step's last run but one
+
+    double sum = 0.0;
+    EXPECT_EQ(allocations_during([&] { sum += f({7.0}) + f({8.0}); }), 0);
+    EXPECT_EQ(sum, 30.0);
+
+    // The node's next run is handed {3, 3}, the value of its own last run.
+    x->set(4.0);
+    double value = 0.0;
+    EXPECT_EQ(allocations_during([&] {
+        const ValuePtr v = total->eval(ctx);
+        value = get_value<double>(v);
+    }), 0);
+    EXPECT_EQ(value, 8.0);
+    EXPECT_EQ(handed, (std::vector<double>{3.0, 3.0}));
+}
+
+// A step that published through its node's slot would leave the reduction
+// holding one of the slot's two buffers, and the node's next run would allocate.
+TEST(Reduction, ACallLeavesANodesSlotAlone) {
+    auto x = Input<double>::make("x", 1.0);
+    auto doubled = ComputeNode<double, double>::make("doubled", {x},
+        [](const double& a) { return 2.0 * a; }, InvalidationMode::Lazy);
+    EvalContext ctx;
+    for (const double v : {1.0, 2.0, 3.0}) {   // both buffers of its slot
+        x->set(v);
+        doubled->eval(ctx);
+    }
+    Reduction f = reduce(doubled, {x});
+    for (int i = 0; i < 3; ++i) EXPECT_EQ(f({5.0 + i}), 10.0 + 2.0 * i);
+
+    for (const double v : {4.0, 5.0}) {
+        x->set(v);   // Input::set allocates, by design, so it is not counted
+        EXPECT_EQ(allocations_during([&] { doubled->eval(ctx); }), 0);
+    }
+}
+
+// The cache is keyed by the input values, so calls through it would fill it
+// with trial values. The step calls the functor.
+TEST(Reduction, AMemoizedNodeIsCalledPastItsCache) {
+    using Memo = MemoizedComputeNode<double, double>;
+    Memo::clearCache();
+    auto x = Input<double>::make("x", 2.0);
+    int calls = 0;
+    auto squared = Memo::make("reduction.squared", {x},
+        [&calls](const double& a) { ++calls; return a * a; });   // Eager, and called all the same
+    EvalContext ctx;
+    squared->eval(ctx);
+    ASSERT_EQ(Memo::cacheSize(), 1u);
+    ASSERT_EQ(squared->cacheMisses(), 1u);
+    ASSERT_EQ(squared->cacheHits(), 0u);
+
+    Reduction f = reduce(squared, {x});
+    EXPECT_EQ(f.size(), 1u);
+    for (int i = 0; i < 50; ++i) EXPECT_EQ(f({3.0 + i}), (3.0 + i) * (3.0 + i));
+    EXPECT_EQ(calls, 51);
+    EXPECT_EQ(Memo::cacheSize(), 1u);
+    EXPECT_EQ(squared->cacheMisses(), 1u);
+    EXPECT_EQ(squared->cacheHits(), 0u);
+    Memo::clearCache();
+}
+
+// A tape runs a differentiable node's functor on duals. A call does not.
+TEST(Reduction, ADifferentiableNodeIsCalledAtDouble) {
+    auto x = Input<double>::make("x", 1.5);
+    auto y = Input<double>::make("y", 0.5);
+    int doubles = 0, duals = 0;
+    auto product = aad::DifferentiableNode<2>::make("x.exp(y)", {x, y},
+        [&doubles, &duals](const auto& a, const auto& b) {
+            using std::exp;
+            if constexpr (isDual<decltype(a)>()) ++duals;
+            else ++doubles;
+            return a * exp(b);
+        });   // Eager, and called all the same
+    EvalContext ctx;
+    product->eval(ctx);
+    ASSERT_EQ(doubles, 1);
+
+    Reduction f = reduce(product, {x, y});
+    EXPECT_EQ(f.size(), 1u);
+    EXPECT_EQ(f({2.0, 0.0}), 2.0);
+    for (int i = 0; i < 4; ++i) f({1.0 + i, 0.25});
+    EXPECT_EQ(doubles, 6);
+    EXPECT_EQ(duals, 0);
+}
+
+// To the bit, through three differentiable nodes and five ops.
+TEST(Reduction, ACallPriceAsAFunctionOfVol) {
+    const CallPrice c;
+    EvalContext ctx;
+    const ValuePtr held = c.call->eval(ctx);
+
+    Reduction f = reduce(c.call, {c.vol});
+    EXPECT_EQ(f.size(), 8u);
+    EXPECT_EQ(f({0.25}), get_value<double>(held));
+
+    const double there = f({0.30});
+    c.vol->set(0.30);
+    const ValuePtr moved = c.call->eval(ctx);
+    EXPECT_EQ(there, get_value<double>(moved));
+    EXPECT_NE(there, get_value<double>(held));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

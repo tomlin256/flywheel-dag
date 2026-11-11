@@ -119,6 +119,37 @@ std::vector<NodePtr> MemoizedComputeNode<Out, Ins...>::inputs() const {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The step a Reduction calls
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The functor itself, at the values a reduction hands it. Not the cache: a
+// solver's trial values would each add an entry to a map that never shrinks,
+// and count as this node's hits and misses.
+template<typename Out, typename... Ins>
+class MemoizedComputeNode<Out, Ins...>::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const MemoizedComputeNode> node) : node_(std::move(node)) {}
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return call(in, std::index_sequence_for<Ins...>{});
+    }
+
+private:
+    template<std::size_t... Is>
+    ValuePtr call([[maybe_unused]] const ReduceInputs& in, std::index_sequence<Is...>) {
+        return slot_.emit(node_->fn_(get_value<Ins>(in[Is])...));
+    }
+
+    std::shared_ptr<const MemoizedComputeNode> node_;
+    ValueSlot<Out>                             slot_;
+};
+
+template<typename Out, typename... Ins>
+std::unique_ptr<IReduceStep> MemoizedComputeNode<Out, Ins...>::reduceStep() {
+    return std::make_unique<Step>(this->shared_from_this());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cache management
 // ─────────────────────────────────────────────────────────────────────────────
 

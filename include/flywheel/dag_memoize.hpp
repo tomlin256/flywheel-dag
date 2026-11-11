@@ -67,10 +67,16 @@ std::size_t hash_tuple(const std::string& name, const Tuple& t,
 //   - The node name must uniquely identify the functor being memoized. Two
 //     nodes with the same name but different functors will share cache entries
 //     and produce incorrect results.
+//
+// An IReducible: it always gives a Reduction (dag_reduce.hpp) a step, in either
+// mode, because the purity the cache needs is what lets the functor run at a
+// trial value. The step calls the functor and never the cache, which trial
+// values would fill.
 
 template<typename Out, typename... Ins>
 class MemoizedComputeNode
     : public NodeBase
+    , public IReducible
     , public std::enable_shared_from_this<MemoizedComputeNode<Out, Ins...>>
 {
 public:
@@ -92,6 +98,9 @@ public:
     std::vector<NodePtr> inputs() const override;
     NodeKind             kind()   const override { return NodeKind::Compute; }
 
+    /// A step that calls the functor, past the cache.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
     // Cache management — shared per <Out, Ins...> instantiation.
     static void        clearCache();
     static std::size_t cacheSize();
@@ -103,6 +112,8 @@ public:
 private:
     MemoizedComputeNode(std::string name, InputTuple ins, Fn fn,
                         EqualityPolicyPtr eq, InvalidationMode mode);
+
+    class Step;
 
     template<std::size_t... Is>
     std::tuple<Ins...>   evalInputs(EvalContext& ctx, std::index_sequence<Is...>);

@@ -287,6 +287,39 @@ std::vector<NodePtr> ComputeNode<Out, Ins...>::collectInputs(
     return { std::get<Is>(inputs_)... };
 }
 
+// The functor, at the values a reduction hands it. The step holds the node,
+// whose fn_ it calls, and publishes through a slot of its own, so the node's
+// slot_ and cached_ stay as the node's last eval() left them.
+template<typename Out, typename... Ins>
+class ComputeNode<Out, Ins...>::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const ComputeNode> node) : node_(std::move(node)) {}
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return call(in, std::index_sequence_for<Ins...>{});
+    }
+
+private:
+    // The references bind into values that the reduction holds for the whole
+    // call, so nothing needs copying out.
+    template<std::size_t... Is>
+    ValuePtr call([[maybe_unused]] const ReduceInputs& in, std::index_sequence<Is...>) {
+        return slot_.emit(node_->fn_(get_value<Ins>(in[Is])...));
+    }
+
+    std::shared_ptr<const ComputeNode> node_;
+    ValueSlot<Out>                     slot_;
+};
+
+// Only a Lazy node gives a step. Lazy is its author's statement that the
+// functor is a pure function of its inputs, and nothing else says that the
+// functor may run at a trial value.
+template<typename Out, typename... Ins>
+std::unique_ptr<IReduceStep> ComputeNode<Out, Ins...>::reduceStep() {
+    if (invalidationMode() != InvalidationMode::Lazy) return nullptr;
+    return std::make_unique<Step>(this->shared_from_this());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // InPlaceComputeNode<Out, Ins...>
 // ─────────────────────────────────────────────────────────────────────────────
@@ -387,6 +420,38 @@ std::vector<NodePtr> InPlaceComputeNode<Out, Ins...>::collectInputs(
     std::index_sequence<Is...>) const
 {
     return { std::get<Is>(inputs_)... };
+}
+
+// ComputeNode's step, with a scratch of its own for the functor to write into.
+// The node's scratch_ holds the value of the node's last run, which the node's
+// next run is handed, so a call must not write there. The step's scratch holds
+// the value of the step's last call, under the class's contract.
+template<typename Out, typename... Ins>
+class InPlaceComputeNode<Out, Ins...>::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const InPlaceComputeNode> node) : node_(std::move(node)) {}
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return call(in, std::index_sequence_for<Ins...>{});
+    }
+
+private:
+    template<std::size_t... Is>
+    ValuePtr call([[maybe_unused]] const ReduceInputs& in, std::index_sequence<Is...>) {
+        node_->fn_(scratch_, get_value<Ins>(in[Is])...);
+        return slot_.emit(std::as_const(scratch_));
+    }
+
+    std::shared_ptr<const InPlaceComputeNode> node_;
+    Out                                       scratch_{};
+    ValueSlot<Out>                            slot_;
+};
+
+// Only a Lazy node gives a step: see ComputeNode::reduceStep().
+template<typename Out, typename... Ins>
+std::unique_ptr<IReduceStep> InPlaceComputeNode<Out, Ins...>::reduceStep() {
+    if (invalidationMode() != InvalidationMode::Lazy) return nullptr;
+    return std::make_unique<Step>(this->shared_from_this());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

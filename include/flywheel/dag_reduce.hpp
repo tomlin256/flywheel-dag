@@ -56,9 +56,24 @@
 // Which nodes can be called
 // ─────────────────────────
 // A node that an argument moves is called through its step, so it must give
-// one. Every dag::ops node does, and so does a node of your own that
-// implements IReducible. Any other node with an argument above it is a
-// BARRIER.
+// one. A reduction calls a functor only where a contract its author has already
+// accepted makes that safe:
+//
+//   • Every dag::ops node. They are structurally pure: Op{} is built at each
+//     evaluation.
+//   • aad::DifferentiableNode. Its contract is a functor with no side effects,
+//     which a tape runs again too.
+//   • MemoizedComputeNode. Its contract is a functor that is a pure function.
+//     The step calls the functor and not the cache, which trial values would
+//     fill.
+//   • ComputeNode and InPlaceComputeNode, when Lazy. Lazy is the author's
+//     statement that the functor is a pure function of its inputs. Eager says
+//     nothing, and is what a functor with captured state must be: called at
+//     trial values, such a functor would advance on every one.
+//   • A node of your own that implements IReducible.
+//
+// Any other node with an argument above it is a BARRIER, every dag::ts node
+// and an Eager compute node among them.
 //
 // The rules
 // ─────────

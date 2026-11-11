@@ -300,6 +300,12 @@ D5 and D9 are answered below (2026-11-11). The other defaults stand if you appro
   `INode` and `NodeBase` alone, and its cost on the hot path is inside the noise (above). *Alternative:* two virtuals with
   defaults on `NodeBase`. No object grows and the hot path's machine code is provably the same, but `NodeBase` gains a
   concern that is not the dirty protocol. Step 2 switches to it if the full sweep shows a cost.
+  *Measured in Step 2 (2026-11-11, the Outcome has the table):* the mixin costs `chain` 0.37% on average over the 16
+  alignments, about 1 ns in 266, between nothing and 1.1%, and a control shows that the 8 bytes are the cause. `ingest`
+  and `idle-queues` show nothing. Step 2's rule asks for a slowdown at every alignment that exceeds what `idle-queues`
+  moves, and finds one at 13 of 16, so the mixin stays. The alternative would close the cost. **Open for you before
+  the release in Step 7:** keep the mixin at this cost, or take the alternative, which changes D8's names (no
+  `IReducible`) and is a break once v1.3.0 is tagged.
 - **D3 One root, and doubles at the boundary.** A solver's function is ℝⁿ → ℝ. Several roots from one reduction (a
   least-squares fit shares most of its subgraph between residuals) is a follow-up issue: until then, one reduction per
   root.
@@ -437,6 +443,11 @@ same.
 
 *Done when:* red then green; the checkpoint; each change as stated; the sweep's table is in the Outcome; pushed. Commit:
 `feat: a reduction calls Lazy compute nodes, differentiable nodes and memoized nodes`.
+
+*As built* (the Outcome has the results). The barrier's message gains its third reason here, with the nodes that have
+it: an `IReducible` that is `Eager` and gives no step. The sweep was run twice, and the second time with a control the
+plan did not ask for: the base headers with the 8 bytes and nothing else. The mixin stays, by the rule above, and it is
+not free: `chain` reads 0.4% slower on average. The Outcome says what was measured, and D2 what closes it.
 
 ### Step 3 — Selection and tweaks, one commit
 
@@ -601,7 +612,7 @@ recorded here. Commit: `build: release v1.3.0`.
 |---|---|---|
 | 0 Approval | Done | Pushed and linked from flywheel-dag#55; D5 and D9 answered, and the plan approved, 2026-11-11. |
 | 1 The contract, the ops, and a reduction's values | Done | 2026-11-11. 22 tests; the checkpoint at 84; 15 hand-made changes caught. See the Outcome. |
-| 2 Compute nodes, and which functors may be called | Not started | |
+| 2 Compute nodes, and which functors may be called | Done | 2026-11-11. 30 tests; 9 hand-made changes caught; the mixin stays by Step 2's rule, at a measured 0.37% on `chain` (D2 is open for you). See the Outcome. |
 | 3 Selection and tweaks | Not started | |
 | 4 The gradient | Not started | |
 | 5 In an engine, and the benchmark row | Not started | |
@@ -647,3 +658,84 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   | `ReduceReads::reads()` overwrites a deciding input | `ReduceContract.ReadsRecordsWhatANodeNames` alone |
   | `IReducible::reduceReads()` names no input by default | `ReduceContract.ANodeReadsEveryInputUnlessItSaysOtherwise`, and 16 of the `Reduction` tests |
   | `ReduceInputs` ignores the positions it is given | `ReduceContract.InputsAreAViewOfTheReductionsValues`, and 7 of the `Reduction` tests |
+
+### Step 2 — compute nodes, and which functors may be called (2026-11-11)
+
+- **Red, then green.** The eight tests were written against the headers of Step 1 and all eight failed, each on a
+  compute node that was a barrier. With the code, 30 of 30.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 30 of 30 | not run | equal |
+
+- **The hand-made changes.** Each of the five fails the test its row names, and no other, against a control that
+  passed 30 of 30. Four more, for what the table left out:
+
+  | Change made by hand, then reverted | Fails |
+  |---|---|
+  | `InPlaceComputeNode::reduceStep()` returns a step whatever the mode | `AnEagerComputeNodeIsABarrier` |
+  | The barrier's message does not look at the mode | `AnEagerComputeNodeIsABarrier` |
+  | `MemoizedComputeNode` gives a step only when `Lazy` | `AMemoizedNodeIsCalledPastItsCache` |
+  | `DifferentiableNode` gives a step only when `Lazy` | `ADifferentiableNodeIsCalledAtDouble` |
+
+- **The hot path: what did not change.** `Engine::cycle()` in `bench_hot_path` is the same 188 lines of machine code
+  before Step 1 and after Step 2. The destructor of its guard differs in one `adrp`/`add` pair, the address of a string
+  on its cold path: layout, not behaviour.
+- **The hot path: what grew.** Each class that joins is 8 bytes larger: `ComputeNode<double, double>` 200 to 208,
+  `InPlaceComputeNode<std::vector<double>, double>` 224 to 232, `ops::ProductNode<>` 184 to 192, `ops::DiffNode<>` 192
+  to 200, `aad::DifferentiableNode<1>` 240 to 248, `MemoizedComputeNode<double, double>` 216 to 224.
+- **The hot path: what it costs.** Apple M4 Pro. `bench_hot_path`'s three rows, built from the headers before Step 1
+  and from this step's, behind a pad of 0 to 15 nops, so that `Engine::cycle()` lands at each of the 16 alignments.
+  Each binary was run 30 times in shuffled order, over two sessions, each run the median of 7 timings in a warm
+  process. Paired by where `cycle()` lands, ns/cycle, this step's / before:
+
+  | `cycle()` mod 64 | `chain` | `idle-queues` | `ingest` |
+  |---|---|---|---|
+  | 0 | 266.10 / 266.05 (+0.0%) | 230.33 / 230.34 (-0.0%) | 122.36 / 123.76 (-1.1%) |
+  | 4 | 266.12 / 265.24 (+0.3%) | 231.08 / 230.73 (+0.2%) | 122.23 / 122.60 (-0.3%) |
+  | 8 | 267.24 / 264.27 (+1.1%) | 230.34 / 255.54 (-9.9%) | 123.08 / 122.39 (+0.6%) |
+  | 12 | 267.06 / 265.18 (+0.7%) | 230.44 / 230.33 (+0.0%) | 121.69 / 123.32 (-1.3%) |
+  | 16 | 267.55 / 265.19 (+0.9%) | 230.46 / 230.36 (+0.0%) | 123.61 / 122.10 (+1.2%) |
+  | 20 | 266.79 / 265.95 (+0.3%) | 230.49 / 230.43 (+0.0%) | 123.37 / 123.43 (-0.1%) |
+  | 24 | 267.01 / 266.41 (+0.2%) | 230.62 / 230.25 (+0.2%) | 122.23 / 122.80 (-0.5%) |
+  | 28 | 267.06 / 264.94 (+0.8%) | 230.57 / 230.67 (-0.0%) | 121.93 / 122.05 (-0.1%) |
+  | 32 | 267.04 / 265.87 (+0.4%) | 230.36 / 230.28 (+0.0%) | 121.96 / 123.15 (-1.0%) |
+  | 36 | 266.62 / 266.07 (+0.2%) | 230.63 / 230.76 (-0.1%) | 121.67 / 123.78 (-1.7%) |
+  | 40 | 266.17 / 266.34 (-0.1%) | 230.42 / 230.46 (-0.0%) | 122.84 / 121.81 (+0.8%) |
+  | 44 | 266.60 / 265.85 (+0.3%) | 230.49 / 230.29 (+0.1%) | 122.56 / 122.75 (-0.1%) |
+  | 48 | 266.66 / 265.55 (+0.4%) | 230.76 / 230.39 (+0.2%) | 123.32 / 123.53 (-0.2%) |
+  | 52 | 266.52 / 266.37 (+0.1%) | 230.36 / 230.54 (-0.1%) | 123.04 / 121.77 (+1.0%) |
+  | 56 | 266.12 / 265.89 (+0.1%) | 230.24 / 230.25 (-0.0%) | 122.69 / 122.78 (-0.1%) |
+  | 60 | 266.30 / 266.07 (+0.1%) | 230.46 / 230.40 (+0.0%) | 122.72 / 122.29 (+0.4%) |
+
+  | Over the 16 alignments | `chain` | `idle-queues` | `ingest` |
+  |---|---|---|---|
+  | Mean change | +0.37% | −0.58%, and +0.04% without alignment 8 | −0.15% |
+  | Range | −0.1% to +1.1% | −9.9% to +0.2% | −1.7% to +1.2% |
+  | Slower at | 15 of 16 | 9 of 16 | 5 of 16 |
+  | Slower by more than `idle-queues` moved there | 13 of 16 | | 4 of 16 |
+  | The headers before Step 1 alone, lowest to highest | 0.8% | 11.0% | 1.6% |
+
+  `idle-queues` holds no class that changed. Its one large figure, at alignment 8, is the older binary reading 255 ns
+  where every other binary reads 230: a slow alignment of that binary, the same in both sessions.
+
+  The second session added a control that the plan did not ask for: the headers before Step 1 with a second
+  polymorphic base on `ComputeNode`, `InPlaceComputeNode` and `OpNodeImpl`, and no other change. Against the headers
+  before Step 1, over the 16 alignments of that session:
+
+  | 15 runs per binary | `chain` | `idle-queues` | `ingest` |
+  |---|---|---|---|
+  | The control: the 8 bytes alone | +0.37%, slower at 14 | +0.01% at the median | −0.26%, slower at 7 |
+  | This step's headers | +0.35%, slower at 16 | +0.03% at the median | −0.27%, slower at 5 |
+  | This step's headers against the control | −0.02%, slower at 6 | 0.00% | −0.01%, slower at 6 |
+
+  So the cost is real, it is small, and it is the 8 bytes: `chain`, which holds three of the grown nodes among its
+  eleven, runs 0.37% slower on average, about 1 ns in 266, by nothing at some alignments and by 1.1% at the worst.
+  `ingest` and `idle-queues` show none.
+- **The rule.** The mixin goes if `chain` or `ingest` is slower at every alignment by more than `idle-queues` moves.
+  `chain` is slower by more than `idle-queues` moved at 13 of the 16, and `ingest` at 4, so by the rule the mixin
+  stays, and it stayed. That is the rule's answer and not a claim that the mixin is free: D2's alternative would close
+  the cost, and D2 now asks which you want before the release.
