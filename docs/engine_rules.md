@@ -1,6 +1,6 @@
 # Engine rules — for code that builds nodes and drives an engine
 
-The contract is written beside the code, in the comment blocks of the headers (`dag.hpp`, `dag_async.hpp`, `dag_engine.hpp`, `dag_state_store.hpp`, `dag_ops.hpp`, `dag_timeseries.hpp`, `dag_aad.hpp`): read the block before editing the code under it. This file holds only what the code cannot say in one place.
+The contract is written beside the code, in the comment blocks of the headers (`dag.hpp`, `dag_async.hpp`, `dag_engine.hpp`, `dag_state_store.hpp`, `dag_ops.hpp`, `dag_timeseries.hpp`, `dag_aad.hpp`, `dag_reduce.hpp`): read the block before editing the code under it. This file holds only what the code cannot say in one place.
 
 ## Writing nodes
 
@@ -10,6 +10,7 @@ The contract is written beside the code, in the comment blocks of the headers (`
 - An equality policy gates downstream work only at a source, at a registered output, and at an intermediate node with `Lazy` consumers. An intermediate node whose consumers are all `Eager` gains nothing from comparing: give it `AlwaysChangedPolicy`. A policy compares against the last value *published*, not the last one computed.
 - `InPlaceComputeNode<Out, Ins...>` is for an `Out` that owns heap. Its functor is `void(Out& out, const Ins&...)` and `out` arrives holding the previous evaluation's value: overwrite everything it owns on every path, early returns included. A functor that appends without clearing grows without bound, and only a test that evaluates twice catches it.
 - A node that pulls inputs calls `beginEval()` before its first pull, and `endEval()` in place of `markClean()` wherever its evaluation ends, skip paths included (flywheel-dag#18). A source, or a tweaked node returning its frozen value, pulls nothing and calls `markClean()`. Override `propagate()` or `dirty()` only for the three reasons listed in `dag.hpp`. `downstream_` is private: reach it through `notifyDownstream()`.
+- A `dag::Reduction` (`dag_reduce.hpp`) calls a functor at values the graph does not hold. It calls a `Lazy` compute node and refuses an `Eager` one, so `Lazy` vouches for purity there too. A node of your own joins by implementing `IReducible`.
 - No node reads a wall clock. Time enters as a DAG input (`makeTimeDelayNode`), which keeps replay deterministic.
 
 ## Threads and the engine

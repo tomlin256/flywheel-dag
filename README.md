@@ -29,6 +29,9 @@ evaluates only the part of the graph they dirtied.
   at the values the graph holds. A compute node written as a generic lambda is differentiated with
   dual numbers, and gradient and tangent nodes deliver sensitivities through the engine like any
   other output.
+- **A subgraph as a function** (`dag::reduce`) — the nodes between some arguments and an output, as a
+  function that a solver calls at any point, with a gradient, without moving the graph and without
+  allocating once warm.
 - **Snapshot and restore** of stateful nodes, discovered by walking the graph; a JSON file store
   writes atomically.
 - **Deterministic replay** of recorded sessions through an unmodified graph, with no threads or
@@ -187,6 +190,66 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
   `aad::TangentNode::make("along x", {f, g}, {{x, 1.0}})` holds ∂f/∂x and ∂g/∂x, for another
   root `g`.
 
+### A subgraph as a function
+
+`dag_reduce.hpp` turns the nodes between some argument nodes and a root into a function of the arguments, so
+that a solver can ask what an output would be, had an input been x, without setting the input:
+
+```cpp
+#include <flywheel/dag_reduce.hpp>
+
+EvalContext ctx;
+price->eval(ctx);                               // a reduction reads a clean root
+
+dag::Reduction f = dag::reduce(price, {vol});   // price as a function of vol
+f({0.30});                                      // the price, had vol been 0.30
+double vega = 0.0;
+f.gradient({0.30}, {&vega, 1});                 // the same, and ∂price/∂vol there
+
+spot->set(101.0);                               // the point moves,
+price->eval(ctx);
+f.bind();                                       // so read it again
+```
+
+- A call moves nothing in the graph: no node is evaluated or invalidated, and no stateful node ticks. Once warm, a
+  call, a gradient and a `bind()` allocate nothing. [`examples/reduce.cpp`](examples/reduce.cpp) finds an implied
+  volatility this way, by Newton's method, and checks it against the graph.
+- Everything no argument reaches is a constant, which `bind()` reads from the graph. A bound reduction describes one
+  point: once a value it read moves, bind it again. `bind()` needs a clean root that holds a double and evaluates
+  nothing, so bind in the root's output callback, in a node that has just pulled the root, or after evaluating it.
+- A node that an argument moves is called through a step it gives the reduction. A reduction calls a functor only where
+  a contract its author has already accepted makes that safe:
+
+  | Node | Called |
+  |---|---|
+  | Every `dag::ops` node, and `ConditionNode` | Always |
+  | `aad::DifferentiableNode`, `MemoizedComputeNode` | Always: the one's functor has no side effects, and the other's is a pure function |
+  | `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode` | When `Lazy`, which says that the functor is a pure function of its inputs |
+  | Every `dag::ts` node, an `Eager` compute node, a node without `IReducible` | Never: a barrier |
+
+  A barrier that an argument moves makes `bind()` throw `std::domain_error`, naming the argument and the node. A node
+  of your own joins by implementing `IReducible`.
+- `bind()` follows the branch a `ConditionNode` took, and takes a tweaked node as a constant. A condition that an
+  argument moves is refused: a piecewise function of an argument belongs inside one functor.
+- The gradient sweeps the ops' closed-form partials and a `DifferentiableNode`'s dual numbers in reverse, at the trial
+  point. A step with no partials, such as a `Lazy` `ComputeNode`, makes `gradient()` throw, and calls still work.
+- In an engine, a solver is an `Eager` compute node over the root, which binds in its functor:
+
+  ```cpp
+  auto f = std::make_shared<dag::Reduction>(price, std::vector<NodePtr>{vol});
+  auto implied = ComputeNode<double, double, double>::make("implied vol", {quote, price},
+      [f](const double& target, const double&) {
+          f->bind();            // price has just been pulled, so it is clean
+          double v = 0.2, vega = 0.0;
+          for (int i = 0; i < 20; ++i) {
+              const double miss = f->gradient({v}, {&vega, 1}) - target;
+              if (std::abs(miss) < 1e-12) break;
+              v -= miss / vega;
+          }
+          return v;
+      });   // Eager, the default: the point can move while the price stands still
+  ```
+
 ## Concepts
 
 - **Build nodes with `make()`**, never a constructor: `make()` wires the node into the graph once
@@ -214,13 +277,14 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 
 | Header | Namespace | Provides |
 |---|---|---|
-| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase`, `aad::IDifferentiable` |
+| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase`, `aad::IDifferentiable`, `IReducible` |
 | `dag_async.hpp` | `dag::async` | `AsyncInput`, `AsyncQueue`, `FeedRegistry`, `TickLoop` |
 | `dag_engine.hpp` | `dag::async` | `Engine`, `CycleSeqLock` |
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
 | `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `SinNode`, `CosNode`, `TanNode`, `AsinNode`, `AcosNode`, `AtanNode`, `Atan2Node`, `Derivative` |
 | `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual`, `GradientNode`, `TangentNode` |
+| `dag_reduce.hpp` | `dag` | `reduce`, `Reduction` — a subgraph as a function, with a gradient |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
@@ -384,8 +448,8 @@ CI prints the timings and fails if `--invariants` differs from
 
 The engine's contract is written beside the code, in the comment blocks of its headers: the
 invalidation protocol and what an equality policy can and cannot gate in `dag.hpp`, the rules for
-flushing and allocation in `dag_async.hpp`, the cycle in `dag_engine.hpp`, and state persistence in
-`dag_state_store.hpp`. [`docs/plans/`](docs/plans) has the reasoning behind each fix.
+flushing and allocation in `dag_async.hpp`, the cycle in `dag_engine.hpp`, state persistence in
+`dag_state_store.hpp`, and what a reduction may call in `dag_reduce.hpp`. [`docs/plans/`](docs/plans) has the reasoning behind each fix.
 [`CLAUDE.md`](CLAUDE.md) is the short list of rules a contributor or coding agent needs before
 touching any of it, and [`docs/engine_rules.md`](docs/engine_rules.md) holds the rules for code that
 builds nodes and drives an engine.

@@ -4,6 +4,9 @@ target_link_libraries(quickstart PRIVATE flywheel::dag)
 add_executable(aad aad.cpp)
 target_link_libraries(aad PRIVATE flywheel::dag)
 
+add_executable(reduce reduce.cpp)
+target_link_libraries(reduce PRIVATE flywheel::dag)
+
 if(FLYWHEEL_DAG_BUILD_TESTS)
   # The example doubles as a test: its signal has exactly eight spikes in 2000
   # cycles, so a correct graph reports exactly eight episodes, each resolved.
@@ -16,4 +19,11 @@ if(FLYWHEEL_DAG_BUILD_TESTS)
   add_test(NAME example_aad COMMAND aad)
   set_tests_properties(example_aad PROPERTIES
     PASS_REGULAR_EXPRESSION "reverse, forward and bumped agree")
+
+  # And this one: its last line says whether a reduction's price at the vol its
+  # solver found is the graph's price once the input is set there. It prints
+  # that line only when it is.
+  add_test(NAME example_reduce COMMAND reduce)
+  set_tests_properties(example_reduce PROPERTIES
+    PASS_REGULAR_EXPRESSION "the function and the graph agree")
 endif()

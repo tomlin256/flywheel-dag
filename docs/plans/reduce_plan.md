@@ -575,6 +575,10 @@ the same line.
 *Done when:* the checkpoint at 85 tests; `test_claude_md_budget` and `test_comment_refs` pass; the issues exist and I
 have told you their numbers, labels and milestone. Commit: `docs: describe dag::reduce, with an example`.
 
+*As built* (the Outcome has the results). The header comments were written with the code, step by step, so this step
+adds none. `docs/engine_rules.md` grew by 263 bytes, to 5,640 of its 6,000. The closing comment on flywheel-dag#55 and
+its close wait with Step 7 for your answer to D2: if the mixin goes, the work goes on under this issue.
+
 ### Step 7 — Release v1.3.0
 
 As `docs/releasing.md`: the scope and the access of each changed signature, the three version strings, the gate on the
@@ -636,8 +640,8 @@ recorded here. Commit: `build: release v1.3.0`.
 | 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
 | 4 The gradient | Done | 2026-11-11. 52 tests; the checkpoint at 84; 10 hand-made changes caught. See the Outcome. |
 | 5 In an engine, and the benchmark row | Done | 2026-11-11. 55 tests; the `solve` row, its checksum the same on three compilers and from a plain loop; 5 hand-made changes as predicted. See the Outcome. |
-| 6 Example, docs, follow-ups | Not started | |
-| 7 Release v1.3.0 | Not started | |
+| 6 Example, docs, follow-ups | Done, but for the close | 2026-11-11. The checkpoint at 85; flywheel-dag#74, flywheel-dag#75 and flywheel-dag#76 raised. The closing comment and the close of flywheel-dag#55 wait for D2. |
+| 7 Release v1.3.0 | Waiting for you | D2 is open: keep the mixin at 0.37% on `chain`, or take the alternative before the tag. |
 
 ## Outcome
 
@@ -843,3 +847,42 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   | An argument's value published with `make_value` | `ASolvingCycleAllocatesNothing`, and the three other allocation tests |
   | `bind()` keeps the last point's values | `ABindHoldsOnlyWhatItsPointReads` alone, as probed: the solving cycle still allocates nothing |
 - **CI** on the commit of Step 4: `CI` and `clang-tidy` green.
+
+### Step 6 — example, docs, follow-ups (2026-11-11)
+
+- **The example.** `examples/reduce.cpp` solves for the vol at which the call is worth 12, by Newton's method on
+  `price(vol)`, from 0.2: three steps, to 0.2388677617. The graph then holds 0.25 and its price still, and with the
+  input set to the answer it gives the function's price to the bit. `example_reduce` matches its last line.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 85 of 85 | 44 of 44 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 85 of 85 | 44 of 44 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 55 of 55; the example agrees | not run | equal |
+
+  `test_claude_md_budget` and `test_comment_refs` pass. `CLAUDE.md` did not change.
+- **What it costs to call**, on the code as it now is. Apple M4 Pro, the Black–Scholes call (17 nodes), best of nine
+  loops of 200,000, three runs. The figures of "What I checked" were the prototype's:
+
+  | | ns |
+  |---|---|
+  | The formula as one plain function | 19 to 21 |
+  | The graph: `vol->set(v)`, then `call->eval()` | 194 to 198 |
+  | The reduction over vol (8 steps): `f(v)` | 68 to 70 |
+  | The same, with its derivative: `f.gradient(v)` | 241 to 243 |
+  | The reduction over all five inputs (12 steps): `f(x)` | 102 to 104 |
+  | The same, with all five derivatives | 328 to 330 |
+  | `bind()`, over vol and over all five | 99 to 101, 122 to 126 |
+  | A tape recorded and swept once in reverse, for the same five | 3,140 to 3,220 |
+  | Constructing the reduction over vol (once) | 2,440 to 2,510 |
+- **The follow-ups**, each labelled `enhancement` and `core`, in the milestone "Differentiable subgraphs":
+  [flywheel-dag#74](https://github.com/tomlin256/flywheel-dag/issues/74), a node that owns a reduction and binds it at
+  each evaluation (D6); [flywheel-dag#75](https://github.com/tomlin256/flywheel-dag/issues/75), several roots from one
+  reduction (D3); [flywheel-dag#76](https://github.com/tomlin256/flywheel-dag/issues/76), a `ConditionNode` whose
+  condition an argument moves (D5). A comment on flywheel-dag#11 says that a reduction through a stateful node needs
+  the answer "at the current state", and one on flywheel-dag#13 gives the figures above for a kept reduction against a
+  tape, and what still stands between a reduction and a `GradientNode` built on one.
+- **Not done here:** the closing comment on flywheel-dag#55 and its close. They wait with Step 7 for D2.
+- **CI** on the commit of Step 5: `CI` and `clang-tidy` green. The Ubuntu leg is x86-64, and its benchmark step
+  compares four rows, so the `solve` checksum is the same there.
