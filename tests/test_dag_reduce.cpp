@@ -740,6 +740,204 @@ TEST(Reduction, ACallPriceAsAFunctionOfVol) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Selection and tweaks: the point decides what a call follows
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The other branch is never pulled, so it stays dirty, and its functor, which a
+// call could run, never does.
+TEST(Reduction, AConditionTakesTheBranchTheGraphTook) {
+    auto x    = Input<double>::make("x", 2.0);
+    auto cond = Input<bool>::make("cond", true);
+    int calls = 0;
+    auto taken = ops::ProductNode<>::make("taken", {x, x});
+    auto other = ComputeNode<double, double>::make("other", {x},
+        [&calls](const double& a) { ++calls; return -a; }, InvalidationMode::Lazy);
+    auto root  = ConditionNode::make("root", cond, taken, other);
+    EvalContext ctx;
+    const ValuePtr held = root->eval(ctx);
+    ASSERT_EQ(get_value<double>(held), 4.0);
+    ASSERT_TRUE(other->dirty());
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f.size(), 2u);   // taken and the selection
+    EXPECT_EQ(f({3.0}), 9.0);
+    EXPECT_EQ(calls, 0);
+    EXPECT_TRUE(other->dirty());
+}
+
+TEST(Reduction, ABranchSwitchIsSeenAtTheNextBind) {
+    auto x    = Input<double>::make("x", 2.0);
+    auto cond = Input<bool>::make("cond", true);
+    auto root = ConditionNode::make("root", cond, ops::ProductNode<>::make("x.x", {x, x}),
+                                    ops::NegateNode<>::make("-x", x));
+    EvalContext ctx;
+    root->eval(ctx);
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({3.0}), 9.0);
+
+    cond->set(false);
+    root->eval(ctx);
+    EXPECT_EQ(f({3.0}), 9.0);   // the point it was bound to
+    f.bind();
+    EXPECT_EQ(f({3.0}), -3.0);
+}
+
+// A barrier is a matter of the point: an Eager node on the branch the graph did
+// not take is not read, and one on the branch it took is.
+TEST(Reduction, ABarrierOnTheBranchNotTakenIsNotOne) {
+    auto x     = Input<double>::make("arg.x", 2.0);
+    auto cond  = Input<bool>::make("cond", true);
+    auto eager = ComputeNode<double, double>::make("node.eager", {x},
+        [](const double& a) { return a + 1.0; });
+    auto root  = ConditionNode::make("root.out", cond, ops::NegateNode<>::make("-x", x), eager);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({5.0}), -5.0);
+
+    cond->set(false);
+    root->eval(ctx);
+    const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
+    EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.eager")) << why;
+}
+
+// |x| as a selection: x > 0 chooses between x and −x, and the argument moves it.
+TEST(Reduction, AConditionAnArgumentMovesIsABarrier) {
+    auto x        = Input<double>::make("arg.x", 2.0);
+    auto positive = ComputeNode<bool, double>::make("node.positive", {x},
+        [](const double& a) { return a > 0.0; }, InvalidationMode::Lazy);
+    auto root     = ConditionNode::make("root.out", positive, x, ops::NegateNode<>::make("-x", x));
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f(root, {x});
+    const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
+    EXPECT_TRUE(mentions(why, "arg.x moves node.positive, which decides what root.out reads")) << why;
+}
+
+// sel·x, where sel is k or −x. With k taken the selection reads nothing that
+// the argument moves, so it is a constant, and the product is the only step.
+TEST(Reduction, ABranchNoArgumentReachesIsAConstant) {
+    auto x    = Input<double>::make("x", 2.0);
+    auto k    = Input<double>::make("k", 10.0);
+    auto cond = Input<bool>::make("cond", true);
+    auto sel  = ConditionNode::make("sel", cond, k, ops::NegateNode<>::make("-x", x));
+    auto root = ops::ProductNode<>::make("root", {sel, x});
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f.size(), 1u);
+    EXPECT_EQ(f({3.0}), 30.0);
+
+    cond->set(false);
+    root->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f.size(), 3u);   // −x, the selection and the product
+    EXPECT_EQ(f({3.0}), -9.0);
+}
+
+// A tweaked node holds its frozen value whatever its inputs do, so it reads
+// none of them: the EWMA above it is never pulled, and is no barrier.
+TEST(Reduction, ATweakedNodeIsAConstant) {
+    auto x        = Input<double>::make("arg.x", 2.0);
+    auto smoothed = ts::EWMANode::make("smoothed", x, 0.5);
+    int calls = 0;
+    auto lazy = TweakableComputeNode<double, double>::make("node.lazy", {smoothed},
+        [&calls](const double& a) { ++calls; return 10.0 * a; }, InvalidationMode::Lazy);
+    auto root = ops::SumNode<>::make("root.out", {lazy, x});
+    lazy->tweak(100.0);
+    EvalContext ctx;
+    root->eval(ctx);
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f.size(), 1u);
+    EXPECT_EQ(f({3.0}), 103.0);
+    EXPECT_EQ(calls, 0);
+    EXPECT_TRUE(smoothed->dirty());
+    EXPECT_FALSE(smoothed->isInitialized());
+
+    // Untweaked and Lazy, it is called.
+    auto called  = TweakableComputeNode<double, double>::make("node.called", {x},
+        [&calls](const double& a) { ++calls; return 10.0 * a; }, InvalidationMode::Lazy);
+    auto negated = ops::NegateNode<>::make("root.negated", called);
+    negated->eval(ctx);
+    ASSERT_EQ(calls, 1);
+    Reduction g = reduce(negated, {x});
+    EXPECT_EQ(g.size(), 2u);
+    EXPECT_EQ(g({3.0}), -30.0);
+    EXPECT_EQ(calls, 2);
+
+    // Untweaked and Eager, it is a barrier, and tweaked it is a constant again.
+    auto eager   = TweakableComputeNode<double, double>::make("node.eager", {x},
+        [](const double& a) { return 10.0 * a; });
+    auto doubled = ops::SumNode<>::make("root.doubled", {eager, eager});
+    doubled->eval(ctx);
+    Reduction h(doubled, {x});
+    const std::string why = messageOf<std::domain_error>([&] { h.bind(); });
+    EXPECT_TRUE(mentions(why, "arg.x reaches root root.doubled through node.eager")) << why;
+    EXPECT_TRUE(mentions(why, "is Eager")) << why;
+
+    eager->tweak(7.0);
+    doubled->eval(ctx);
+    h.bind();
+    EXPECT_EQ(h.size(), 0u);
+    EXPECT_EQ(h({3.0}), 14.0);
+}
+
+TEST(Reduction, ATweakIsSeenAtTheNextBind) {
+    auto x    = Input<double>::make("x", 2.0);
+    auto lazy = TweakableComputeNode<double, double>::make("lazy", {x},
+        [](const double& a) { return 10.0 * a; }, InvalidationMode::Lazy);
+    auto root = ops::SumNode<>::make("root", {lazy, x});
+    EvalContext ctx;
+    root->eval(ctx);
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f.size(), 2u);
+    EXPECT_EQ(f({3.0}), 33.0);
+
+    lazy->tweak(100.0);
+    root->eval(ctx);
+    EXPECT_EQ(f({3.0}), 33.0);   // the point it was bound to
+    f.bind();
+    EXPECT_EQ(f.size(), 1u);
+    EXPECT_EQ(f({3.0}), 103.0);
+
+    lazy->clearTweak();
+    root->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f.size(), 2u);
+    EXPECT_EQ(f({3.0}), 33.0);
+}
+
+// The selection takes a·x or b·x. Bound with a·x taken, the reduction holds a's
+// value. After the switch and a bind it holds b's, and a's no more: its
+// reference count is what it was before the reduction was built.
+TEST(Reduction, ABindHoldsOnlyWhatItsPointReads) {
+    auto x    = Input<double>::make("x", 2.0);
+    auto a    = Input<double>::make("a", 10.0);
+    auto b    = Input<double>::make("b", 20.0);
+    auto cond = Input<bool>::make("cond", true);
+    auto root = ConditionNode::make("root", cond, ops::ProductNode<>::make("a.x", {a, x}),
+                                    ops::ProductNode<>::make("b.x", {b, x}));
+    EvalContext ctx;
+    root->eval(ctx);
+    const ValuePtr heldByA = a->eval(ctx);
+    const long before = heldByA.use_count();
+
+    Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({3.0}), 30.0);
+    EXPECT_EQ(heldByA.use_count(), before + 1);
+
+    cond->set(false);
+    root->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f({3.0}), 60.0);
+    EXPECT_EQ(heldByA.use_count(), before);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Constants and barriers
 // ─────────────────────────────────────────────────────────────────────────────
 

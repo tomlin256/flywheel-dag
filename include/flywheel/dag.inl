@@ -630,6 +630,44 @@ std::vector<NodePtr> TweakableComputeNode<Out, Ins...>::collectInputs(
     return { std::get<Is>(inputs_)... };
 }
 
+// ComputeNode's step: the functor, at the values a reduction hands it, through
+// a slot of the step's own. A reduction runs it only at a point where the node
+// is not tweaked: tweaked, the node reads nothing, and is a constant there.
+template<typename Out, typename... Ins>
+class TweakableComputeNode<Out, Ins...>::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const TweakableComputeNode> node) : node_(std::move(node)) {}
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return call(in, std::index_sequence_for<Ins...>{});
+    }
+
+private:
+    template<std::size_t... Is>
+    ValuePtr call([[maybe_unused]] const ReduceInputs& in, std::index_sequence<Is...>) {
+        return slot_.emit(node_->fn_(get_value<Ins>(in[Is])...));
+    }
+
+    std::shared_ptr<const TweakableComputeNode> node_;
+    ValueSlot<Out>                              slot_;
+};
+
+// Only a Lazy node gives a step: see ComputeNode::reduceStep().
+template<typename Out, typename... Ins>
+std::unique_ptr<IReduceStep> TweakableComputeNode<Out, Ins...>::reduceStep() {
+    if (invalidationMode() != InvalidationMode::Lazy) return nullptr;
+    return std::make_unique<Step>(this->shared_from_this());
+}
+
+// A frozen value depends on no input, so the node names none, as its partials()
+// names none. A reduction then takes the frozen value as a constant and reads
+// nothing above the node: the inputs the freeze is ignoring can be dirty.
+template<typename Out, typename... Ins>
+void TweakableComputeNode<Out, Ins...>::reduceReads(EvalContext& ctx, ReduceReads& out) {
+    if (tweaked_) return;
+    IReducible::reduceReads(ctx, out);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ConditionNode
 // ─────────────────────────────────────────────────────────────────────────────
@@ -690,6 +728,28 @@ inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
     const bool cond = get_value<bool>(condition_->eval(ctx));
     out.add(cond ? 1 : 2, 1.0);
     return true;
+}
+
+// Selection, at the values a reduction hands it. It returns the selected
+// branch's value itself, as eval() publishes it, so it needs no slot. The input
+// of the other branch is null here, because reduceReads() does not name it.
+class ConditionNode::Step final : public IReduceStep {
+public:
+    ValuePtr apply(const ReduceInputs& in) override {
+        return in[get_value<bool>(in[0]) ? 1 : 2];
+    }
+};
+
+inline std::unique_ptr<IReduceStep> ConditionNode::reduceStep() { return std::make_unique<Step>(); }
+
+// What eval() read. The condition is pulled only to learn which branch that
+// was. The node is clean when a reduction asks, so the pull returns the value
+// its last eval() chose by. The other branch is not named, so a reduction never
+// reads it: it may be stale, and reading it would evaluate it.
+inline void ConditionNode::reduceReads(EvalContext& ctx, ReduceReads& out) {
+    const bool cond = get_value<bool>(condition_->eval(ctx));
+    out.decides(0);
+    out.reads(cond ? 1 : 2);
 }
 
 // Lazy, fixed in the class: this is pure selection over three inputs, with no

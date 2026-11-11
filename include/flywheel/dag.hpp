@@ -560,8 +560,8 @@ public:
     /// std::out_of_range for an input the node does not have.
     void reads(std::size_t input);
 
-    /// The same, and the input's value chose which inputs the node reads, as
-    /// the input a node selects by does. A Reduction is bound to the choice the
+    /// The same, and the input's value chose which inputs the node reads, as a
+    /// ConditionNode's condition does. A Reduction is bound to the choice the
     /// graph made, so it refuses a point where an argument moves such an input.
     void decides(std::size_t input);
 
@@ -904,6 +904,11 @@ public:
 //
 // A ComputeNode that also implements ITweakable<Out> and aad::IDifferentiable.
 //
+// An IReducible, as ComputeNode is: Lazy, it gives a Reduction a step that
+// calls the functor, and Eager, none. While tweaked it reads no input, so a
+// reduction bound then takes the frozen value as a constant, in either mode,
+// and reads nothing above the node.
+//
 // State machine:
 //
 //   ┌──────────────────────────────────────────────────────────────┐
@@ -924,6 +929,7 @@ class TweakableComputeNode
     : public NodeBase
     , public ITweakable<Out>
     , public aad::IDifferentiable
+    , public IReducible
     , public std::enable_shared_from_this<TweakableComputeNode<Out, Ins...>>
 {
 public:
@@ -956,9 +962,18 @@ public:
     /// Otherwise false: the functor is opaque.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    // ── IReducible ───────────────────────────────────────────────────────────
+    /// A step that calls the functor, when the node is Lazy. Null when it is
+    /// Eager.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+    /// No input while tweaked. Otherwise every input.
+    void reduceReads(EvalContext& ctx, ReduceReads& out) override;
+
 private:
     TweakableComputeNode(std::string name, InputTuple ins, Fn fn,
                          EqualityPolicyPtr eq, InvalidationMode mode);
+
+    class Step;
 
     /// While tweaked, absorbs every upstream invalidation: the frozen value does
     /// not depend on the inputs, so downstream sees no change.
@@ -997,10 +1012,19 @@ private:
 // consumers dirty again after they were evaluated: they would recompute for
 // nothing, and a root left dirty cannot be recorded on a tape. Held by
 // UntakenBranch.ItsMoveReachesNoConsumer.
+//
+// AS A STEP. An IReducible that always gives a step, which selects as eval()
+// does. It tells a Reduction what eval() read: the condition, which decides,
+// and the branch the condition selects. So a reduction never reads the other
+// branch, and a barrier there is not one. A reduction is bound to the branch
+// the graph took, and refuses a condition that an argument moves: following
+// the other branch would need the values above it, which the graph does not
+// hold.
 // ─────────────────────────────────────────────────────────────────────────────
 class ConditionNode
     : public NodeBase
     , public aad::IDifferentiable
+    , public IReducible
     , public std::enable_shared_from_this<ConditionNode>
 {
 public:
@@ -1017,9 +1041,17 @@ public:
     /// other branch, so a pass never reads the branch eval() did not take.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// A step that returns the value of the branch the condition's value
+    /// selects.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+    /// The condition, which decides, and the branch it selects.
+    void reduceReads(EvalContext& ctx, ReduceReads& out) override;
+
 private:
     ConditionNode(std::string name, NodePtr cond, NodePtr tb, NodePtr fb,
                   EqualityPolicyPtr eq);
+
+    class Step;
 
     // Hears one branch for the node. Not a node: nothing names a listener as
     // an input, so nothing pulls one, and its eval() throws.

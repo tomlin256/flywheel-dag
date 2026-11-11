@@ -478,6 +478,11 @@ tweaked.
 *Done when:* red then green; the checkpoint; each change as stated; pushed. Commit:
 `feat: a reduction follows the branch and the tweaks the graph holds`.
 
+*As built* (the Outcome has the results). `bind()` now reads a constant each time a step names it, where Step 1 skipped
+one it already held. The values are the same. The difference is what makes the last row of the table fail one test
+alone, as probed: with the skip, a `bind()` that kept the last point's values also kept a stale constant, and
+`BindReadsThePointTheGraphHolds` failed with it.
+
 ### Step 4 — The gradient, one commit
 
 `IReduceStep::partials()` for the ops (from `Derivative<Op>`), `DifferentiableNode` (the helper its `partials()` now
@@ -613,7 +618,7 @@ recorded here. Commit: `build: release v1.3.0`.
 | 0 Approval | Done | Pushed and linked from flywheel-dag#55; D5 and D9 answered, and the plan approved, 2026-11-11. |
 | 1 The contract, the ops, and a reduction's values | Done | 2026-11-11. 22 tests; the checkpoint at 84; 15 hand-made changes caught. See the Outcome. |
 | 2 Compute nodes, and which functors may be called | Done | 2026-11-11. 30 tests; 9 hand-made changes caught; the mixin stays by Step 2's rule, at a measured 0.37% on `chain` (D2 is open for you). See the Outcome. |
-| 3 Selection and tweaks | Not started | |
+| 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
 | 4 The gradient | Not started | |
 | 5 In an engine, and the benchmark row | Not started | |
 | 6 Example, docs, follow-ups | Not started | |
@@ -739,3 +744,29 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   `chain` is slower by more than `idle-queues` moved at 13 of the 16, and `ingest` at 4, so by the rule the mixin
   stays, and it stayed. That is the rule's answer and not a claim that the mixin is free: D2's alternative would close
   the cost, and D2 now asks which you want before the release.
+
+### Step 3 — selection and tweaks (2026-11-11)
+
+- **Red, then green.** The eight tests failed against the headers of Step 2, where a `ConditionNode` and a
+  `TweakableComputeNode` were barriers. With the code, 38 of 38.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 84 of 84 | 43 of 43 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 38 of 38 | not run | equal |
+
+  `ConditionNode` is 208 to 216 bytes and `TweakableComputeNode<double, double>` 224 to 232.
+- **The hand-made changes**, against a control that passed 38 of 38. Each of the six fails the tests its row names.
+  Three fail others too, for reasons read from their logs:
+  - *`ConditionNode` reads both branches* also fails `ABranchNoArgumentReachesIsAConstant`, where the branch the
+    argument moves is then read while the constant one is taken, and `ABindHoldsOnlyWhatItsPointReads`, where the old
+    branch is still read after the switch.
+  - *`ConditionNode`'s step returns the other branch* fails all five tests whose reduction runs a selection as a step.
+  - *`TweakableComputeNode` reads its inputs while tweaked* also fails `ATweakIsSeenAtTheNextBind`, which then calls
+    the functor where it should use the frozen value.
+
+  *`bind()` keeps the last point's values* fails `ABindHoldsOnlyWhatItsPointReads` and no other test.
+- **CI** on the commits of Steps 1 and 2: `CI` and `clang-tidy` green on both, which is the first x86-64 build of the
+  new code.

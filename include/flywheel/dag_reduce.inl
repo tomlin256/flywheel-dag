@@ -222,7 +222,7 @@ inline void Reduction::bind() {
         for (std::size_t k = e.firstInput; k < e.lastInput; ++k) {
             if (uses_[k] == ReduceReads::Use::Unread) continue;
             const std::size_t in = inputs_[k];
-            if (movedBy_[in] == kNone && !values_[in]) values_[in] = entries_[in].node->eval(ctx);
+            if (movedBy_[in] == kNone) values_[in] = entries_[in].node->eval(ctx);
         }
         run_.push_back(i);
     }

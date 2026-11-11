@@ -66,10 +66,12 @@
 //   • MemoizedComputeNode. Its contract is a functor that is a pure function.
 //     The step calls the functor and not the cache, which trial values would
 //     fill.
-//   • ComputeNode and InPlaceComputeNode, when Lazy. Lazy is the author's
-//     statement that the functor is a pure function of its inputs. Eager says
-//     nothing, and is what a functor with captured state must be: called at
-//     trial values, such a functor would advance on every one.
+//   • ComputeNode, InPlaceComputeNode and TweakableComputeNode, when Lazy.
+//     Lazy is the author's statement that the functor is a pure function of
+//     its inputs. Eager says nothing, and is what a functor with captured
+//     state must be: called at trial values, such a functor would advance on
+//     every one.
+//   • ConditionNode. It selects, and has no functor.
 //   • A node of your own that implements IReducible.
 //
 // Any other node with an argument above it is a BARRIER, every dag::ts node
@@ -87,8 +89,11 @@
 //     callback, in a node that has just pulled the root, or after evaluating
 //     the root.
 //   • bind() follows only the inputs each node reads at this point
-//     (IReducible::reduceReads()). An input a node does not read can be stale,
-//     and is never pulled.
+//     (IReducible::reduceReads()). A ConditionNode reads its condition and the
+//     branch the condition selects, never the other, which can be stale. A
+//     tweaked node reads nothing. Every other node of the engine reads every
+//     input. An input a node does not read is never pulled, and a barrier
+//     above it is not one.
 //   • A node that reads no input an argument moves is a constant here, and so
 //     is every node no argument reaches: a stateful node, a source. The
 //     reduction holds the value each one published, until the next bind().
@@ -98,9 +103,12 @@
 //     silently wrong answer. A node that is not an IReducible reads every
 //     input, for all a reduction can tell, so it is refused even when the
 //     input the argument moves contributes nothing.
-//   • A node whose deciding input an argument moves (ReduceReads::decides())
-//     throws std::domain_error too. Following the choice would need the values
-//     above the inputs the graph did not read, which the graph does not hold.
+//   • A node whose deciding input an argument moves (ReduceReads::decides()),
+//     which is a ConditionNode whose condition an argument moves, throws
+//     std::domain_error too. Following the choice would need the values above
+//     the branch the graph did not take, which the graph does not hold. A
+//     piecewise function of an argument belongs inside one functor, where it
+//     can compare.
 //   • Any node can be an argument, not only a leaf. The function is then what
 //     the root would hold had that node's value been x, and the node's own
 //     inputs are not read. An argument the root does not depend on at this
