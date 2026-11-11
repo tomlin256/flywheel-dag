@@ -1,6 +1,7 @@
 # A Subgraph as a Function: `dag::reduce()`
 
-**Status: Proposed (2026-11-11), awaiting approval.** Nothing in the repository has changed but this file.
+**Status: Proposed (2026-11-11), not yet approved to start.** D5 and D9 are answered (2026-11-11). Nothing in the
+repository has changed but this file.
 
 Closes [flywheel-dag#55](https://github.com/tomlin256/flywheel-dag/issues/55).
 
@@ -287,7 +288,7 @@ rows keep their exact columns.
 
 ## Decisions to confirm
 
-Defaults stand if you approve the plan as written.
+D5 and D9 are answered below (2026-11-11). The other defaults stand if you approve the plan as written.
 
 - **D1 `Lazy` is what lets a compute node's functor be called.** `docs/engine_rules.md` recommends a `ComputeNode` lambda
   with captured state as the first way to write a node, and one that mutates that state must be `Eager`. Called at trial
@@ -304,11 +305,11 @@ Defaults stand if you approve the plan as written.
   root.
 - **D4 The gradient is in this plan** (Step 4). The milestone asks for a function that can be differentiated, and a tape
   cannot do it away from the graph's own point. *Alternative:* values only, and the gradient as a follow-up.
-- **D5 A `ConditionNode` whose condition an argument moves is refused. Needs your yes.** Following it needs the values
-  below the branch the graph did not take, which the graph does not hold, and getting them means evaluating live nodes.
-  Every design I can see breaks the bar this plan sets (a reduction evaluates nothing in the graph), so I am asking
-  rather than parking it. A piecewise function of an argument belongs inside a `DifferentiableNode`'s functor, where a
-  dual compares and takes `min` and `max`. A follow-up issue records it.
+- **D5 A `ConditionNode` whose condition an argument moves is refused. Answered: yes, refuse (2026-11-11).**
+  Following it needs the values below the branch the graph did not take, which the graph does not hold, and getting
+  them means evaluating live nodes. Every design I can see breaks the bar this plan sets (a reduction evaluates nothing
+  in the graph), so I asked rather than parking it. A piecewise function of an argument belongs inside a
+  `DifferentiableNode`'s functor, where a dual compares and takes `min` and `max`. A follow-up issue records it.
 - **D6 No node of its own yet.** A node that owns a reduction, takes the root as its input, is `Eager` by construction
   and binds at each evaluation would make the pattern above a class, as `GradientNode` followed the tape. It is also
   what could bind a root that an always-dirty node leaves dirty, which the public `bind()` refuses. A follow-up issue.
@@ -317,11 +318,11 @@ Defaults stand if you approve the plan as written.
   nothing but + − × ÷, so its checksum is the same everywhere. `benchmarks/expected_invariants.txt` gains one line.
 - **D8 Names:** `dag::reduce()`, `dag::Reduction`, `dag::IReducible`, `dag::IReduceStep`, `dag::ReduceInputs`,
   `dag::ReduceReads`, in `dag_reduce.hpp` and `dag.hpp`, with the root first, as in `aad::adjoints(root, wrt)`.
-- **D9 The release is v1.3.0, in Step 7. The number is yours.** New public names make it a minor, and nothing a consumer
-  calls changes. The node classes in the table grow by 8 bytes. I read that as no break, as the two fixes that grew
-  `Engine` did: the engine is header-only, so nothing compiled against the old layout is left to link, and a pin bump
-  rebuilds. If you count a layout change of a public type as a major, it is v2.0.0, or D2's alternative, which changes
-  no layout. *Alternative:* leave the release until you ask, as for flywheel-dag#49.
+- **D9 The release is v1.3.0, in Step 7. Answered: v1.3.0 (2026-11-11).** New public names make it a minor, and nothing
+  a consumer calls changes. The node classes in the table grow by 8 bytes, which is read as no break, as with the two
+  fixes that grew `Engine`: the engine is header-only, so nothing compiled against the old layout is left to link, and
+  a pin bump rebuilds. v2.0.0, the number if a layout change of a public type counted as a major, is not taken.
+  *Alternative:* leave the release until you ask, as for flywheel-dag#49.
 - **D10 Pushes, comments and issues.** Each step is one commit on `main`, pushed once its checkpoint is green and not
   held for CI. Approving the plan approves those pushes, the comment on flywheel-dag#55 that links this plan, the three
   follow-up issues and the two comments of Step 6, and the tag and release of Step 7.
@@ -341,7 +342,8 @@ Before each push the leak audit passes on the tree.
 ### Step 0 — Approval
 
 *Tests:* none. Commit this plan (`docs: add plan for a subgraph as a callable function`), push, and comment on
-flywheel-dag#55 with the path. *Done when:* the issue and the plan link each other, and D5 is answered.
+flywheel-dag#55 with the path. *Done when:* the issue and the plan link each other, D5 is answered, and you have said to
+start.
 
 ### Step 1 — The contract, the ops, and a reduction's values, one commit
 
@@ -587,7 +589,7 @@ recorded here. Commit: `build: release v1.3.0`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 Approval | Not started | |
+| 0 Approval | In progress | Pushed and linked from flywheel-dag#55; D5 and D9 answered 2026-11-11. Waiting for your word to start. |
 | 1 The contract, the ops, and a reduction's values | Not started | |
 | 2 Compute nodes, and which functors may be called | Not started | |
 | 3 Selection and tweaks | Not started | |
