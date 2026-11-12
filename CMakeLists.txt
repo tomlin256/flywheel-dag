@@ -157,6 +157,14 @@ endif()
 # A parent that already provides a target (find_package, or its own
 # FetchContent) is used as-is. A parent that declares the same FetchContent name
 # first wins that way too, so a build holds one copy of each.
+#
+# Each is fetched small. spdlog and googletest are shallow clones of their tags.
+# nlohmann/json is json.tar.xz, the archive that its release publishes for this:
+# the headers and the CMake files, pinned by its SHA-256. CMake's shallow clone
+# fetches the tip of every branch and tag, and for that repository the tips are
+# hundreds of megabytes. A move to another version of it changes the URL and the
+# hash together. test_fetch_declarations holds every declaration in the checkout
+# to one of the two forms.
 # ─────────────────────────────────────────────────────────────────────────────
 include(FetchContent)
 
@@ -165,6 +173,7 @@ if(NOT TARGET spdlog::spdlog)
       spdlog
       GIT_REPOSITORY https://github.com/gabime/spdlog.git
       GIT_TAG        v1.17.0
+      GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(spdlog)
 endif()
@@ -172,8 +181,8 @@ endif()
 if(NOT TARGET nlohmann_json::nlohmann_json)
     FetchContent_Declare(
       nlohmann_json
-      GIT_REPOSITORY https://github.com/nlohmann/json.git
-      GIT_TAG        v3.12.0
+      URL      https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+      URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
     )
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
@@ -185,6 +194,7 @@ if(FLYWHEEL_DAG_BUILD_TESTS)
       googletest
       GIT_REPOSITORY https://github.com/google/googletest.git
       GIT_TAG        v1.18.0
+      GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(googletest)
 endif()

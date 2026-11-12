@@ -367,6 +367,17 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_floor.cmake)
 endif()
 
+# What a cold configure fetches. Every dependency that a CMake file of the checkout declares is a shallow clone of a tag,
+# an archive with a SHA-256, or a SOURCE_DIR that fetches nothing: a clone at full depth is a repository's whole history
+# on every runner, and an archive with no hash is not pinned. The check is a plain cmake -P script, so it runs in every
+# tree. Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_fetch_declarations
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fetch_declarations.cmake)
+endif()
+
 # The strict configure flags. CI's three workflows, the README and CLAUDE.md spell them
 # -Werror=author -Werror=deprecated, and the check holds the five to that spelling. On
 # CMake 4.4 or later it also configures a probe project to see that the flags make an

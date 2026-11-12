@@ -51,10 +51,12 @@ elseif(FLYWHEEL_DAG_PACKAGE_VERSION)
   if(CONSUMER_FETCHES_DEPENDENCIES)
     FetchContent_Declare(spdlog
       GIT_REPOSITORY https://github.com/gabime/spdlog.git
-      GIT_TAG        v1.17.0)
+      GIT_TAG        v1.17.0
+      GIT_SHALLOW    TRUE)
     FetchContent_Declare(nlohmann_json
       GIT_REPOSITORY https://github.com/nlohmann/json.git
-      GIT_TAG        v3.12.0)
+      GIT_TAG        v3.12.0
+      GIT_SHALLOW    TRUE)
     FetchContent_MakeAvailable(spdlog nlohmann_json)
   endif()
 
