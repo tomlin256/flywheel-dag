@@ -299,6 +299,17 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_crtp_access.cmake)
 endif()
 
+# StatefulDiscovery.CastWorksOnEveryStatefulNodeType builds one of every stateful node type, and nothing in C++ lists the
+# classes that derive a base, so a class that the test leaves out goes unnoticed. This reads the classes that derive
+# StatefulNodeBase from the headers and fails on one that the test does not build. The check is a plain cmake -P script,
+# so it runs in every tree. Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_stateful_node_list
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_stateful_node_list.cmake)
+endif()
+
 # The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that
 # orders atomics only. Nothing else would notice a bare std::atomic_thread_fence, or a pragma that does not work: the
 # suite is not built under ThreadSanitizer, and the default build is not -Werror. This scans the headers for a bare
@@ -504,7 +515,7 @@ if(_flywheel_dag_top_level)
 
   add_test(NAME test_comment_refs
     COMMAND ${CMAKE_COMMAND}
-      -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOPEN_ISSUES=31,32
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOPEN_ISSUES=31
       -P ${_comment_refs_script})
 
   add_test(NAME test_comment_refs_accepts

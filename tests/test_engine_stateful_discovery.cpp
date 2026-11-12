@@ -185,11 +185,11 @@ TEST(StatefulDiscovery, MixedStatefulStatelessUpstream) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CastWorksOnEveryStatefulNodeType
 //
-// Constructs one of each concrete stateful node type but RollingSumNode
-// (flywheel-dag#32) and confirms dynamic_pointer_cast<IStatefulNode> against the
-// INode-typed shared_ptr (the form discovery uses) succeeds. Guards against a
-// stateful node that bypasses StatefulNodeBase and quietly skips the discovery
-// path.
+// Constructs one of each concrete stateful node type and confirms
+// dynamic_pointer_cast<IStatefulNode> against the INode-typed shared_ptr (the
+// form discovery uses) succeeds. Guards against a stateful node that bypasses
+// StatefulNodeBase and quietly skips the discovery path. test_stateful_node_list
+// holds the list to the classes that derive StatefulNodeBase in the headers.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(StatefulDiscovery, CastWorksOnEveryStatefulNodeType) {
     auto inp_d = Input<double>::make("xd", 0.0);
@@ -198,6 +198,7 @@ TEST(StatefulDiscovery, CastWorksOnEveryStatefulNodeType) {
     std::vector<NodePtr> nodes;
     nodes.push_back(WindowNode<double>::make("win",      inp_d, 4));
     nodes.push_back(RollingStats   ::make("stats",       inp_d, 4));
+    nodes.push_back(RollingSumNode ::make("sum",         inp_d, 4));
     nodes.push_back(RollingMinMaxNode::make("mm",        inp_d, 4));
     nodes.push_back(EWMANode       ::make("ewma",        inp_d, 0.3));
     nodes.push_back(EWMATickRateNode::make("ewmaTick",   inp_d, 0.3));
