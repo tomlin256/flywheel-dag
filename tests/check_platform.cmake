@@ -2,7 +2,8 @@
 # check of cmake/flywheel_dag_platform.cmake, over a fixed table, so that the
 # result does not depend on the host it runs on. The check refuses a name that
 # claims another platform, a tree named for a sanitizer it is not configured
-# for, and a tree that remembers another platform.
+# for, and a tree that remembers another platform. The table also holds what a claim
+# is: a kind starts with a letter, and only the exact system name Darwin is macOS.
 #
 # Run by ctest as
 #
@@ -130,6 +131,9 @@ expect_tag(Linux   x86_64  linux-x86_64)
 expect_tag(Linux   AMD64   linux-x86_64)
 expect_tag(Darwin  x86_64  macos-x86_64)
 expect_tag(Windows AMD64   windows-x86_64)
+# Only the exact system name Darwin is macOS. Another spelling is lower-cased as it stands.
+expect_tag(darwin  arm64   darwin-arm64)
+expect_tag(DARWIN  arm64   darwin-arm64)
 
 # ── accepted ─────────────────────────────────────────────────────────────────
 # Truthful platform trees, with a suffix after the architecture and with no kind.
@@ -153,6 +157,17 @@ foreach(tree IN ITEMS build scratch vscode build-vscode cmake-build-debug releas
     expect_accepted("${tree}" macos-arm64 "" "")
 endforeach()
 
+# A kind starts with a letter. A name whose first word starts with a digit is not a platform tree: it claims no
+# platform, whatever follows the word, and is not examined on any host.
+foreach(host IN ITEMS linux-arm64 macos-arm64)
+    foreach(tree IN ITEMS 2025-macos-arm64 2025-linux-x86_64 9lives-linux-arm64 9lives-macos-x86_64 2025-linux)
+        expect_accepted("${tree}" ${host} "" "")
+    endforeach()
+endforeach()
+# After its first letter a kind may hold digits. Such a name is a platform tree: truthful here, and refused below
+# when it claims another platform, as a kind of one letter is.
+expect_accepted(gcc13-linux-arm64 linux-arm64 "" "")
+
 # The platform a tree remembers, and a first configure.
 expect_accepted(build linux-arm64 linux-arm64 "")
 expect_accepted(build linux-arm64 "" "")
@@ -165,9 +180,13 @@ expect_claim_refused(debug-macos-arm64     linux-arm64 macos-arm64)
 expect_claim_refused(release-linux-aarch64 linux-arm64 linux-aarch64)
 expect_claim_refused(release-linux-arm64x  linux-arm64 linux-arm64x)
 expect_claim_refused(Release-Linux-X86_64  linux-arm64 linux-x86_64)
+expect_claim_refused(gcc13-linux-x86_64    linux-arm64 linux-x86_64)
+expect_claim_refused(x-macos-arm64         linux-arm64 macos-arm64)
 # A false claim is named before a sanitizer that is missing.
 expect_claim_refused(asan-macos-arm64      linux-arm64 macos-arm64)
 expect_recorded_refused(build linux-arm64 macos-arm64)
+# A name that claims nothing is refused for the platform its tree remembers, like any other.
+expect_recorded_refused(2025-macos-arm64 linux-arm64 macos-arm64)
 
 # ── refused: a tree named for a sanitizer it is not configured for ───────────
 expect_sanitizer_refused(asan-linux-arm64       linux-arm64 ""   asan)
