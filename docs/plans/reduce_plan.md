@@ -1,7 +1,8 @@
 # A Subgraph as a Function: `dag::reduce()`
 
-**Status: Approved 2026-11-11, in progress.** D5 and D9 are answered (2026-11-11). The Progress table says which step
-the work is at, and the Outcome at the end what each finished step measured and where it departed from this plan.
+**Status: Done (2026-11-12).** `dag::reduce()` is on `main` and released as v1.3.0. The Outcome at the end says what each
+step measured and where it departed from this plan. The one large departure is D2: the contract a node joins through
+was built as a mixin, measured, and moved to two virtuals of `NodeBase` before the release (Step 6a).
 
 Closes [flywheel-dag#55](https://github.com/tomlin256/flywheel-dag/issues/55).
 
@@ -641,6 +642,8 @@ As `docs/releasing.md`: the scope and the access of each changed signature, the 
 Mac and in `ubuntu-dev`, the commit, the tag and the release page with its notes, then the runs read afterwards and
 recorded here. Commit: `build: release v1.3.0`.
 
+*As built:* as written. The Outcome has the commit, the tag, the page and the runs.
+
 ## Designs I rejected
 
 - **Move the graph and put it back.** Unsound in an engine, as probed above.
@@ -696,9 +699,9 @@ recorded here. Commit: `build: release v1.3.0`.
 | 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
 | 4 The gradient | Done | 2026-11-11. 52 tests; the checkpoint at 84; 10 hand-made changes caught. See the Outcome. |
 | 5 In an engine, and the benchmark row | Done | 2026-11-11. 55 tests; the `solve` row, its checksum the same on three compilers and from a plain loop; 5 hand-made changes as predicted. See the Outcome. |
-| 6 Example, docs, follow-ups | Done, but for the close | 2026-11-11. The checkpoint at 85; flywheel-dag#74, flywheel-dag#75 and flywheel-dag#76 raised. The closing comment and the close of flywheel-dag#55 follow Step 6a. |
+| 6 Example, docs, follow-ups | Done | 2026-11-11. The checkpoint at 85; flywheel-dag#74, flywheel-dag#75 and flywheel-dag#76 raised. flywheel-dag#55 was closed by hand on 2026-11-12, after Step 6a and its closing comment. |
 | 6a The hooks move to `NodeBase` | Done | 2026-11-12. 56 tests; the checkpoint at 85; every class the size it was before Step 1, and `chain` no slower; 48 hand-made changes caught. See the Outcome. |
-| 7 Release v1.3.0 | Not started | After Step 6a. |
+| 7 Release v1.3.0 | Done | 2026-11-12. Tagged and published; `CI` and `clang-tidy` green on the release commit. |
 
 ## Outcome
 
@@ -1010,3 +1013,39 @@ The prototype of "What I checked" was not kept, so the code is written again fro
   | `NodeBase::reduceStep()` gives a step by default | `ANodeGivesNoStepUnlessItSaysOtherwise`, `ANodeThatCannotBeCalledIsABarrier` and `IsUnboundUntilABindSucceeds` |
 - **CI** on the last commit of Step 6: `CI` and `clang-tidy` green. Its push cancelled the `CI` run of the commit
   before it, whose tree it contains.
+
+### Step 7 — release v1.3.0 (2026-11-12)
+
+- **flywheel-dag#55** has its closing comment, with the eight commits, and was closed by hand before the release.
+- **Scope.** The release carries every commit since v1.2.0. `git diff v1.2.0..HEAD --stat -- include` names 15 files.
+  Five change comments only, and between v1.2.0 and the commit before Step 1 no line of `include/` or of the
+  benchmark's sources changes that is not a comment, so the sizes and the machine code this plan compared itself with
+  are v1.2.0's. The release commit lists the access of each signature that changed. Besides this plan the release
+  carries the work of flywheel-dag#45, flywheel-dag#65, flywheel-dag#70, flywheel-dag#71 and flywheel-dag#72, none of
+  which a consumer sees.
+- **The number** is v1.3.0, as D9: new public names, and no class changes size.
+- **The gate**, on the tree as committed, with CI's flags and the lint gate: 85 of 85 and 44 of 44 on the Mac (Apple
+  clang 21.0.0, CMake 4.4.5, LLVM 23.1.4) and in `ubuntu-dev` (GCC 13.3.0, CMake 4.4.5, LLVM 23.1.6), no warning, the
+  generated version file at 1.3.0 on both, and `--invariants` equal on both.
+- **The release.** The commit is `2eb68c2` (`build: release v1.3.0`), the annotated tag `v1.3.0` is on it, and the page
+  is [v1.3.0](https://github.com/tomlin256/flywheel-dag/releases/tag/v1.3.0), marked Latest. The release list shows it
+  after v1.1.0: the page for v1.2.0 is the one `dot_path_for_public_plan.md` records as unpublished.
+- **CI on the release commit**, read once it had finished and before this record was pushed:
+  [`CI`](https://github.com/tomlin256/flywheel-dag/actions/runs/43181563670) passes 85 of 85 on Ubuntu (GCC 15.2.0,
+  CMake 4.4.5, x86-64) and on macOS (Apple clang 21.0.0, CMake 4.4.5), and its benchmark step compares the four rows
+  on both. [`clang-tidy`](https://github.com/tomlin256/flywheel-dag/actions/runs/43181563661) passes 44 of 44 on both.
+  The jobs carry two notices from the runners, about the `ubuntu-latest` label and macOS queue times, which the runs
+  before this plan carry too.
+- **Sanitizers.** The nightly workflow has not run on this code: its last run on `main` is of 2026-11-11, green, on
+  the commit before the plan. Run by hand after the push, in the `asan` trees: `test_dag_reduce` (56 of 56),
+  `test_aad_node`, `test_dag_ops`, `test_dag` and `test_dag_memoize`, the example and the benchmark, under
+  AddressSanitizer and UBSan on the Mac, and under those and LeakSanitizer in `ubuntu-dev` (GCC 13.3.0): no report,
+  and the `solve` row still at `allocs/cycle=0`.
+- **Left for later:** the first nightly `Sanitizers` run on this code, which is also the first under ThreadSanitizer.
+  A reduction is for the eval thread only, so nothing here was run under it by hand.
+
+### End state
+
+`dag::reduce()` and `dag::Reduction` are in v1.3.0, with a gradient, an example, a benchmark row and a README section.
+A node joins through two virtuals of `NodeBase`, and no node is larger or slower for them. What is not covered has an
+issue each: flywheel-dag#74, flywheel-dag#75, flywheel-dag#76, and flywheel-dag#11 for stateful nodes.
