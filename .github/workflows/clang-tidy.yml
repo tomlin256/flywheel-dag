@@ -3,8 +3,10 @@
 #
 # What it runs. Nothing is built: clang-tidy reads <tree>/compile_commands.json, so each leg configures a tree with the gate on
 # and runs the tests whose names begin clang_tidy_: one per translation unit that a target of the project compiles, through which
-# the engine's headers are checked; clang_tidy_units, which holds that list to the tree's compile database; and the ones that
-# prove the gate bites (the version, the checks, three canaries). The macOS leg is the only gate on what the macOS SDK adds.
+# the engine's headers are checked; clang_tidy_units, which holds that list to the tree's compile database;
+# clang_tidy_headers_alone, which compiles each of the engine's headers as the only include of a unit; and the ones that prove
+# the gate bites (the version, the checks, three canaries). The macOS leg is the only gate on what the macOS SDK adds, and on
+# what LLVM's own libc++ shows: Homebrew's llvm carries it, and clang_tidy_headers_alone compiles against it there.
 #
 # A workflow of its own, so that a red lint run cannot mask whether the build in ci.yml is green. It has no cache and no
 # concurrency group: nothing is built, and every push keeps its own result, so a red one names its commit.

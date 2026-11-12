@@ -303,11 +303,13 @@ endif()
 # The clang-tidy gate. Its units are the sources of the targets made above:
 # the tests', the examples' and the benchmarks'. So it is registered here,
 # after the last add_subdirectory, and a target made below this line is a unit
-# that nothing registered (clang_tidy_units fails on it). test_clang_tidy_wiring
-# holds this wiring.
+# that nothing registered (clang_tidy_units fails on it). The gate also compiles
+# each of the engine's headers alone, which needs the include directories of the
+# two libraries they include. test_clang_tidy_wiring holds this wiring.
 # ─────────────────────────────────────────────────────────────────────────────
 if(_flywheel_dag_clang_tidy)
     include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_clang_tidy.cmake)
     flywheel_dag_clang_tidy_add_tests("${_flywheel_dag_clang_tidy}" "${CMAKE_CURRENT_LIST_DIR}"
-                                      "${FLYWHEEL_DAG_CLANG_TIDY_ARGS}")
+                                      "${FLYWHEEL_DAG_CLANG_TIDY_ARGS}"
+                                      "${spdlog_SOURCE_DIR}/include;${nlohmann_json_SOURCE_DIR}/include")
 endif()

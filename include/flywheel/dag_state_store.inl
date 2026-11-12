@@ -16,6 +16,7 @@
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <ctime>
 #include <fstream>
 #include <stdexcept>
 

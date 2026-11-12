@@ -12,6 +12,9 @@
 
 #pragma once
 
+#include <cmath>
+#include <typeinfo>
+
 namespace dag {
 
 // ─────────────────────────────────────────────────────────────────────────────

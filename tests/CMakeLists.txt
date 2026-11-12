@@ -283,6 +283,23 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_standard_guard.cmake)
 endif()
 
+# Every public header compiles as the only include of a unit. The suite includes the headers in its own order, so nothing
+# else would notice one that needs another to come first: this compiles each alone at C++23 with the tree's compiler,
+# -fsyntax-only, and reads the headers with a glob when it runs, so a header added later is covered. It sees what the
+# tree's standard library does not hide. A header that uses a name of the standard library, and gets the name's header
+# through another standard header, passes here; clang_tidy_headers_alone, in the clang-tidy gate, is the same script
+# through a tool whose library keeps its headers apart. Registered for GCC and Clang, at the top level, like
+# test_standard_guard.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_test(NAME test_headers_alone
+    COMMAND ${CMAKE_COMMAND}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DINCLUDE_DIR=${PROJECT_SOURCE_DIR}/include
+      "-DDEPENDENCY_INCLUDE_DIRS=${spdlog_SOURCE_DIR}/include|${nlohmann_json_SOURCE_DIR}/include"
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/headers_alone
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_headers_alone.cmake)
+endif()
+
 # The CRTP bases (OpNodeImpl, NodeImpl, StatefulNodeBase) keep their constructors private to the class they are the
 # base of, so that `class Wrong : public OpNodeImpl<Other>` does not compile. The suite derives them correctly, so
 # nothing else would notice a constructor that is public or protected: this compiles a wrong derivation of each, with

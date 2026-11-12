@@ -127,11 +127,12 @@ function(_flywheel_dag_clang_tidy_walk directory out)
     set(${out} "${sources}" PARENT_SCOPE)
 endfunction()
 
-# flywheel_dag_clang_tidy_add_tests(<tool> <root> <extra>)
+# flywheel_dag_clang_tidy_add_tests(<tool> <root> <extra> <includes>)
 #
 # Registers the gate: clang-tidy over this project's own sources, as tests. <tool> is the command FLYWHEEL_DAG_CLANG_TIDY resolved
 # to (the root has already refused a configure that asked for one it cannot run, so nothing here checks again), <root> is the
-# project's root and <extra> a list of arguments for every run. Call it where every target of the project has been made: the units
+# project's root, <extra> a list of arguments for every run and <includes> the include directories of the libraries that the
+# engine's headers include. Call it where every target of the project has been made: the units
 # are the sources of the targets under <root>. Nothing is built: clang-tidy reads compile_commands.json and the sources the build
 # would compile, and FetchContent has put the dependencies' headers in place by then.
 #
@@ -144,9 +145,16 @@ endfunction()
 #   clang_tidy_checks    .clang-tidy enables the families it should, and none that it leaves out:
 #                        bugprone-easily-swappable-parameters, bugprone-narrowing-conversions, readability-* and modernize-*.
 #   clang_tidy_canary_*  three proofs that the gate bites, on fixtures that are in no compile database.
+#   clang_tidy_headers_alone
+#                        every header under <root>/include/flywheel compiles as the only include of a unit
+#                        (tests/check_headers_alone.cmake), with the flags given after "--" and not taken from the compile
+#                        database. A unit run that way is compiled against the standard library that the tool's own LLVM
+#                        carries, where it carries one, and not against the library of the compiler a database names. Homebrew's
+#                        LLVM carries its libc++, which keeps its headers apart, so a header that uses a name of the standard
+#                        library whose header it does not include fails here, where a build with the SDK's library passes.
 #
 # A lint gate that silently checks nothing passes CI, which is why the gate itself is tested.
-function(flywheel_dag_clang_tidy_add_tests tool root extra)
+function(flywheel_dag_clang_tidy_add_tests tool root extra includes)
     set(_flywheel_dag_clang_tidy_major 23)
 
     _flywheel_dag_clang_tidy_walk("${root}" candidates)
@@ -184,6 +192,20 @@ function(flywheel_dag_clang_tidy_add_tests tool root extra)
     add_test(NAME clang_tidy_units
         COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${root} -DBUILD_DIR=${PROJECT_BINARY_DIR} "-DREGISTERED=${registered}"
                 -P ${root}/tests/check_clang_tidy_units.cmake)
+
+    # The arguments and the directories go to the script bar-separated, as the units do. On an Apple host the script is told the
+    # tool's major, and stops unless the units met the libc++ of that LLVM: the SDK's is another, and may hide what this is for.
+    string(REPLACE ";" "|" alone_args "${args}")
+    string(REPLACE ";" "|" alone_includes "${includes}")
+    set(alone_library "")
+    if(APPLE)
+        set(alone_library -DLIBCXX_MAJOR=${_flywheel_dag_clang_tidy_major})
+    endif()
+    add_test(NAME clang_tidy_headers_alone
+        COMMAND ${CMAKE_COMMAND} -DCLANG_TIDY=${tool} -DCONFIG_FILE=${root}/.clang-tidy "-DCLANG_TIDY_ARGS=${alone_args}"
+                -DINCLUDE_DIR=${root}/include "-DDEPENDENCY_INCLUDE_DIRS=${alone_includes}"
+                -DWORK_DIR=${PROJECT_BINARY_DIR}/clang_tidy_headers_alone ${alone_library}
+                -P ${root}/tests/check_headers_alone.cmake)
 
     add_test(NAME clang_tidy_version COMMAND ${tool} --version)
     set_tests_properties(clang_tidy_version PROPERTIES

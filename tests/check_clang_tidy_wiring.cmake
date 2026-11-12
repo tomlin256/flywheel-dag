@@ -20,8 +20,8 @@
 #     from the module: every .cpp directly in tests/, and in examples/ and benchmarks/ when their option is on. A .cpp there that no
 #     target compiles is expected and not registered, so it fails here, naming the file.
 #
-# For each tree the checks are the names of the gate's tests (the units, and version, checks, units and the three canaries), the
-# command of each unit's test, and the command and the properties of the others.
+# For each tree the checks are the names of the gate's tests (the units, and version, checks, units, the three canaries and
+# headers_alone), the command of each unit's test, and the command and the properties of the others.
 
 cmake_minimum_required(VERSION 4.0)
 
@@ -64,7 +64,17 @@ endif()
 
 # The tests that every tree has, whatever its units.
 set(fixed_names clang_tidy_version clang_tidy_checks clang_tidy_units clang_tidy_canary_source clang_tidy_canary_engine_header
-                clang_tidy_canary_dependency_header)
+                clang_tidy_canary_dependency_header clang_tidy_headers_alone)
+
+# The major that the registration tells the headers-alone script on an Apple host: the one the module holds the tool to.
+set(library "")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    file(READ "${module}" module_text)
+    if(NOT module_text MATCHES "set\\(_flywheel_dag_clang_tidy_major ([0-9]+)\\)")
+        message(FATAL_ERROR "${module} does not set _flywheel_dag_clang_tidy_major to a number")
+    endif()
+    set(library "-DLIBCXX_MAJOR=${CMAKE_MATCH_1}")
+endif()
 
 # The cases are counted and the failures kept in global properties, so that the functions below record them without macros.
 set_property(GLOBAL PROPERTY CASES 0)
@@ -324,8 +334,9 @@ function(expect_unit_commands label tests tree extra)    # ARGN: the units
     endif()
 endfunction()
 
-# The tests that every tree has: the version, the checks, the three canaries and the units test.
-function(expect_fixed_tests label tests root tree extra)    # ARGN: the units
+# The tests that every tree has: the version, the checks, the three canaries, the units test and the headers-alone test.
+# <includes> is the list of include directories that the registration was given.
+function(expect_fixed_tests label tests root tree extra includes)    # ARGN: the units
     count_case()
     set(config "--config-file=${root}/.clang-tidy")
 
@@ -357,6 +368,16 @@ function(expect_fixed_tests label tests root tree extra)    # ARGN: the units
     string(REPLACE ";" "|" registered "${registered}")
     expect_command("${label}" "${tests}" clang_tidy_units
                    "${CMAKE_COMMAND};-DSOURCE_DIR=${root};-DBUILD_DIR=${tree};-DREGISTERED=${registered};-P;${root}/tests/check_clang_tidy_units.cmake")
+
+    # The headers-alone test is its script, on the tool, with the arguments of a unit's run and the include directories, each
+    # bar-separated, and on an Apple host the major of the libc++ that the units must meet.
+    set(alone_args "--warnings-as-errors=*" "--extra-arg=-Wno-error=deprecated-declarations" ${extra} ${sysroot})
+    string(REPLACE ";" "|" alone_args "${alone_args}")
+    string(REPLACE ";" "|" alone_includes "${includes}")
+    set(expected "${CMAKE_COMMAND}" "-DCLANG_TIDY=${tool}" "-DCONFIG_FILE=${root}/.clang-tidy" "-DCLANG_TIDY_ARGS=${alone_args}"
+                 "-DINCLUDE_DIR=${root}/include" "-DDEPENDENCY_INCLUDE_DIRS=${alone_includes}"
+                 "-DWORK_DIR=${tree}/clang_tidy_headers_alone" ${library} -P "${root}/tests/check_headers_alone.cmake")
+    expect_command("${label}" "${tests}" clang_tidy_headers_alone "${expected}")
 endfunction()
 
 # The tree's clang_tidy_units test passes.
@@ -439,7 +460,8 @@ add_library(stub_dependency OBJECT _deps/dep-src/dep.cpp)
 add_library(stub_outside OBJECT @OUTSIDE@/other.cpp)
 
 @GENEX@
-flywheel_dag_clang_tidy_add_tests("@TOOL@" "${CMAKE_CURRENT_LIST_DIR}" "--extra-arg=-DWIRING_A;--extra-arg=-DWIRING_B")
+flywheel_dag_clang_tidy_add_tests("@TOOL@" "${CMAKE_CURRENT_LIST_DIR}" "--extra-arg=-DWIRING_A;--extra-arg=-DWIRING_B"
+                                  "${CMAKE_CURRENT_LIST_DIR}/dep_a/include;${CMAKE_CURRENT_LIST_DIR}/dep_b/include")
 @LATE@
 ]=])
 endfunction()
@@ -481,7 +503,8 @@ list(SORT absolute_units)
 if(NOT "${tests}" STREQUAL "")
     expect_listing("stub: the units are the sources of the targets, and no other file" "${tests}" ${absolute_units})
     expect_unit_commands("stub: the command of a unit" "${tests}" "${tree}" "${stub_extra}" ${absolute_units})
-    expect_fixed_tests("stub: the fixed tests" "${tests}" "${root}" "${tree}" "${stub_extra}" ${absolute_units})
+    expect_fixed_tests("stub: the fixed tests" "${tests}" "${root}" "${tree}" "${stub_extra}"
+                       "${root}/dep_a/include;${root}/dep_b/include" ${absolute_units})
     expect_units_pass("stub: clang_tidy_units passes" "${tree}")
 endif()
 
@@ -552,7 +575,8 @@ function(check_real_root name examples benchmarks)
     real_units(units ${examples} ${benchmarks})
     expect_listing("real root ${name}: the gate is registered for the files of the options that are on" "${tests}" ${units})
     expect_unit_commands("real root ${name}: the command of a unit" "${tests}" "${tree}" "${real_extra}" ${units})
-    expect_fixed_tests("real root ${name}: the fixed tests" "${tests}" "${SOURCE_DIR}" "${tree}" "${real_extra}" ${units})
+    expect_fixed_tests("real root ${name}: the fixed tests" "${tests}" "${SOURCE_DIR}" "${tree}" "${real_extra}"
+                       "${SPDLOG_SOURCE_DIR}/include;${NLOHMANN_JSON_SOURCE_DIR}/include" ${units})
     expect_units_pass("real root ${name}: clang_tidy_units passes" "${tree}")
 endfunction()
 

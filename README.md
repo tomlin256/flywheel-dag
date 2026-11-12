@@ -273,7 +273,8 @@ f.bind();                                       // so read it again
 
 ## Headers
 
-All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`.
+All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`. Each `.hpp` compiles as the only
+include of a unit, so none needs another to come first (`test_headers_alone`).
 
 | Header | Namespace | Provides |
 |---|---|---|
@@ -379,7 +380,10 @@ ctest --preset relwithdebinfo-macos-arm64 -R '^clang_tidy_' -j8
 `FLYWHEEL_DAG_CLANG_TIDY` is a command on `PATH` or a path to one, and a configure that names a tool it cannot run
 fails; `FLYWHEEL_DAG_CLANG_TIDY_ARGS` adds arguments, as a list. There is one test per unit, a unit being a `.cpp`,
 `.cc` or `.cxx` that a target of the project compiles, so a switched-off example or benchmark has no test, and a few tests
-that prove the gate bites. `clang_tidy_units` holds the list to the tree's `compile_commands.json` and names a file
+that prove the gate bites. `clang_tidy_headers_alone` runs the tool over each public header as the only include of a
+unit, with its flags after `--`: on a Mac that compiles the header against LLVM's own libc++, which keeps its headers
+apart, so a header that uses a name of the standard library and does not include its header fails there, where a build
+with the SDK's library passes. `clang_tidy_units` holds the list to the tree's `compile_commands.json` and names a file
 that is built and not checked, or the reverse. A dependency's sources are not units, so keep a local clone of one
 outside the checkout or under a directory called `_deps`. A `.cpp` in `tests/`, `examples/` or `benchmarks/` that no
 target compiles fails `test_clang_tidy_wiring`, which needs no clang-tidy. On a Mac, `brew install llvm` has LLVM 23; it
