@@ -12,8 +12,8 @@
 # -fsanitize=thread, which -Werror makes an error. CycleSeqLock's four fences order atomics only, where the
 # warning costs nothing, so they go through dag::threadFence<Order>() (dag_thread_fence.hpp), which turns
 # the warning off for that one call on GCC. Nothing else would notice a bare
-# std::atomic_thread_fence, or a pragma that does not work: the suite is not built under ThreadSanitizer,
-# and the default build is not -Werror.
+# std::atomic_thread_fence, or a pragma that does not work, in a tree that is not built under ThreadSanitizer,
+# which is every tree but a tsan one.
 #
 # Four things are held:
 #
@@ -31,8 +31,8 @@
 # -fsanitize=thread: nothing is linked, so no ThreadSanitizer runtime is needed. They pass only the flags that
 # bear on the property: -Werror=tsan and -Werror=pragmas on GCC (the pragma's option name is spelt right), and
 # -Werror=unknown-warning-option on Clang (the guard that keeps the pragma from Clang is there). Not
-# -Wall -Wextra -Wpedantic -Werror: a newer compiler's unrelated warning must not fail this test, because a
-# contributor's build is warning-lenient by design.
+# -Wall -Wextra -Wpedantic -Werror: this test is about one warning, and a tree that FLYWHEEL_DAG_WARNINGS_AS_ERRORS=OFF
+# relaxes for a newer compiler's unrelated warning must still pass it.
 #
 # A compiler that refuses -fsanitize=thread on an empty unit skips the compile cases, and the status line says
 # so; the scan still runs.

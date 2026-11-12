@@ -29,7 +29,7 @@
 # test presets carry what CI passes today: --output-on-failure, --timeout 120,
 # and an error for a test preset that finds no tests, which ctest otherwise
 # reports as success. No preset sets a warning flag
-# (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is the caller's).
+# (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is on by default, and turning it off is the caller's).
 #
 # The file's cmakeMinimumRequired is 3.21, the CMake that can read a version 3 file,
 # and not the project's floor, which is CMake 4.0 (test_cmake_floor). Raised to the

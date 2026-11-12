@@ -338,11 +338,10 @@ is not built with it runs its tests uninstrumented and passes. Other names (`bui
 nothing and are yours.
 
 The presets set the tree, the build type and a sanitizer kind's mode, and nothing else. CI also passes
-`-Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, and so does a strict local
-configure:
+`-Werror=author -Werror=deprecated`, and so does a strict local configure:
 
 ```bash
-cmake --preset relwithdebinfo-macos-arm64 -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+cmake --preset relwithdebinfo-macos-arm64 -Werror=author -Werror=deprecated
 ```
 
 `-Werror=author` makes a CMake author warning an error. It is CMake 4.4's name for what earlier releases call `dev`,
@@ -361,9 +360,13 @@ consumer searches only the prefixes it is given, so a package already installed 
 cannot stand in for one of them.
 
 The tests, the example and the benchmark compile the engine's headers with `-Wall -Wextra
--Wpedantic` on GCC and Clang. CI also sets `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON`, so any warning
-fails the build. None of these flags reaches a consumer or a dependency. They are set only when
-flywheel-dag is the top-level project, and never on `flywheel::dag`.
+-Wpedantic` on GCC and Clang, and with `-Werror`, so any warning fails the build, on your machine
+as in CI. `-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=OFF` relaxes a tree whose compiler has a warning that the
+code does not answer yet, and each configure of such a tree says "warnings are not errors in this
+tree". The option is cached, so a tree made with it off stays relaxed until
+`cmake --preset relwithdebinfo-macos-arm64 -UFLYWHEEL_DAG_WARNINGS_AS_ERRORS` returns it to the default.
+None of these flags reaches a consumer or a dependency. They are set only when flywheel-dag is the
+top-level project, and never on `flywheel::dag`.
 
 ### clang-tidy
 

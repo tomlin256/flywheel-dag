@@ -14,7 +14,8 @@
 #   - The configure line carries the strict CMake flags, -Werror=author -Werror=deprecated (test_cmake_diagnostics holds their
 #     spelling and effect, but reads the whole file, so a comment that says them meets it) and names no FLYWHEEL_DAG_SANITIZE,
 #     CMAKE_CXX_FLAGS or CMAKE_BUILD_TYPE: the preset is the one place that sets the mode and the build type, and a second one would
-#     double an option or quietly override it.
+#     double an option or quietly override it. A compiler warning fails the build by the project's default, and
+#     test_warning_option holds that no workflow names the option that would relax it.
 #   - Every ctest command runs the whole suite: it selects and excludes nothing (-R, -E, -L, -LE, -I, --rerun-failed, and their long
 #     forms), and it is not piped, since a pipe's status is its last command's. At least one ctest command runs tests, as opposed to
 #     listing them (-N). The canaries and test_sanitizer_coverage are part of the suite, and a run that leaves them out is a
@@ -232,11 +233,6 @@ foreach(line IN LISTS configure_lines)
         string(APPEND failures
             "\n  the configure does not carry -Werror=author -Werror=deprecated, so a CMake author warning or deprecation would "
             "not fail the run:\n      ${shown}")
-    endif()
-    if(NOT line MATCHES "-DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON")
-        string(APPEND failures
-            "\n  the configure does not carry -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON, so a compiler warning would not fail the "
-            "run:\n      ${shown}")
     endif()
     foreach(variable IN ITEMS FLYWHEEL_DAG_SANITIZE CMAKE_CXX_FLAGS CMAKE_BUILD_TYPE)
         if(line MATCHES "${variable}")

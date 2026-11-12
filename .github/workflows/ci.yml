@@ -45,13 +45,14 @@ jobs:
     # "dev", whose old spelling prints a deprecation notice there. A CMake before
     # 4.4 would ignore -Werror=author without a word, so what makes it bite is the
     # runners' CMake, which Tool versions above prints; test_cmake_diagnostics
-    # holds the spelling and the effect. FLYWHEEL_DAG_WARNINGS_AS_ERRORS
-    # makes any compiler warning in this project's own code fail it too; the
-    # dependencies' sources keep their own flags. The build type is the preset's:
-    # relwithdebinfo is RelWithDebInfo, the project's own default, the
-    # configuration consumers get.
+    # holds the spelling and the effect. A compiler warning in this project's own
+    # code fails the run too, with no flag here: -Werror is the project's default,
+    # and test_warning_option holds the default and that no workflow names the
+    # option that relaxes it. The dependencies' sources keep their own flags. The
+    # build type is the preset's: relwithdebinfo is RelWithDebInfo, the project's
+    # own default, the configuration consumers get.
     - name: Configure
-      run: cmake --preset ${{ matrix.preset }} -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+      run: cmake --preset ${{ matrix.preset }} -Werror=author -Werror=deprecated
 
     - name: Build
       run: cmake --build --preset ${{ matrix.preset }} --parallel 4

@@ -279,15 +279,22 @@ if(_flywheel_dag_top_level)
     # and a subproject sets none of this, so a consumer's flags stay its own.
     # test_warning_flags and test_consumer_subproject hold both halves.
     #
-    # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes every warning an error, and CI
-    # turns it on. It is off by default, so a newer compiler's new warning
-    # does not stop a contributor's build; CI still refuses it.
+    # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes every warning an error, and it is on
+    # by default, so that every build is as strict as CI's and no workflow has
+    # to ask. -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=OFF relaxes a tree whose compiler
+    # has a warning that the code does not answer yet. An option is cached, so a
+    # tree keeps the value it was made with: a configure with the option off
+    # says so, and cmake -UFLYWHEEL_DAG_WARNINGS_AS_ERRORS returns a tree to the
+    # default. test_warning_option holds the default, the line, and that the
+    # option reaches neither a dependency, a consumer nor a workflow.
     option(FLYWHEEL_DAG_WARNINGS_AS_ERRORS
-           "Make every compiler warning an error in this project's own targets" OFF)
+           "Make every compiler warning an error in this project's own targets" ON)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
         if(FLYWHEEL_DAG_WARNINGS_AS_ERRORS)
             add_compile_options(-Werror)
+        else()
+            message(STATUS "flywheel-dag: warnings are not errors in this tree (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is OFF)")
         endif()
     endif()
 endif()

@@ -22,7 +22,7 @@
 # `which=asan`, or `which=tsan`).
 #
 # The same locally, on a Linux host (the presets are asan-linux-arm64 and tsan-linux-arm64 on an aarch64 one):
-#   cmake --preset asan-linux-x86_64 -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+#   cmake --preset asan-linux-x86_64 -Werror=author -Werror=deprecated
 #   cmake --build --preset asan-linux-x86_64 --parallel 4
 #   ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1:detect_leaks=1 ctest --preset asan-linux-x86_64
 name: Sanitizers
@@ -92,10 +92,11 @@ jobs:
 
     # -Werror=author -Werror=deprecated: any CMake author or deprecation warning fails the run, as in ci.yml;
     # test_cmake_diagnostics holds the spelling and the effect, and test_ci_sanitizers that this line carries them.
-    # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes any compiler warning in this project's own code fail it too. The build type and the
-    # mode are the preset's, and nothing here sets them.
+    # A compiler warning in this project's own code fails it too, with no flag here: -Werror is the project's default, and
+    # test_warning_option holds that no workflow names the option that relaxes it. The build type and the mode are the
+    # preset's, and nothing here sets them.
     - name: Configure
-      run: cmake --preset ${{ env.PRESET }} -Werror=author -Werror=deprecated -DFLYWHEEL_DAG_WARNINGS_AS_ERRORS=ON
+      run: cmake --preset ${{ env.PRESET }} -Werror=author -Werror=deprecated
 
     - name: Build
       run: cmake --build --preset ${{ env.PRESET }} --parallel 4

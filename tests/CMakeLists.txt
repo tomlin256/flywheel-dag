@@ -182,6 +182,26 @@ if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_warning_flags.cmake)
 endif()
 
+# -Werror is the default. test_warning_flags reads the running tree, and a tree keeps the value of an option that it was once
+# given, so nothing there notices what the default is. The check configures the real root offline into scratch trees, with no
+# option and with the option off, and a parent project that pulls the engine in, and reads each tree's compile_commands.json
+# and cache: with no option every unit of this project has -Werror and no dependency's has, with the option off none has and
+# the configure says so, and a parent's units and cache are left alone. It also reads the workflows, none of which may name
+# the option, so that CI tests the default. It compiles nothing and needs no network. Registered as test_warning_flags is.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
+   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja"))
+  add_test(NAME test_warning_option
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/warning_option
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_warning_option.cmake)
+endif()
+
 # The FLYWHEEL_DAG_SANITIZE modes. This holds the mapping of cmake/flywheel_dag_sanitize.cmake, a pure function, to a table: the exact
 # options of asan and tsan, and a refusal of everything else that names the value and lists the modes. It needs no configure and
 # no build tree, so it runs in every tree. Registered at the top level, where the checkout it reads is the engine's.
@@ -328,8 +348,8 @@ if(_flywheel_dag_top_level)
 endif()
 
 # The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that
-# orders atomics only. Nothing else would notice a bare std::atomic_thread_fence, or a pragma that does not work: the
-# suite is not built under ThreadSanitizer, and the default build is not -Werror. This scans the headers for a bare
+# orders atomics only. Nothing else would notice a bare std::atomic_thread_fence, or a pragma that does not work, in a
+# tree that is not built under ThreadSanitizer, which is every tree but a tsan one. This scans the headers for a bare
 # fence, compiles the helper and an engine unit with -fsanitize=thread (compile only, so no ThreadSanitizer runtime is
 # needed), and on GCC checks that a bare fence draws the warning. Registered for GCC and Clang, at the top level, like
 # test_crtp_access.
