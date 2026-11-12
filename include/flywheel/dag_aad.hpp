@@ -374,9 +374,9 @@ struct RepeatedFn<T, std::index_sequence<Is...>> {
 // it twice. Reading captured state is allowed, and makes the node Eager, as it
 // would a ComputeNode.
 //
-// That contract also makes the node an IReducible that always gives a step, in
-// either mode: a Reduction (dag_reduce.hpp) runs the functor at double, at
-// values the graph does not hold. Captured state is read when the functor
+// That contract also lets the node always give a Reduction (dag_reduce.hpp) a
+// step, in either mode: the reduction runs the functor at double, at values the
+// graph does not hold. Captured state is read when the functor
 // runs, at each call.
 //
 // Why a sibling and not another ComputeNode::make(): std::function erases a
@@ -388,7 +388,6 @@ template<std::size_t N>
 class DifferentiableNode
     : public NodeBase
     , public IDifferentiable
-    , public IReducible
     , public std::enable_shared_from_this<DifferentiableNode<N>>
 {
     static_assert(N > 0, "DifferentiableNode needs an input: a constant is an Input");

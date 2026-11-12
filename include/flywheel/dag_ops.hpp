@@ -64,15 +64,13 @@ namespace dag::ops {
 // partials() from Derivative<Op>, and returns false for an op over a type
 // other than double or an Op with no specialisation.
 //
-// Every op is an IReducible too, and always gives a step: Op{}, applied to the
-// values a Reduction hands it. It reads every input, which is IReducible's
-// default.
+// Every op gives a Reduction a step: Op{}, applied to the values the reduction
+// hands it. It reads every input, which is NodeBase's default.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Derived>
 class OpNodeImpl
     : public NodeBase
     , public aad::IDifferentiable
-    , public IReducible
     , public std::enable_shared_from_this<Derived>
 {
 public:

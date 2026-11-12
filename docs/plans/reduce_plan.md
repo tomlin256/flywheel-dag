@@ -286,6 +286,8 @@ No `eval()` path. `INode` and `NodeBase` are untouched. The classes in the table
 `DifferentiableNode`'s dual call moves into a helper that its `partials()` and its step share. `bench_hot_path`'s three
 rows keep their exact columns.
 
+*Since Step 6a:* `INode` is untouched, `NodeBase` gains two virtuals, and no class gains a base or a byte.
+
 ## Decisions to confirm
 
 D5 and D9 are answered below (2026-11-11). The other defaults stand if you approve the plan as written.
@@ -303,9 +305,10 @@ D5 and D9 are answered below (2026-11-11). The other defaults stand if you appro
   *Measured in Step 2 (2026-11-11, the Outcome has the table):* the mixin costs `chain` 0.37% on average over the 16
   alignments, about 1 ns in 266, between nothing and 1.1%, and a control shows that the 8 bytes are the cause. `ingest`
   and `idle-queues` show nothing. Step 2's rule asks for a slowdown at every alignment that exceeds what `idle-queues`
-  moves, and finds one at 13 of 16, so the mixin stays. The alternative would close the cost. **Open for you before
-  the release in Step 7:** keep the mixin at this cost, or take the alternative, which changes D8's names (no
-  `IReducible`) and is a break once v1.3.0 is tagged.
+  moves, and finds one at 13 of 16, so by that rule the mixin stayed through Step 6. The alternative closes the
+  cost. **Answered: take the alternative before the release (2026-11-12).** Step 6a moves the two hooks to
+  `NodeBase` and removes `IReducible`, which changes D8's names. Where the sections above say `IReducible`, read
+  "the two hooks of `NodeBase`": Step 6a has the contract as it now is.
 - **D3 One root, and doubles at the boundary.** A solver's function is ℝⁿ → ℝ. Several roots from one reduction (a
   least-squares fit shares most of its subgraph between residuals) is a follow-up issue: until then, one reduction per
   root.
@@ -322,7 +325,8 @@ D5 and D9 are answered below (2026-11-11). The other defaults stand if you appro
 - **D7 A benchmark row, `solve`** (Step 5): a cycle that binds a reduction and runs six Newton steps on x·x − a. Its
   `allocs/cycle=0` holds the reduction, and the nodes whose values it holds, in CI on both platforms. Its arithmetic is
   nothing but + − × ÷, so its checksum is the same everywhere. `benchmarks/expected_invariants.txt` gains one line.
-- **D8 Names:** `dag::reduce()`, `dag::Reduction`, `dag::IReducible`, `dag::IReduceStep`, `dag::ReduceInputs`,
+- **D8 Names** (`dag::IReducible` is not among them since Step 6a: its two functions are `NodeBase`'s)**:**
+  `dag::reduce()`, `dag::Reduction`, `dag::IReducible`, `dag::IReduceStep`, `dag::ReduceInputs`,
   `dag::ReduceReads`, in `dag_reduce.hpp` and `dag.hpp`, with the root first, as in `aad::adjoints(root, wrt)`.
 - **D9 The release is v1.3.0, in Step 7. Answered: v1.3.0 (2026-11-11).** New public names make it a minor, and nothing
   a consumer calls changes. The node classes in the table grow by 8 bytes, which is read as no break, as with the two
@@ -579,6 +583,58 @@ have told you their numbers, labels and milestone. Commit: `docs: describe dag::
 adds none. `docs/engine_rules.md` grew by 263 bytes, to 5,640 of its 6,000. The closing comment on flywheel-dag#55 and
 its close wait with Step 7 for your answer to D2: if the mixin goes, the work goes on under this issue.
 
+### Step 6a — The hooks move to `NodeBase`, one commit (added 2026-11-12)
+
+D2 as answered: the mixin goes before the release, because after it the change is a break. `IReducible` is removed.
+`NodeBase` gains the two hooks as virtuals, declared after `propagate()` so that no virtual a node already had moves in
+its vtable:
+
+```cpp
+class NodeBase : public INode {
+public:
+    /// A step that applies this node's function, or null, the default: a barrier.
+    virtual std::unique_ptr<IReduceStep> reduceStep();
+    /// The inputs this node's value depends on at the values the graph holds now. The default is
+    /// every input.
+    virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
+};
+```
+
+The classes of Steps 1 to 4 keep their overrides and lose a base class, and so do the suite's two nodes. No node grows.
+A `Reduction` finds the hooks with a cast to `NodeBase`. A node that is not one is a barrier, and reads every input,
+as a node without the mixin did. A node of your own joins by overriding `reduceStep()`.
+
+With no mixin to tell a compute node from a stateful one, the barrier's message goes by what the node says of itself:
+a `NodeKind::TimeSeries` node is stateful, and the message does not tell the reader to build it `Lazy`; an `Eager` node
+of another kind gives no step, and a compute node gives one when it is built `Lazy`; any other node gives no step.
+
+| Test (`Reduction.`) | Asserts |
+|---|---|
+| The suite's `Counted` and `Chooser` | They derive `NodeBase` alone and override its two hooks, so the suite does not compile until `NodeBase` has them |
+| `ANodeThatIsNotANodeBaseIsABarrier` | A node of the suite's own that derives `INode` alone. Below the argument: `std::domain_error`, by name. With no argument above it: a constant |
+| `ANodeThatCannotBeCalledIsABarrier` (changed) | An `EWMANode`: the message names it as a time-series node and does not mention `Lazy`. A `Lazy` node of the suite's that gives no step: "gives no step" |
+| `ANodeGivesNoStepUnlessItSaysOtherwise` | `NodeBase`'s defaults, on nodes that do not override them: no step from an `Input` or an `EWMANode`, and every input read |
+
+| Change made by hand, then reverted | Must fail |
+|---|---|
+| A node that is not a `NodeBase` is taken as a constant | `ANodeThatIsNotANodeBaseIsABarrier` |
+| The message does not look at the node's kind | `ANodeThatCannotBeCalledIsABarrier` |
+| `NodeBase::reduceReads()` names no input | `ANodeGivesNoStepUnlessItSaysOtherwise`, and most of the suite |
+| Every row of Steps 1 to 5, made again on this code | The tests it failed before |
+
+**The hot path.** Every class is the size it was before Step 1. `Engine::cycle()`'s disassembly is compared with the
+one before Step 1. The sweep of Step 2 is run again on this step's headers against those before Step 1, at all 16
+alignments: `chain` must show no slowdown beyond what `idle-queues` moves.
+
+*Done when:* red then green; the checkpoint at 85 tests on the three compilers; the sizes, the disassembly and the
+sweep are in the Outcome; every hand-made change of Steps 1 to 5 still fails its test; the README, the engine rules,
+the header comments and the example say `NodeBase` and not `IReducible`; pushed. Then the closing comment on
+flywheel-dag#55 and its close, which Step 6 left. Commit: `refactor: the reduction hooks are NodeBase's`.
+
+*As built* (the Outcome has the results). The comment over the hooks gives the reason they are virtuals, and not
+where they sit in the class: the vtable order matters to the proof in the Outcome and to nothing a reader of the code
+relies on. A fourth change was made by hand, a default step that is not null, beside the three of the table.
+
 ### Step 7 — Release v1.3.0
 
 As `docs/releasing.md`: the scope and the access of each changed signature, the three version strings, the gate on the
@@ -640,8 +696,9 @@ recorded here. Commit: `build: release v1.3.0`.
 | 3 Selection and tweaks | Done | 2026-11-11. 38 tests; the checkpoint at 84; 6 hand-made changes caught. See the Outcome. |
 | 4 The gradient | Done | 2026-11-11. 52 tests; the checkpoint at 84; 10 hand-made changes caught. See the Outcome. |
 | 5 In an engine, and the benchmark row | Done | 2026-11-11. 55 tests; the `solve` row, its checksum the same on three compilers and from a plain loop; 5 hand-made changes as predicted. See the Outcome. |
-| 6 Example, docs, follow-ups | Done, but for the close | 2026-11-11. The checkpoint at 85; flywheel-dag#74, flywheel-dag#75 and flywheel-dag#76 raised. The closing comment and the close of flywheel-dag#55 wait for D2. |
-| 7 Release v1.3.0 | Waiting for you | D2 is open: keep the mixin at 0.37% on `chain`, or take the alternative before the tag. |
+| 6 Example, docs, follow-ups | Done, but for the close | 2026-11-11. The checkpoint at 85; flywheel-dag#74, flywheel-dag#75 and flywheel-dag#76 raised. The closing comment and the close of flywheel-dag#55 follow Step 6a. |
+| 6a The hooks move to `NodeBase` | Done | 2026-11-12. 56 tests; the checkpoint at 85; every class the size it was before Step 1, and `chain` no slower; 48 hand-made changes caught. See the Outcome. |
+| 7 Release v1.3.0 | Not started | After Step 6a. |
 
 ## Outcome
 
@@ -886,3 +943,70 @@ The prototype of "What I checked" was not kept, so the code is written again fro
 - **Not done here:** the closing comment on flywheel-dag#55 and its close. They wait with Step 7 for D2.
 - **CI** on the commit of Step 5: `CI` and `clang-tidy` green. The Ubuntu leg is x86-64, and its benchmark step
   compares four rows, so the `solve` checksum is the same there.
+
+### Step 6a — the hooks move to `NodeBase` (2026-11-12)
+
+- **Red, then green.** With the suite's two nodes deriving `NodeBase` alone, the build stopped at `only virtual member
+  functions can be marked 'override'` and `no member named 'reduceStep' in 'dag::Input<double>'`. With the hooks on
+  `NodeBase` and `IReducible` gone, 56 of 56.
+- **The checkpoint**, with CI's flags and the lint gate, and no warning in any build:
+
+  | | Build | Tests | clang-tidy | `--invariants` |
+  |---|---|---|---|---|
+  | Mac, Apple clang 21.0.0 | every target | 85 of 85 | 44 of 44 | equal |
+  | `ubuntu-dev`, GCC 13.3.0 | every target | 85 of 85 | 44 of 44 | equal |
+  | `ubuntu:26.04`, GCC 15.2.0 | every target | `test_dag_reduce`, 56 of 56, and twelve more suites, 282 of 282; both examples agree | not run | equal |
+
+- **The hot path: nothing grew.** `ComputeNode<double, double>` 200 bytes, `InPlaceComputeNode<std::vector<double>,
+  double>` 224, `ops::ProductNode<>` 184, `ops::DiffNode<>` 192, `aad::DifferentiableNode<1>` 240,
+  `MemoizedComputeNode<double, double>` 216, `ConditionNode` 208, `TweakableComputeNode<double, double>` 224: each the
+  size it was before Step 1.
+- **The hot path: the same code.** `Engine::cycle()` is the same 188 lines of machine code as before Step 1. The
+  destructor of its guard differs in one `adrp`/`add` pair, the address of a string on its cold path.
+- **The hot path: no cost.** The sweep of Step 2 again, this step's headers against those before Step 1: 16
+  alignments, each binary run 15 times in shuffled order. Paired by where `cycle()` lands, ns/cycle, this step's /
+  before:
+
+  | `cycle()` mod 64 | `chain` | `idle-queues` | `ingest` |
+  |---|---|---|---|
+  | 0 | 264.72 / 265.39 (-0.3%) | 229.99 / 230.20 (-0.1%) | 120.45 / 121.48 (-0.8%) |
+  | 4 | 265.25 / 264.95 (+0.1%) | 230.26 / 230.59 (-0.1%) | 120.13 / 120.82 (-0.6%) |
+  | 8 | 264.70 / 263.86 (+0.3%) | 230.06 / 254.66 (-9.7%) | 120.95 / 120.40 (+0.5%) |
+  | 12 | 264.51 / 265.69 (-0.4%) | 230.33 / 230.10 (+0.1%) | 120.73 / 122.71 (-1.6%) |
+  | 16 | 265.87 / 264.70 (+0.4%) | 230.05 / 230.19 (-0.1%) | 120.47 / 120.24 (+0.2%) |
+  | 20 | 265.19 / 265.88 (-0.3%) | 230.06 / 230.10 (-0.0%) | 120.91 / 121.57 (-0.5%) |
+  | 24 | 265.08 / 266.10 (-0.4%) | 230.15 / 230.02 (+0.1%) | 119.90 / 120.92 (-0.8%) |
+  | 28 | 265.31 / 265.29 (+0.0%) | 230.32 / 230.30 (+0.0%) | 119.98 / 120.42 (-0.4%) |
+  | 32 | 265.50 / 265.69 (-0.1%) | 230.17 / 229.99 (+0.1%) | 120.54 / 121.00 (-0.4%) |
+  | 36 | 265.16 / 266.16 (-0.4%) | 230.48 / 230.39 (+0.0%) | 121.06 / 121.73 (-0.5%) |
+  | 40 | 265.91 / 265.56 (+0.1%) | 230.04 / 230.14 (-0.0%) | 121.39 / 120.31 (+0.9%) |
+  | 44 | 265.65 / 265.51 (+0.1%) | 230.15 / 229.96 (+0.1%) | 120.50 / 120.69 (-0.2%) |
+  | 48 | 265.01 / 264.83 (+0.1%) | 230.32 / 230.17 (+0.1%) | 120.52 / 121.54 (-0.8%) |
+  | 52 | 265.51 / 264.64 (+0.3%) | 230.09 / 230.28 (-0.1%) | 120.16 / 120.47 (-0.3%) |
+  | 56 | 263.67 / 265.31 (-0.6%) | 230.19 / 230.13 (+0.0%) | 120.77 / 120.98 (-0.2%) |
+  | 60 | 264.32 / 266.64 (-0.9%) | 230.06 / 230.25 (-0.1%) | 120.80 / 120.11 (+0.6%) |
+
+  | Over the 16 alignments | `chain` | `idle-queues` | `ingest` |
+  |---|---|---|---|
+  | Mean change | −0.11% | −0.61%, and 0.00% without alignment 8 | −0.31% |
+  | Range | −0.9% to +0.4% | −9.7% to +0.1% | −1.6% to +0.9% |
+  | Slower at | 8 of 16 | 8 of 16 | 4 of 16 |
+  | Slower by more than `idle-queues` moved there | 5 of 16 | | 3 of 16 |
+
+  `chain` was 0.37% slower with the mixin, at 15 of 16 alignments. With the hooks on `NodeBase` it is slower at half
+  of them and faster at half, by less either way than the headers before Step 1 spread on their own (1.1%).
+- **The hand-made changes**, against the reduce suite and `test_aad_node` together, with a control that passed 63 of
+  63 in every run. All 45 of Steps 1 to 5 were made again on this code, and each still fails the test its row names.
+  Two rows needed a longer anchor, because the line they change now occurs twice, and one changed its form: a
+  candidate *that gives no step* is taken as a constant, where it was one with no `IReducible`. Most fail more tests
+  than they did, because later steps added tests that lean on the same code. Then this step's three, and with them
+  the one of Step 1 that now changes `NodeBase`:
+
+  | Change made by hand, then reverted | Fails |
+  |---|---|
+  | A node that is not a `NodeBase` is taken as a constant | `ANodeThatIsNotANodeBaseIsABarrier` alone |
+  | The message does not look at the node's kind | `ANodeThatCannotBeCalledIsABarrier` alone |
+  | `NodeBase::reduceReads()` names no input | `ANodeGivesNoStepUnlessItSaysOtherwise`, and 48 of the `Reduction` tests |
+  | `NodeBase::reduceStep()` gives a step by default | `ANodeGivesNoStepUnlessItSaysOtherwise`, `ANodeThatCannotBeCalledIsABarrier` and `IsUnboundUntilABindSucceeds` |
+- **CI** on the last commit of Step 6: `CI` and `clang-tidy` green. Its push cancelled the `CI` run of the commit
+  before it, whose tree it contains.

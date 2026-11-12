@@ -125,7 +125,13 @@ inline ReduceReads::Use& ReduceReads::at(std::size_t input) {
 
 inline bool IReduceStep::partials(const ReduceInputs&, aad::Partials&) { return false; }
 
-inline void IReducible::reduceReads(EvalContext&, ReduceReads& out) {
+// ─────────────────────────────────────────────────────────────────────────────
+// NodeBase: the reduction hooks
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline std::unique_ptr<IReduceStep> NodeBase::reduceStep() { return nullptr; }
+
+inline void NodeBase::reduceReads(EvalContext&, ReduceReads& out) {
     for (std::size_t i = 0; i < out.size(); ++i) out.reads(i);
 }
 
@@ -667,7 +673,7 @@ std::unique_ptr<IReduceStep> TweakableComputeNode<Out, Ins...>::reduceStep() {
 template<typename Out, typename... Ins>
 void TweakableComputeNode<Out, Ins...>::reduceReads(EvalContext& ctx, ReduceReads& out) {
     if (tweaked_) return;
-    IReducible::reduceReads(ctx, out);
+    NodeBase::reduceReads(ctx, out);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

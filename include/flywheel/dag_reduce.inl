@@ -88,9 +88,11 @@ inline Reduction::Reduction(NodePtr root, std::vector<NodePtr> args)
         if (reached) {
             const std::size_t first = inputs_.size();
             for (const auto& in : top.ins) inputs_.push_back(entryOf(in, Role::Constant, kNone));
+            // The hooks are NodeBase's. A node that is not one has none: it gives
+            // no step, and bind() takes it to read every input.
             Entry e{top.node, Role::Candidate, kNone, first, inputs_.size(),
-                    std::dynamic_pointer_cast<IReducible>(top.node), nullptr};
-            if (e.reducible) e.step = e.reducible->reduceStep();
+                    std::dynamic_pointer_cast<NodeBase>(top.node), nullptr};
+            if (e.hooks) e.step = e.hooks->reduceStep();
             position.emplace(top.node.get(), entries_.size());
             entries_.push_back(std::move(e));
         }
@@ -121,15 +123,15 @@ inline bool Reduction::holdsDouble(const ValuePtr& v) noexcept {
 
 inline std::string Reduction::barrierMessage(std::size_t barrier, std::size_t by) const {
     const Entry& e = entries_[barrier];
-    const auto* base = dynamic_cast<const NodeBase*>(e.node.get());
     std::string why;
-    if (!e.reducible)
-        why = "is not an IReducible, so a reduction has no function of it to call";
-    else if (base != nullptr && base->invalidationMode() == InvalidationMode::Eager)
-        why = "is Eager. Only InvalidationMode::Lazy says that a functor is a pure function of"
-              " its inputs: build the node Lazy if its functor is one";
+    if (e.node->kind() == NodeKind::TimeSeries)
+        why = "is a time-series node, whose value is not a function of its inputs' values alone";
+    else if (e.hooks && e.hooks->invalidationMode() == InvalidationMode::Eager)
+        why = "is Eager, and gives no step. A compute node gives one when it is built with"
+              " InvalidationMode::Lazy, which says that its functor is a pure function of its"
+              " inputs";
     else
-        why = "gives no step";
+        why = "gives no step: nothing says that its function may be called at other values";
     return "dag::Reduction: " + args_[by]->name() + " reaches root " + root_->name()
          + " through " + e.node->name() + ", which " + why;
 }
@@ -175,9 +177,9 @@ inline void Reduction::bind() {
         if (reached_[i] == 0 || e.role != Role::Candidate) continue;
         const std::span<ReduceReads::Use> uses =
             std::span(uses_).subspan(e.firstInput, e.lastInput - e.firstInput);
-        if (e.reducible) {
+        if (e.hooks) {
             ReduceReads reads(uses);
-            e.reducible->reduceReads(ctx, reads);
+            e.hooks->reduceReads(ctx, reads);
         } else {
             // Nothing says what it reads, so it reads every input.
             std::fill(uses.begin(), uses.end(), ReduceReads::Use::Read);

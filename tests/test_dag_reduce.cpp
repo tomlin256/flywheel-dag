@@ -44,8 +44,9 @@ using allocation_counter::allocations_during;
 namespace {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Two nodes of the suite's own that implement IReducible, so that what bind()
-// does with what a node reads is held without any engine node.
+// Three nodes of the suite's own. Two override NodeBase's reduction hooks, so
+// that what bind() does with what a node reads is held without any engine node.
+// The third derives INode alone, and so has no hooks.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// What a Counted gives a reduction: no step, a step, or a step whose partials
@@ -58,7 +59,6 @@ enum class Gives : std::uint8_t { NoStep, AStep, AStepThatMisnamesItsInput };
 template<typename In = double>
 class Counted
     : public NodeBase
-    , public IReducible
     , public std::enable_shared_from_this<Counted<In>>
 {
 public:
@@ -129,7 +129,6 @@ private:
 /// it then reads no input at all, as a tweaked node does.
 class Chooser
     : public NodeBase
-    , public IReducible
     , public std::enable_shared_from_this<Chooser>
 {
 public:
@@ -187,6 +186,49 @@ private:
     NodePtr     which_, first_, second_;
     ValuePtr    cached_;
     bool        held_ = false;
+};
+
+/// −a, as a node that derives INode alone and keeps the dirty protocol by hand.
+/// The engine's nodes all derive NodeBase, and a node of your own should: this
+/// one is here because a reduction can meet a node that does not.
+class Bare : public INode, public std::enable_shared_from_this<Bare> {
+public:
+    static std::shared_ptr<Bare> make(std::string name, NodePtr in) {
+        auto self = std::shared_ptr<Bare>(new Bare(std::move(name), std::move(in)));
+        self->in_->addDownstream(self);
+        return self;
+    }
+
+    ValuePtr eval(EvalContext& ctx) override {
+        if (!dirty_ && !ctx.forceRecompute) return cached_;
+        const ValuePtr v = in_->eval(ctx);
+        cached_ = make_value(-get_value<double>(v));
+        dirty_  = false;
+        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidate();
+        return cached_;
+    }
+    std::string name() const override { return name_; }
+    std::vector<NodePtr> inputs() const override { return {in_}; }
+    void invalidate() override { mark(); }
+    void invalidateMaybe() override { mark(); }
+    bool dirty() const override { return dirty_; }
+    void addDownstream(std::weak_ptr<INode> n) override { downstream_.push_back(std::move(n)); }
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+private:
+    Bare(std::string name, NodePtr in) : name_(std::move(name)), in_(std::move(in)) {}
+
+    void mark() {
+        if (dirty_) return;
+        dirty_ = true;
+        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidateMaybe();
+    }
+
+    std::string                       name_;
+    NodePtr                           in_;
+    ValuePtr                          cached_;
+    bool                              dirty_ = true;
+    std::vector<std::weak_ptr<INode>> downstream_;
 };
 
 /// A Black–Scholes call, from ops and differentiable nodes: d1 is one
@@ -1416,9 +1458,10 @@ TEST(Reduction, ANodeThatCannotBeCalledIsABarrier) {
     Reduction f(root, {x});
     const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
     EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.ewma")) << why;
-    EXPECT_TRUE(mentions(why, "is not an IReducible")) << why;
+    EXPECT_TRUE(mentions(why, "is a time-series node")) << why;
+    EXPECT_FALSE(mentions(why, "Lazy")) << why;   // which a stateful node cannot be
 
-    // An IReducible that gives no step is one too.
+    // A Lazy node that gives no step is one too.
     auto silent  = Counted<>::make("node.silent", x, Gives::NoStep);
     auto negated = ops::NegateNode<>::make("root.negated", silent);
     negated->eval(ctx);
@@ -1426,6 +1469,29 @@ TEST(Reduction, ANodeThatCannotBeCalledIsABarrier) {
     const std::string whyNot = messageOf<std::domain_error>([&] { g.bind(); });
     EXPECT_TRUE(mentions(whyNot, "arg.x reaches root root.negated through node.silent")) << whyNot;
     EXPECT_TRUE(mentions(whyNot, "gives no step")) << whyNot;
+}
+
+// A node that derives INode alone has no hooks for a reduction to ask it
+// through. Below the argument it is a barrier, and reads every input for all a
+// reduction can tell. With no argument above it, it is a constant like any
+// other.
+TEST(Reduction, ANodeThatIsNotANodeBaseIsABarrier) {
+    auto x    = Input<double>::make("arg.x", 2.0);
+    auto y    = Input<double>::make("y", 5.0);
+    auto bare = Bare::make("node.bare", x);
+    auto root = ops::ProductNode<>::make("root.out", {bare, y});
+    EvalContext ctx;
+    const ValuePtr held = root->eval(ctx);
+    ASSERT_EQ(get_value<double>(held), -10.0);
+
+    Reduction f(root, {x});
+    const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
+    EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.bare")) << why;
+    EXPECT_TRUE(mentions(why, "gives no step")) << why;
+
+    Reduction ofY = reduce(root, {y});
+    EXPECT_EQ(ofY.size(), 1u);
+    EXPECT_EQ(ofY({7.0}), -14.0);
 }
 
 // The Chooser takes `taken`, so it never pulls `other`, which stays dirty.
@@ -1515,11 +1581,18 @@ TEST(ReduceContract, ReadsRecordsWhatANodeNames) {
     EXPECT_EQ(uses, (std::vector<Use>{Use::Decides, Use::Unread, Use::Read}));
 }
 
-// IReducible's default, on a node that does not override it.
-TEST(ReduceContract, ANodeReadsEveryInputUnlessItSaysOtherwise) {
+// NodeBase's defaults, on nodes that do not override them: no step, which makes
+// a node a barrier, and every input read.
+TEST(ReduceContract, ANodeGivesNoStepUnlessItSaysOtherwise) {
     using Use = ReduceReads::Use;
-    auto x   = Input<double>::make("x", 1.0);
+    auto x    = Input<double>::make("x", 1.0);
+    auto ewma = ts::EWMANode::make("ewma", x, 0.5);
+    EXPECT_EQ(x->reduceStep(), nullptr);
+    EXPECT_EQ(ewma->reduceStep(), nullptr);
+
+    // An op gives a step, and does not say what it reads.
     auto sum = ops::SumNode<>::make("sum", {x, x, x});
+    EXPECT_NE(sum->reduceStep(), nullptr);
     std::vector<Use> uses(3, Use::Unread);
     ReduceReads reads(uses);
     EvalContext ctx;

@@ -41,7 +41,7 @@
 // ──────────────────────────────────────────────
 //   1. Construct, once. One walk up from the root finds every node an argument
 //      reaches, in topological order, and asks each for a step
-//      (IReducible::reduceStep(), dag.hpp). A graph is not rewired once it is
+//      (NodeBase::reduceStep(), dag.hpp). A graph is not rewired once it is
 //      built, so the walk is never repeated. It reads no value, so a reduction
 //      can be built while a graph is being wired, before anything is evaluated.
 //   2. bind(), once per point. It follows what the root depends on at the
@@ -74,10 +74,11 @@
 //     state must be: called at trial values, such a functor would advance on
 //     every one.
 //   • ConditionNode. It selects, and has no functor.
-//   • A node of your own that implements IReducible.
+//   • A node of your own that overrides NodeBase::reduceStep().
 //
-// Any other node with an argument above it is a BARRIER, every dag::ts node
-// and an Eager compute node among them.
+// A node gives no step unless it says otherwise, and a node that gives none,
+// with an argument above it, is a BARRIER: every dag::ts node, an Eager
+// compute node, and a node that does not derive NodeBase.
 //
 // The rules
 // ─────────
@@ -91,7 +92,7 @@
 //     callback, in a node that has just pulled the root, or after evaluating
 //     the root.
 //   • bind() follows only the inputs each node reads at this point
-//     (IReducible::reduceReads()). A ConditionNode reads its condition and the
+//     (NodeBase::reduceReads()). A ConditionNode reads its condition and the
 //     branch the condition selects, never the other, which can be stale. A
 //     tweaked node reads nothing. Every other node of the engine reads every
 //     input. An input a node does not read is never pulled, and a barrier
@@ -102,9 +103,9 @@
 //   • A node that an argument does move must give a step, or bind() throws
 //     std::domain_error, naming the argument, the root and the node. The value
 //     through a barrier is unknown, and the value the graph holds would be a
-//     silently wrong answer. A node that is not an IReducible reads every
-//     input, for all a reduction can tell, so it is refused even when the
-//     input the argument moves contributes nothing.
+//     silently wrong answer. A node that does not say what it reads is taken
+//     to read every input, so it is refused even when the input the argument
+//     moves contributes nothing.
 //   • A node whose deciding input an argument moves (ReduceReads::decides()),
 //     which is a ConditionNode whose condition an argument moves, throws
 //     std::domain_error too. Following the choice would need the values above
@@ -235,7 +236,7 @@ private:
         std::size_t                  argument;     ///< an Argument's position in args_
         std::size_t                  firstInput;   ///< a Candidate's inputs are
         std::size_t                  lastInput;    ///<   inputs_[firstInput, lastInput)
-        std::shared_ptr<IReducible>  reducible;    ///< a Candidate's mixin, or null
+        std::shared_ptr<NodeBase>    hooks;        ///< a Candidate, as the NodeBase it is, or null
         std::unique_ptr<IReduceStep> step;         ///< a Candidate's step, or null
     };
 

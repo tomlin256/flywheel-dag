@@ -225,10 +225,10 @@ f.bind();                                       // so read it again
   | Every `dag::ops` node, and `ConditionNode` | Always |
   | `aad::DifferentiableNode`, `MemoizedComputeNode` | Always: the one's functor has no side effects, and the other's is a pure function |
   | `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode` | When `Lazy`, which says that the functor is a pure function of its inputs |
-  | Every `dag::ts` node, an `Eager` compute node, a node without `IReducible` | Never: a barrier |
+  | Every `dag::ts` node, an `Eager` compute node, any node that does not override `reduceStep()` | Never: a barrier |
 
   A barrier that an argument moves makes `bind()` throw `std::domain_error`, naming the argument and the node. A node
-  of your own joins by implementing `IReducible`.
+  of your own joins by overriding `NodeBase::reduceStep()`, and no node is larger for it.
 - `bind()` follows the branch a `ConditionNode` took, and takes a tweaked node as a constant. A condition that an
   argument moves is refused: a piecewise function of an argument belongs inside one functor.
 - The gradient sweeps the ops' closed-form partials and a `DifferentiableNode`'s dual numbers in reverse, at the trial
@@ -277,7 +277,7 @@ All headers live under `include/flywheel/`; include the `.hpp`, never the `.inl`
 
 | Header | Namespace | Provides |
 |---|---|---|
-| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase`, `aad::IDifferentiable`, `IReducible` |
+| `dag.hpp` | `dag` | `Input`, `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode`, `ConditionNode`, `Graph`, equality policies, `NodeBase`, `aad::IDifferentiable`, `IReduceStep` |
 | `dag_async.hpp` | `dag::async` | `AsyncInput`, `AsyncQueue`, `FeedRegistry`, `TickLoop` |
 | `dag_engine.hpp` | `dag::async` | `Engine`, `CycleSeqLock` |
 | `dag_compute_module.hpp` | `dag::async` | `IComputeModule` — self-contained subgraphs |

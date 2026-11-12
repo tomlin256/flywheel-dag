@@ -326,6 +326,90 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The reduction contract — how a node lets a dag::Reduction (dag_reduce.hpp)
+// apply its function at values the graph does not hold.
+//
+// A Reduction turns the nodes between some argument nodes and a root into a
+// function of the arguments. It evaluates no node. It asks each node that an
+// argument reaches for a STEP: the node's function, applied to values the
+// reduction hands it, and published through storage the step owns. So a call
+// moves nothing in the graph: no node's cached value, slot, state or dirty
+// flag.
+//
+// It asks through two virtuals of NodeBase, reduceStep() and reduceReads(),
+// which a node overrides to join. By default a node gives no step, which makes
+// it a BARRIER: a Reduction cannot be bound at a point where an argument moves
+// an input the node reads. The three types below are what the two hooks are
+// written in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The values a step applies its node's function to: one per input of the node,
+/// in inputs() order. A view of the reduction's values, good for the one call.
+class ReduceInputs {
+public:
+    /// Input i's value is values[positions[i]].
+    ReduceInputs(std::span<const ValuePtr> values, std::span<const std::size_t> positions) noexcept;
+
+    /// The number of inputs the node has.
+    std::size_t size() const noexcept;
+
+    /// Input i's value, for i < size(). Null for an input the node's
+    /// reduceReads() did not name at the point the reduction is bound to.
+    const ValuePtr& operator[](std::size_t i) const noexcept;
+
+private:
+    std::span<const ValuePtr>    values_;
+    std::span<const std::size_t> positions_;
+};
+
+/// What NodeBase::reduceReads() writes: which of its inputs a node's value
+/// depends on at the values the graph holds now.
+class ReduceReads {
+public:
+    enum class Use : std::uint8_t { Unread, Read, Decides };
+
+    /// One Use per input of the node, each Unread until the node names it.
+    explicit ReduceReads(std::span<Use> inputs) noexcept;
+
+    /// The number of inputs the node has.
+    std::size_t size() const noexcept;
+
+    /// The node's value depends on inputs()[input] here. Throws
+    /// std::out_of_range for an input the node does not have.
+    void reads(std::size_t input);
+
+    /// The same, and the input's value chose which inputs the node reads, as a
+    /// ConditionNode's condition does. A Reduction is bound to the choice the
+    /// graph made, so it refuses a point where an argument moves such an input.
+    void decides(std::size_t input);
+
+private:
+    Use& at(std::size_t input);
+
+    std::span<Use> inputs_;
+};
+
+/// One node's function, held by a Reduction and applied at each call.
+class IReduceStep {
+public:
+    virtual ~IReduceStep() = default;
+
+    /// The node's value at these input values. It applies the node's function
+    /// and nothing else: no equality policy, which compares with the value the
+    /// node last published and so has a history. It publishes through storage
+    /// of its own, never the node's, and a warm call should not allocate
+    /// (ValueSlot). Eval thread only, like eval().
+    virtual ValuePtr apply(const ReduceInputs& in) = 0;
+
+    /// The node's local partial derivatives at these input values, written as
+    /// aad::IDifferentiable::partials() writes them: an entry for each input
+    /// the value depends on, by its position in inputs(). False, the default,
+    /// when the step cannot say: a reduction that runs it then has a value and
+    /// no gradient. A Reduction asks after apply(), with the same values.
+    virtual bool partials(const ReduceInputs& in, aad::Partials& out);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // NodeBase — the one copy of the dirty/downstream protocol.
 //
 // `downstream_` is private: a derived class reaches it through
@@ -348,6 +432,9 @@ public:
 //
 // Anything else overriding these is re-implementing the protocol rather than
 // using it.
+//
+// It also carries the two hooks a dag::Reduction asks a node through,
+// reduceStep() and reduceReads(): the reduction contract is the block above.
 // ─────────────────────────────────────────────────────────────────────────────
 class NodeBase : public INode {
 public:
@@ -399,6 +486,28 @@ protected:
         cascadeMaybe();
     }
 
+public:
+    // ── The reduction hooks ──────────────────────────────────────────────────
+    //
+    // Virtuals of NodeBase, and not a mixin beside it, so that a node that joins
+    // is no larger than one that does not: a second polymorphic base is eight
+    // bytes on every node of the class, and on the cycle path that is measurable.
+
+    /// A step that applies this node's function at the values a Reduction
+    /// hands it, or null when nothing says the function may be called at
+    /// other values. The default is null, which makes the node a barrier. A
+    /// Reduction asks once, when it is built, and keeps the step.
+    virtual std::unique_ptr<IReduceStep> reduceStep();
+
+    /// The inputs this node's value depends on at the values the graph holds
+    /// now. The default is every input. A node that reads fewer says so here:
+    /// a Reduction then never reads the others, which can be stale, and a
+    /// barrier among them is not one. It pulls what it must with eval(ctx), as
+    /// eval() does. A Reduction asks only a clean node, at each bind(), so
+    /// every pull returns a cached value.
+    virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
+
+protected:
     /// Invalidate every downstream node — "my value changed". Expired weak_ptrs
     /// are skipped, not erased: a node's downstream set is built once, by
     /// wire(), and graphs are not rewired at runtime.
@@ -510,109 +619,6 @@ private:
 void wire(const NodePtr& self, const std::vector<NodePtr>& ins);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The reduction contract — how a node lets a dag::Reduction (dag_reduce.hpp)
-// apply its function at values the graph does not hold.
-//
-// A Reduction turns the nodes between some argument nodes and a root into a
-// function of the arguments. It evaluates no node. It asks each node that an
-// argument reaches for a STEP: the node's function, applied to values the
-// reduction hands it, and published through storage the step owns. So a call
-// moves nothing in the graph: no node's cached value, slot, state or dirty
-// flag.
-//
-// IReducible is a mixin, like ITweakable, IStatefulNode and
-// aad::IDifferentiable. A Reduction finds it with dynamic_cast, so INode and
-// NodeBase do not change, and neither does a node that does not implement it.
-// A node without it is a BARRIER: a Reduction cannot be bound at a point where
-// an argument moves an input the node reads.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// The values a step applies its node's function to: one per input of the node,
-/// in inputs() order. A view of the reduction's values, good for the one call.
-class ReduceInputs {
-public:
-    /// Input i's value is values[positions[i]].
-    ReduceInputs(std::span<const ValuePtr> values, std::span<const std::size_t> positions) noexcept;
-
-    /// The number of inputs the node has.
-    std::size_t size() const noexcept;
-
-    /// Input i's value, for i < size(). Null for an input the node's
-    /// reduceReads() did not name at the point the reduction is bound to.
-    const ValuePtr& operator[](std::size_t i) const noexcept;
-
-private:
-    std::span<const ValuePtr>    values_;
-    std::span<const std::size_t> positions_;
-};
-
-/// What IReducible::reduceReads() writes: which of its inputs a node's value
-/// depends on at the values the graph holds now.
-class ReduceReads {
-public:
-    enum class Use : std::uint8_t { Unread, Read, Decides };
-
-    /// One Use per input of the node, each Unread until the node names it.
-    explicit ReduceReads(std::span<Use> inputs) noexcept;
-
-    /// The number of inputs the node has.
-    std::size_t size() const noexcept;
-
-    /// The node's value depends on inputs()[input] here. Throws
-    /// std::out_of_range for an input the node does not have.
-    void reads(std::size_t input);
-
-    /// The same, and the input's value chose which inputs the node reads, as a
-    /// ConditionNode's condition does. A Reduction is bound to the choice the
-    /// graph made, so it refuses a point where an argument moves such an input.
-    void decides(std::size_t input);
-
-private:
-    Use& at(std::size_t input);
-
-    std::span<Use> inputs_;
-};
-
-/// One node's function, held by a Reduction and applied at each call.
-class IReduceStep {
-public:
-    virtual ~IReduceStep() = default;
-
-    /// The node's value at these input values. It applies the node's function
-    /// and nothing else: no equality policy, which compares with the value the
-    /// node last published and so has a history. It publishes through storage
-    /// of its own, never the node's, and a warm call should not allocate
-    /// (ValueSlot). Eval thread only, like eval().
-    virtual ValuePtr apply(const ReduceInputs& in) = 0;
-
-    /// The node's local partial derivatives at these input values, written as
-    /// aad::IDifferentiable::partials() writes them: an entry for each input
-    /// the value depends on, by its position in inputs(). False, the default,
-    /// when the step cannot say: a reduction that runs it then has a value and
-    /// no gradient. A Reduction asks after apply(), with the same values.
-    virtual bool partials(const ReduceInputs& in, aad::Partials& out);
-};
-
-/// A node that a Reduction can call: the mixin of the block above.
-class IReducible {
-public:
-    virtual ~IReducible() = default;
-
-    /// A step that applies this node's function, or null when nothing says the
-    /// function may be called at other values. A Reduction asks once, when it
-    /// is built, and keeps the step.
-    virtual std::unique_ptr<IReduceStep> reduceStep() = 0;
-
-    /// The inputs this node's value depends on at the values the graph holds
-    /// now. The default is every input. A node that reads fewer says so here:
-    /// a Reduction then never reads the others, which can be stale, and a
-    /// barrier among them is not one. It pulls what it must with eval(ctx), as
-    /// eval() does. A Reduction asks only a clean node, at each bind(), so
-    /// every pull returns a cached value.
-    virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Input<T> — leaf node.
 //
 // An optional wake hook, installed with setWakeHook(), is called at the end of
@@ -652,15 +658,11 @@ using InputPtr = std::shared_ptr<Input<T>>;
 // ─────────────────────────────────────────────────────────────────────────────
 // ComputeNode<Out, Ins...> — typed node with a functor over typed inputs.
 //
-// An IReducible: built Lazy, it gives a Reduction a step that calls the
-// functor. Built Eager, it gives none (InvalidationMode).
+// Built Lazy, it gives a Reduction a step that calls the functor. Built Eager,
+// it gives none (InvalidationMode).
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
-class ComputeNode
-    : public NodeBase
-    , public IReducible
-    , public std::enable_shared_from_this<ComputeNode<Out, Ins...>>
-{
+class ComputeNode : public NodeBase, public std::enable_shared_from_this<ComputeNode<Out, Ins...>> {
 public:
     using Fn = std::function<Out(const Ins&...)>;
     using InputTuple = std::tuple<std::conditional_t<true, NodePtr, Ins>...>;
@@ -754,10 +756,8 @@ using ComputeNodePtr = std::shared_ptr<ComputeNode<Out, Ins...>>;
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename Out, typename... Ins>
 class InPlaceComputeNode
-    : public NodeBase
-    , public IReducible
-    , public std::enable_shared_from_this<InPlaceComputeNode<Out, Ins...>>
-{
+    : public NodeBase,
+      public std::enable_shared_from_this<InPlaceComputeNode<Out, Ins...>> {
 public:
     /// Writes this cycle's value into `out`. See the contract above: `out` holds
     /// the previous cycle's value on entry.
@@ -914,10 +914,10 @@ public:
 //
 // A ComputeNode that also implements ITweakable<Out> and aad::IDifferentiable.
 //
-// An IReducible, as ComputeNode is: Lazy, it gives a Reduction a step that
-// calls the functor, and Eager, none. While tweaked it reads no input, so a
-// reduction bound then takes the frozen value as a constant, in either mode,
-// and reads nothing above the node.
+// To a Reduction it is a ComputeNode: Lazy, it gives a step that calls the
+// functor, and Eager, none. While tweaked it reads no input, so a reduction
+// bound then takes the frozen value as a constant, in either mode, and reads
+// nothing above the node.
 //
 // State machine:
 //
@@ -939,7 +939,6 @@ class TweakableComputeNode
     : public NodeBase
     , public ITweakable<Out>
     , public aad::IDifferentiable
-    , public IReducible
     , public std::enable_shared_from_this<TweakableComputeNode<Out, Ins...>>
 {
 public:
@@ -972,7 +971,7 @@ public:
     /// Otherwise false: the functor is opaque.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
-    // ── IReducible ───────────────────────────────────────────────────────────
+    // ── The reduction hooks ──────────────────────────────────────────────────
     /// A step that calls the functor, when the node is Lazy. Null when it is
     /// Eager.
     std::unique_ptr<IReduceStep> reduceStep() override;
@@ -1023,8 +1022,8 @@ private:
 // nothing, and a root left dirty cannot be recorded on a tape. Held by
 // UntakenBranch.ItsMoveReachesNoConsumer.
 //
-// AS A STEP. An IReducible that always gives a step, which selects as eval()
-// does. It tells a Reduction what eval() read: the condition, which decides,
+// AS A STEP. It always gives a Reduction a step, which selects as eval() does.
+// It tells a Reduction what eval() read: the condition, which decides,
 // and the branch the condition selects. So a reduction never reads the other
 // branch, and a barrier there is not one. A reduction is bound to the branch
 // the graph took, and refuses a condition that an argument moves: following
@@ -1034,7 +1033,6 @@ private:
 class ConditionNode
     : public NodeBase
     , public aad::IDifferentiable
-    , public IReducible
     , public std::enable_shared_from_this<ConditionNode>
 {
 public:

@@ -68,15 +68,13 @@ std::size_t hash_tuple(const std::string& name, const Tuple& t,
 //     nodes with the same name but different functors will share cache entries
 //     and produce incorrect results.
 //
-// An IReducible: it always gives a Reduction (dag_reduce.hpp) a step, in either
-// mode, because the purity the cache needs is what lets the functor run at a
-// trial value. The step calls the functor and never the cache, which trial
-// values would fill.
+// It always gives a Reduction (dag_reduce.hpp) a step, in either mode, because
+// the purity the cache needs is what lets the functor run at a trial value. The
+// step calls the functor and never the cache, which trial values would fill.
 
 template<typename Out, typename... Ins>
 class MemoizedComputeNode
     : public NodeBase
-    , public IReducible
     , public std::enable_shared_from_this<MemoizedComputeNode<Out, Ins...>>
 {
 public:
