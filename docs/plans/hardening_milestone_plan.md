@@ -1,8 +1,9 @@
 # Close Out the Hardening Milestone
 
-**Status: In progress (approved 2026-11-12).** Approved as written, so D1 to D8 stand at their defaults, and the
-release is v1.3.1. Everything under "Measured" was taken read-only at `0b21b87`, before the approval, in scratch copies
-and scratch trees outside the checkout.
+**Status: Done (2026-11-12).** Approved as written, so D1 to D8 stood at their defaults. The five issues are closed,
+v1.3.1 is released and the milestone is closed. The Outcome at the end records what each step found and where the work
+differs from this text: the two includes that Step 4 puts in `dag.hpp` went into `dag.inl`. Everything under "Measured"
+was taken read-only at `0b21b87`, before the approval, in scratch copies and scratch trees outside the checkout.
 
 Closes [flywheel-dag#32](https://github.com/tomlin256/flywheel-dag/issues/32),
 [flywheel-dag#66](https://github.com/tomlin256/flywheel-dag/issues/66),
@@ -416,4 +417,88 @@ in flight.
 
 ## Outcome
 
-Nothing yet.
+**Done 2026-11-12.** The five issues are closed, each with a closing comment, v1.3.1 is tagged on the release commit and
+published as Latest, and the milestone is closed.
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `2f84ba2`; each issue names the plan in a comment |
+| 2 — flywheel-dag#73: the rows | Done | `bb6b1db` |
+| 3 — flywheel-dag#32: the list, and its check | Done | `1584cf4` |
+| 4 — flywheel-dag#66: the includes, and headers alone | Done | `04d1547` |
+| 5 — flywheel-dag#69: what a cold configure fetches | Done | `b9635d5` |
+| 6 — flywheel-dag#67: `-Werror` by default | Done | `34628d4` |
+| 7 — Release v1.3.1 | Done | `12555db`, tagged `v1.3.1` |
+| 8 — Close out | Done | the commit that adds this section |
+
+What each step's "done when" found, on the files as committed:
+
+- **Step 2.** `test_platform_name` reports that all 72 cases hold. M1 to M4 fail 9, 2, 1 and 1, and a control none.
+- **Step 3.** The check went in first and failed naming `RollingSumNode` and no other of the 14 classes. With the row it
+  holds, and `test_comment_refs` passes with `OPEN_ISSUES=31`. N1 to N4 are reported as stated; so is the `EWMANode` row
+  made a comment, which shows that a commented-out row is not a row.
+- **Step 4.** `clang_tidy_headers_alone` went in first and failed on the Mac for 14 of the 16 headers at `dag.inl:81`;
+  with the includes it passes. Both tests pass on the Mac and in `ubuntu-dev`, and on both legs of CI's two workflows.
+  On the lint workflow's macOS leg the control passed, so the units there met LLVM 23's own libc++, as on the Mac: the
+  assumption of the Self-review holds. The first takes 6 s on the Mac, 8 in the container and about 20 on a runner; the
+  second 9, 16 and about 35. `clang-include-cleaner`, run again on the committed headers, lists only its own two
+  findings.
+
+  | Change | `test_headers_alone` | `clang_tidy_headers_alone` on the Mac |
+  |---|---|---|
+  | H1. `<cmath>` removed from `dag.inl` | passes | 14 headers fail at `std::abs` |
+  | `<typeinfo>` removed from `dag.inl`, or `<ctime>` from `dag_state_store.inl` | passes | passes |
+  | H2. `"flywheel/dag.hpp"` removed from `dag_window_status.hpp` | names the header | names the header |
+  | H3. a new header that names `std::string` and includes nothing | names it, 1 of 17 | names it, 1 of 17 |
+  | H4. the must-not-compile control given `<string>` | "the control compiled" | "the control compiled" |
+  | H5. the gate's caller told that the major is 22 | not run | "the units were not compiled against the tool's libc++" |
+
+- **Step 5.** The check went in first and failed on five declarations. A fresh configure with the strict flags exits 0
+  with no warning line and a `_deps` of 15 MB in 2 seconds, on the Mac and in `ubuntu-dev`; on the release commit CI's
+  cold configure took 3.6 s on Ubuntu and 8.5 s on macOS. F1 to F5 are reported by name, and so are two more: an
+  archive with no hash, and a root that declares nothing.
+- **Step 6.** The test went in first and failed: all 42 units of the project lacked `-Werror`, the cache held `OFF`,
+  and two workflows named the option. With the default it passes in 2 seconds. Each of the five kinds builds from its
+  preset with no `-D` and no warning, every target and `bench_hot_path`, under Apple clang 21 and under GCC 13.3. W1 to
+  W6 fail in the case stated, and so does a seventh, the script told that the default is `OFF`. `CLAUDE.md` is 6,492
+  bytes. The dispatched `Sanitizers` run 43318553418 passed `asan` and `tsan` with its `-D` gone.
+- **Step 7.** The gate, on the tree as committed, with `-Werror=author -Werror=deprecated` and the clang-tidy gate on:
+  the Mac (Apple clang 21.0.0, CMake 4.4.5, LLVM 23.1.4) and `ubuntu-dev` (GCC 13.3.0, CMake 4.4.5, LLVM 23.1.6)
+  configure with no warning line, build with no warning, pass the suite, 89 of 89, and the `clang_tidy_` tests, 45 of
+  45, and `bench_hot_path --invariants` matches. `gh release list` shows v1.3.1 as Latest. On the release commit,
+  `CI` run 43319730148 passed 89 of 89 on both legs (GCC 15.2.0 and Apple clang 21.0.0, CMake 4.4.5), with no
+  `warning:` line in either log, and `clang-tidy` run 43319730242 passed on both.
+- **30 hand-made changes** in all, each on a scratch copy beside a control. 28 fail the check written to hold them. Two
+  fail nothing, the second row of the table above.
+
+Where the work differs from the plan:
+
+- **`<cmath>` and `<typeinfo>` are in `dag.inl`, not `dag.hpp`.** `dag.inl` is the file that says `std::abs`, `typeid`
+  and `std::bad_cast`, `dag_state_store.inl` already names what it alone uses, and an editor reports an include that
+  `dag.hpp` does not use itself. The header and its `.inl` name them either way, which is what D2 asked.
+- **`flywheel_dag_clang_tidy_add_tests()` takes a fourth argument,** the include directories of the libraries that the
+  headers include, which the headers-alone units need. `test_clang_tidy_wiring` holds it.
+- **The lint workflow's header comment changed,** to say what the gate now runs. That is an edit to a workflow, so its
+  one action was looked up again: `actions/checkout@v6` runs on `node24`.
+- **A tree made earlier does fetch once.** Step 5 said that `ubuntu-dev`'s existing tree would not be fetched again,
+  which had been measured for a clone that only gains `GIT_SHALLOW`. nlohmann/json changes from a clone to an archive,
+  so an existing tree downloads the archive, 115 KB, and keeps its two clones at full depth.
+- **W4 fails as a refused configure.** `-Werror` on `flywheel_dag`'s `INTERFACE` stops the parent project's configure,
+  because `tests/consumer` itself refuses compile options on `flywheel::dag`; the option-off case reports it too, on 40
+  of 42 units.
+- **The cache's `CMAKE_CXX_FLAGS` is held to carry no warning flag,** not to be empty: an environment's `CXXFLAGS`
+  would fail an emptiness check for no fault of the project's.
+- **Every tree already held `ON`.** The five trees on each host had been configured with the option on, so clearing
+  it changed none of them. The stale case showed itself anyway: a scratch tree made before Step 6 printed "warnings
+  are not errors in this tree" on its next configure.
+- **CI did not run every checkpoint on macOS.** A push cancels the `CI` run in flight. The runs on `2f84ba2` and
+  `bb6b1db` were cancelled. The run on `1584cf4` ended `failure` with its Ubuntu leg green and a macOS job that has no
+  steps: a runner that never came, cancelled by the next push. `04d1547`, `b9635d5`, `34628d4` and `12555db` each
+  have a `CI` run that passed on both legs and a `clang-tidy` run that passed on both.
+
+What this does not settle:
+
+- **[flywheel-dag#77](https://github.com/tomlin256/flywheel-dag/issues/77)**, opened for D8 with no milestone:
+  include-what-you-use on the engine's headers as a gate. `<typeinfo>` and `<ctime>` are held by no test until then.
+- **The shallow-clone measurement** is also a comment on tomlin256/cryptocogs#54, whose table it corrects for
+  nlohmann/json.
