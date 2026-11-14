@@ -3,3 +3,6 @@ chain allocs/cycle=0 callbacks=415725 checksum=69780.955311892729
 idle-queues allocs/cycle=0 callbacks=0 checksum=0
 ingest allocs/cycle=0 callbacks=200000 checksum=1292390400000
 solve allocs/cycle=0 callbacks=200000 checksum=1341290.0460180121
+ops-compute allocs/cycle=0 callbacks=200000 checksum=9333831.3161690123
+ops-moving allocs/cycle=0 callbacks=200000 checksum=9333831.3161690123
+ops-held allocs/cycle=0 callbacks=0 checksum=0

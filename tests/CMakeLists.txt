@@ -362,6 +362,19 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_allocation_functions.cmake)
 endif()
 
+# CI diffs `bench_hot_path --invariants` against benchmarks/expected_invariants.txt. That holds the benchmark to the
+# file, and nothing holds the file: one that is regenerated to make the diff pass takes a regression in with it. This
+# holds the file to what is true of the rows however the engine computes them: the cycle count is the default run's,
+# no row allocates, the two quiet rows deliver nothing, and the two folds of the op rows deliver the same. It reads
+# the file and runs no benchmark, so it runs in every tree. Registered at the top level, where the checkout it reads
+# is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_bench_invariants
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_bench_invariants.cmake)
+endif()
+
 # The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that
 # orders atomics only. Nothing else would notice a bare std::atomic_thread_fence, or a pragma that does not work, in a
 # tree that is not built under ThreadSanitizer, which is every tree but a tsan one. This scans the headers for a bare

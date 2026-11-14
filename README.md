@@ -422,7 +422,7 @@ supported on this platform"), so a run on a Mac leaves `detect_leaks` out.
 ## Benchmark
 
 [`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle
-costs on four generic workloads:
+costs on five generic workloads, the last of them as three rows:
 
 | Row | Workload |
 |---|---|
@@ -430,6 +430,13 @@ costs on four generic workloads:
 | `idle-queues` | 32 `AsyncQueue`s, stepped with nothing posted |
 | `ingest` | A heap-owning value, with one `post()` and one `flush()` per cycle |
 | `solve` | A node that binds a reduction of x·x − a over x, and takes six Newton steps on it, each cycle |
+| `ops-compute`, `ops-moving`, `ops-held` | Eight capped multiples of a signal, a `SumNode` that folds them, its `SqrtNode`, and a `DiffNode` of the two. The first row folds with a `ComputeNode` instead, and in the last the signal is above the cap, so the multiples stand still |
+
+The three `ops` rows are one graph, so their differences mean something where a row alone does not.
+`ops-moving` less `ops-compute` is what the shape of an n-ary op node costs: it pulls every input to
+learn whether it can skip, and again to fold them. `ops-moving` less `ops-held` is what a skip saves:
+in `ops-held` each multiple recomputes to the value it already publishes, and the three op nodes
+below pull their inputs and do nothing.
 
 It is built on demand and is not a ctest test:
 
@@ -449,7 +456,10 @@ machine. The other columns are exact, and the same on every platform:
 - `checksum` is the sum of the values they received.
 
 CI prints the timings and fails if `--invariants` differs from
-[`benchmarks/expected_invariants.txt`](benchmarks/expected_invariants.txt).
+[`benchmarks/expected_invariants.txt`](benchmarks/expected_invariants.txt). A test,
+`test_bench_invariants`, holds that file to what is true of the rows however they are computed: no
+row allocates, `idle-queues` and `ops-held` deliver nothing, and `ops-compute` and `ops-moving`
+deliver the same.
 
 ## Documentation
 

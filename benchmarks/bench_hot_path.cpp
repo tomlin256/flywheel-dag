@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// bench_hot_path.cpp — what one engine cycle costs, on four generic workloads.
+// bench_hot_path.cpp — what one engine cycle costs, on five generic workloads.
 //
 // A measurement tool, not a test: it is EXCLUDE_FROM_ALL and not registered
 // with ctest, because a wall-clock threshold would make ctest flaky. Run it by
@@ -39,11 +39,13 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -287,6 +289,98 @@ bench::Row solve(long cycles) {
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ops-compute, ops-moving, ops-held — op nodes, and the path on which they skip.
+//
+//   signal ─┬─ 1·min(s, cap) ─┐
+//           ├─ 2·min(s, cap) ─┤
+//           ⋮                 ├─ total ─┬─ SqrtNode ─┐
+//           └─ 8·min(s, cap) ─┘         └────────────┴─ DiffNode         → out
+//
+// One graph, three rows. Each holder is a Lazy compute node that scales the
+// capped signal, and `total` folds the eight of them: a SumNode, or in
+// ops-compute a Lazy ComputeNode that adds them in the same order from the same
+// 0. Two rows differ in one thing each from ops-moving, so a difference between
+// their timings is that one thing:
+//
+//   ops-compute  the fold is a ComputeNode. A SumNode pulls every input to
+//                learn whether it can skip, and again to fold them, so its
+//                excess over this row is what the op-node shape costs. The two
+//                rows add the same values in the same order, so their checksums
+//                are equal.
+//   ops-held     the signal moves above the cap. The source fires on every
+//                cycle and every holder recomputes, to the value it already
+//                publishes, so nothing below a holder has moved: the fold, the
+//                root and the difference each pull their inputs and skip. Its
+//                shortfall from ops-moving is what the skip saves.
+//
+// The fold, the root and the difference take AlwaysChangedPolicy, as `ingest`'s
+// source does: below moving inputs every recompute differs from the last, so a
+// comparison could only add cost. It also makes ops-held's zero callbacks mean
+// one thing. An op node that recomputed would publish, and the callback would
+// fire, so 0 says that every one of the three skipped, on every cycle.
+// ─────────────────────────────────────────────────────────────────────────────
+constexpr std::size_t kHolders = 8;
+constexpr double      kCap     = 2.0;
+
+enum class Fold : std::uint8_t { Op, Compute };
+
+/// One double for each index, so a pack of indices names a pack of doubles.
+template <std::size_t>
+using Addend = double;
+
+/// The SumNode's fold as a ComputeNode over the same inputs: from PlusOp's
+/// identity, in the inputs' order.
+template <std::size_t... Is>
+NodePtr computeFold(std::string name, const std::vector<NodePtr>& ins, EqualityPolicyPtr eq,
+                    std::index_sequence<Is...>) {
+    return ComputeNode<double, Addend<Is>...>::make(
+        std::move(name), std::make_tuple(ins[Is]...),
+        [](const Addend<Is>&... v) {
+            double total = 0.0;
+            ((total = total + v), ...);
+            return total;
+        },
+        std::move(eq), InvalidationMode::Lazy);
+}
+
+/// `lift` is added to the signal: 0 keeps it below the cap, and kCap puts it
+/// above.
+bench::Row opsRow(const char* name, long cycles, Fold fold, double lift) {
+    async::Engine engine;
+    auto signal = async::AsyncInput<double>::make("signal", 0.0);
+    engine.addSource(signal);
+
+    std::vector<NodePtr> holders;
+    for (std::size_t k = 1; k <= kHolders; ++k) {
+        const double weight = static_cast<double>(k);
+        holders.push_back(ComputeNode<double, double>::make(
+            "signal.x" + std::to_string(k), {signal},
+            [weight](const double& s) { return weight * (s < kCap ? s : kCap); },
+            InvalidationMode::Lazy));
+    }
+
+    const auto always = std::make_shared<AlwaysChangedPolicy>();
+    const NodePtr total = fold == Fold::Op
+        ? NodePtr(ops::SumNode<double>::make("total", holders, always))
+        : computeFold("total", holders, always, std::make_index_sequence<kHolders>{});
+    auto root = ops::SqrtNode<double>::make("total.root", total, always);
+    auto out  = ops::DiffNode<double>::make("total-root", total, root, always);
+
+    double sink  = 0.0;
+    long   fired = 0;
+    engine.addOutput<double>(out, [&](const double& v) { sink += v; ++fired; });
+
+    return measure(name, cycles, sink, fired, [&](long i) {
+        signal->post(lift + 1.5 + 0.5 * noise(i));   // in [1, 2) before the lift
+        engine.step();
+    });
+}
+
+bench::Row opsCompute(long cycles) { return opsRow("ops-compute", cycles, Fold::Compute, 0.0); }
+bench::Row opsMoving(long cycles)  { return opsRow("ops-moving", cycles, Fold::Op, 0.0); }
+bench::Row opsHeld(long cycles)    { return opsRow("ops-held", cycles, Fold::Op, kCap); }
+
 }  // namespace
 
 int main(int argc, char** argv) try {
@@ -304,6 +398,9 @@ int main(int argc, char** argv) try {
         idleQueues(options.cycles),
         ingest(options.cycles),
         solve(options.cycles),
+        opsCompute(options.cycles),
+        opsMoving(options.cycles),
+        opsHeld(options.cycles),
     };
 
     const std::string out = options.invariants ? bench::invariants(options.cycles, rows)
