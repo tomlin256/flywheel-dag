@@ -22,9 +22,11 @@
 // plain functions would count nothing from the first, and AddressSanitizer would
 // abort on the second, for memory from its own operator new given to free().
 //
-// Link it into the suites that count, and no others: the replacement is the
-// whole program's. A suite that links it must not define an operator new or
-// operator delete of its own.
+// Link it into the programs that count, and no others: the replacement is the
+// whole program's. They are the suites that tests/CMakeLists.txt lists and the
+// benchmark. A program that links it must not define an operator new or
+// operator delete of its own, and no file but allocation_counter.cpp may:
+// test_allocation_functions holds that.
 
 #pragma once
 

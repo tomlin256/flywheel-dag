@@ -6,7 +6,13 @@
 #   ./build/relwithdebinfo-macos-arm64/bin/bench_hot_path
 #
 # or the tree for your host (relwithdebinfo-linux-arm64, relwithdebinfo-linux-x86_64).
-add_executable(bench_hot_path EXCLUDE_FROM_ALL bench_hot_path.cpp bench_report.cpp)
+#
+# It counts allocations through the counter that the test suites link, tests/allocation_counter.cpp, which
+# replaces all twenty of the global allocation functions for the whole program (tests/allocation_counter.hpp).
+# The counter needs nothing of the tests', so a tree with the tests off builds the benchmark all the same.
+add_executable(bench_hot_path EXCLUDE_FROM_ALL
+  bench_hot_path.cpp bench_report.cpp ${PROJECT_SOURCE_DIR}/tests/allocation_counter.cpp)
+target_include_directories(bench_hot_path PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(bench_hot_path PRIVATE flywheel::dag)
 
 # No fused multiply-adds. arm64 compilers fuse a * b + c by default, and x86-64

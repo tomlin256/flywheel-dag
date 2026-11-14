@@ -444,7 +444,7 @@ On Linux it is `relwithdebinfo-linux-arm64` or `relwithdebinfo-linux-x86_64`, th
 `ns/cycle` depends on the machine and its load, so compare it only with another run on the same
 machine. The other columns are exact, and the same on every platform:
 
-- `allocs/cycle` is 0 in every row;
+- `allocs/cycle` counts calls to any of the global allocation functions, and is 0 in every row;
 - `callbacks` counts the output callbacks that fired;
 - `checksum` is the sum of the values they received.
 

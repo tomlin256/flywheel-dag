@@ -35,7 +35,8 @@ set(FLYWHEEL_DAG_TESTS
 
 # The suites that count allocations. allocation_counter.cpp replaces the global
 # operator new and operator delete (allocation_counter.hpp), and a replacement
-# is the whole program's, so it is linked into these and no other.
+# is the whole program's, so it is linked into these and no other suite. The
+# benchmark compiles it too (benchmarks/CMakeLists.txt).
 set(FLYWHEEL_DAG_COUNTING_TESTS
   test_aad_node
   test_allocation_counter
@@ -345,6 +346,20 @@ if(_flywheel_dag_top_level)
     COMMAND ${CMAKE_COMMAND}
       -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_stateful_node_list.cmake)
+endif()
+
+# The global allocation functions are tests/allocation_counter.cpp's alone. A program that defines some of its own
+# counts some of its allocations, and in a sanitized build it gets the rest from the sanitizer, which does not forward
+# them: AddressSanitizer aborts when the standard library takes memory from one family and returns it to the other. A
+# program that links gtest finds that out in the sanitizer job, and one that does not may never. This reads every .hpp,
+# .inl and .cpp under include/, tests/, benchmarks/ and examples/, and fails on an allocation function that any file
+# but the counter declares, and on a counter that defines other than the twenty. The check is a plain cmake -P script,
+# so it runs in every tree. Registered at the top level, where the checkout it reads is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_allocation_functions
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_allocation_functions.cmake)
 endif()
 
 # The engine issues its standalone fences through dag::threadFence(), which keeps GCC's -Wtsan quiet for a fence that

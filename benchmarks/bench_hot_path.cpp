@@ -23,8 +23,10 @@
 // ns/cycle depends on the machine and its load. The other three columns are
 // exact, so a change that alters them is a change in what the engine did:
 //
-//   allocs/cycle  operator new calls per measured cycle; 0 in every row, since
-//                 the engine's steady state recycles its value buffers.
+//   allocs/cycle  calls per measured cycle to the global allocation functions,
+//                 all twenty, which tests/allocation_counter.hpp replaces; 0 in
+//                 every row, since the engine's steady state recycles its value
+//                 buffers.
 //   callbacks     output callbacks fired over the measured cycles.
 //   checksum      the sum of every value those callbacks received.
 //
@@ -35,48 +37,17 @@
 //
 // Usage: bench_hot_path [cycles] [--invariants]
 
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <exception>
 #include <memory>
-#include <new>
 #include <string>
 #include <utility>
 #include <vector>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// The instrument: a global operator new that counts while g_counting is set.
-// The benchmark runs on one thread, so g_counting needs no synchronisation.
-// ─────────────────────────────────────────────────────────────────────────────
-namespace {
-std::atomic<long> g_allocs{0};
-bool              g_counting = false;
-}  // namespace
-
-void* operator new(std::size_t n) {
-    if (g_counting) g_allocs.fetch_add(1, std::memory_order_relaxed);
-    void* p = std::malloc(n);
-    if (!p) throw std::bad_alloc();
-    return p;
-}
-// GCC bug 103993 (https://gcc.gnu.org/PR103993): inlined into a caller, these
-// show GCC free() given memory from operator new, and -Wmismatched-new-delete
-// fires. It does not look through the replacement above to its malloc(). The
-// pairing is correct, so the warning is off here, for GCC (11 on) only.
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
-#endif
-void operator delete(void* p) noexcept              { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
-#pragma GCC diagnostic pop
-#endif
-
+#include "allocation_counter.hpp"
 #include "bench_report.hpp"
 
 #include <flywheel/dag.hpp>
@@ -117,19 +88,18 @@ template <typename Drive>
 bench::Row measure(const char* name, long cycles, double& sink, long& fired, Drive&& drive) {
     for (long i = 0; i < kWarmupCycles; ++i) drive(i);
 
-    sink       = 0.0;
-    fired      = 0;
-    g_allocs   = 0;
-    g_counting = true;
+    sink  = 0.0;
+    fired = 0;
+    allocation_counter::start();
     const auto t0 = std::chrono::steady_clock::now();
     for (long i = kWarmupCycles; i < kWarmupCycles + cycles; ++i) drive(i);
     const auto t1 = std::chrono::steady_clock::now();
-    g_counting = false;
+    const long allocs = allocation_counter::stop();
 
     const double n  = static_cast<double>(cycles);
     const double ns = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
-    return { name, ns / n, static_cast<double>(g_allocs.load()) / n, fired, sink };
+    return { name, ns / n, static_cast<double>(allocs) / n, fired, sink };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

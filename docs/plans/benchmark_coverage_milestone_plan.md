@@ -456,7 +456,7 @@ issues of D11 opened, and the milestone closed. **Tests: none.** Commit:
 | Step | Status |
 |---|---|
 | 1 — The plan | Done: approved as written on 2026-11-14 |
-| 2 — flywheel-dag#52: the benchmark counts through the counter | Not started |
+| 2 — flywheel-dag#52: the benchmark counts through the counter | Done, but for the sweep on the committed files, which follows the push. The check went in red as stated, then green, and A1 to A5 are reported as stated. The Mac passes 90 of 90 and `ubuntu-dev` 135 of 135, its clang-tidy gate on. The README's line on `allocs/cycle` is edited here, where it becomes true, and not in Step 4; `CLAUDE.md` is 6,404 bytes |
 | 3 — flywheel-dag#38: the op nodes' skip, pinned | Not started |
 | 4 — flywheel-dag#38: the three rows | Not started |
 | 5 — Close out | Not started |
