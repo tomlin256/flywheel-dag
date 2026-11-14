@@ -1,7 +1,8 @@
 # Close Out the Benchmark Coverage Milestone
 
-**Status: Proposed (2026-11-13).** Nothing but this file is committed until it is approved. Everything under "Measured"
-was taken read-only at `528e466`, in scratch copies and by hand-made builds outside the checkout.
+**Status: Approved (2026-11-14).** The plan was approved as written: D1 to D11 stood at their defaults. Everything under
+"Measured" was taken read-only at `528e466`, before the approval, in scratch copies and by hand-made builds outside the
+checkout. The Progress table at the end tracks the steps.
 
 Closes [flywheel-dag#52](https://github.com/tomlin256/flywheel-dag/issues/52) and
 [flywheel-dag#38](https://github.com/tomlin256/flywheel-dag/issues/38), the two issues of the
@@ -454,7 +455,7 @@ issues of D11 opened, and the milestone closed. **Tests: none.** Commit:
 
 | Step | Status |
 |---|---|
-| 1 — The plan | Awaiting approval |
+| 1 — The plan | Done: approved as written on 2026-11-14 |
 | 2 — flywheel-dag#52: the benchmark counts through the counter | Not started |
 | 3 — flywheel-dag#38: the op nodes' skip, pinned | Not started |
 | 4 — flywheel-dag#38: the three rows | Not started |
