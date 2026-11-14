@@ -456,7 +456,7 @@ issues of D11 opened, and the milestone closed. **Tests: none.** Commit:
 | Step | Status |
 |---|---|
 | 1 — The plan | Done: approved as written on 2026-11-14 |
-| 2 — flywheel-dag#52: the benchmark counts through the counter | Done, but for the sweep on the committed files, which follows the push. The check went in red as stated, then green, and A1 to A5 are reported as stated. The Mac passes 90 of 90 and `ubuntu-dev` 135 of 135, its clang-tidy gate on. The README's line on `allocs/cycle` is edited here, where it becomes true, and not in Step 4; `CLAUDE.md` is 6,404 bytes |
-| 3 — flywheel-dag#38: the op nodes' skip, pinned | Not started |
+| 2 — flywheel-dag#52: the benchmark counts through the counter | Done, `31630c4`. The check went in red as stated, then green, and A1 to A5 are reported as stated. The Mac passes 90 of 90 and `ubuntu-dev` 135 of 135, its clang-tidy gate on, and `CI` run 43584933802 passed 90 of 90 on both legs. The sweep on the committed files reads the rows −0.95% to +1.16% against the old benchmark with each row run once and +0.76% to +2.53% in rotation, and −0.13% to +0.49% against the control; its table goes in the Outcome. The README's line on `allocs/cycle` is edited here, where it becomes true, and not in Step 4; `CLAUDE.md` is 6,404 bytes |
+| 3 — flywheel-dag#38: the op nodes' skip, pinned | Done. The suite has 27 tests where it had 23, each of the three hand-made changes fails its own test and no other of the four, and the Mac passes 90 of 90. GCC 13.3 in `ubuntu-dev` also builds the suite with no warning and passes it, which the step did not ask for |
 | 4 — flywheel-dag#38: the three rows | Not started |
 | 5 — Close out | Not started |

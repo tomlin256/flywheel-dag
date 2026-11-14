@@ -649,6 +649,117 @@ TEST(LazyInvalidation, OpNodesSkipWhenTheirInputsDidNotMove) {
                               "nor anything below it had work";
 }
 
+// The test above counts the runs of a node BELOW the op, and those stand still
+// whether the op skips or recomputes to the value it already publishes: under
+// the default policy an op node that recomputes to the same value tells nobody.
+// So nothing outside the op node can tell a skip from a recompute, and the
+// tests below ask the op itself, which counts its calls.
+namespace {
+
+struct CountedNegate {
+    static inline int calls = 0;
+    double operator()(const double& a) const { ++calls; return -a; }
+};
+struct CountedMinus {
+    static inline int calls = 0;
+    double operator()(const double& a, const double& b) const { ++calls; return a - b; }
+};
+struct CountedPlus {
+    static inline int calls = 0;
+    static constexpr double identity() { return 0.0; }
+    double operator()(const double& a, const double& b) const { ++calls; return a + b; }
+};
+
+/// A Lazy node that publishes 2 whatever `src` holds: it recomputes when `src`
+/// moves, and its value does not.
+NodePtr heldAtTwo(const NodePtr& src) {
+    return ComputeNode<double, double>::make(
+        "held", std::make_tuple(src), [](const double&) { return 2.0; }, InvalidationMode::Lazy);
+}
+
+/// A Lazy node that publishes what `src` holds.
+NodePtr following(const NodePtr& src) {
+    return ComputeNode<double, double>::make(
+        "following", std::make_tuple(src), [](const double& v) { return v; }, InvalidationMode::Lazy);
+}
+
+} // namespace
+
+TEST(LazyInvalidation, AUnaryOpIsNotCalledWhenItsInputDidNotMove) {
+    auto src = Input<double>::make("src", 0.0);
+    auto op  = ops::UnaryOpNode<double, CountedNegate>::make("op", heldAtTwo(src));
+
+    EvalContext ctx;
+    CountedNegate::calls = 0;
+    ASSERT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), -2.0);
+    ASSERT_EQ(CountedNegate::calls, 1);
+
+    src->set(1.0);
+    ASSERT_TRUE(op->dirty()) << "the source moved, so the op has to be asked";
+    EXPECT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), -2.0);
+    EXPECT_EQ(CountedNegate::calls, 1) << "its input republished 2, so the op had no work";
+}
+
+TEST(LazyInvalidation, ABinaryOpIsNotCalledWhenItsInputsDidNotMove) {
+    auto src  = Input<double>::make("src", 0.0);
+    auto held = heldAtTwo(src);
+    auto op   = ops::BinaryOpNode<double, CountedMinus>::make("op", held, held);
+
+    EvalContext ctx;
+    CountedMinus::calls = 0;
+    ASSERT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), 0.0);
+    ASSERT_EQ(CountedMinus::calls, 1);
+
+    src->set(1.0);
+    ASSERT_TRUE(op->dirty());
+    EXPECT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), 0.0);
+    EXPECT_EQ(CountedMinus::calls, 1) << "its inputs republished 2, so the op had no work";
+}
+
+TEST(LazyInvalidation, AnNAryOpIsNotCalledWhenItsInputsDidNotMove) {
+    auto src  = Input<double>::make("src", 0.0);
+    auto held = heldAtTwo(src);
+    auto op   = ops::NAryOpNode<double, CountedPlus>::make("op", {held, held, held});
+
+    EvalContext ctx;
+    CountedPlus::calls = 0;
+    ASSERT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), 6.0);
+    ASSERT_EQ(CountedPlus::calls, 3) << "one call for each input";
+
+    src->set(1.0);
+    ASSERT_TRUE(op->dirty());
+    EXPECT_DOUBLE_EQ(get_value<double>(op->eval(ctx)), 6.0);
+    EXPECT_EQ(CountedPlus::calls, 3) << "its inputs republished 2, so the fold had no work";
+}
+
+// The control: the same ops over an input that does move. Each count goes up,
+// so a count that stands still above is a skip, and not a counter that nothing
+// reaches.
+TEST(LazyInvalidation, EachOpIsCalledWhenAnInputMoved) {
+    auto src  = Input<double>::make("src", 0.0);
+    auto held = heldAtTwo(src);
+    auto live = following(src);
+    auto unary  = ops::UnaryOpNode<double, CountedNegate>::make("unary", live);
+    auto binary = ops::BinaryOpNode<double, CountedMinus>::make("binary", held, live);
+    auto nary   = ops::NAryOpNode<double, CountedPlus>::make("nary", {held, live, held});
+
+    EvalContext ctx;
+    unary->eval(ctx);
+    binary->eval(ctx);
+    nary->eval(ctx);
+    CountedNegate::calls = 0;
+    CountedMinus::calls  = 0;
+    CountedPlus::calls   = 0;
+
+    src->set(5.0);
+    EXPECT_DOUBLE_EQ(get_value<double>(unary->eval(ctx)), -5.0);
+    EXPECT_DOUBLE_EQ(get_value<double>(binary->eval(ctx)), -3.0);
+    EXPECT_DOUBLE_EQ(get_value<double>(nary->eval(ctx)), 9.0);
+    EXPECT_EQ(CountedNegate::calls, 1);
+    EXPECT_EQ(CountedMinus::calls, 1);
+    EXPECT_EQ(CountedPlus::calls, 3) << "the fold runs over every input, the two that held included";
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
