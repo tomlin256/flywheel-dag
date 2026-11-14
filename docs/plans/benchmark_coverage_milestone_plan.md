@@ -1,8 +1,9 @@
 # Close Out the Benchmark Coverage Milestone
 
-**Status: Approved (2026-11-14).** The plan was approved as written: D1 to D11 stood at their defaults. Everything under
-"Measured" was taken read-only at `528e466`, before the approval, in scratch copies and by hand-made builds outside the
-checkout. The Progress table at the end tracks the steps.
+**Status: Done (2026-11-14).** Approved as written, so D1 to D11 stood at their defaults. The two issues are closed and
+the milestone is closed, and there is no release. The Outcome at the end records what each step found on the committed
+files and where the work differs from this text. Everything under "Measured" was taken read-only at `528e466`, before
+the approval, in scratch copies and by hand-made builds outside the checkout.
 
 Closes [flywheel-dag#52](https://github.com/tomlin256/flywheel-dag/issues/52) and
 [flywheel-dag#38](https://github.com/tomlin256/flywheel-dag/issues/38), the two issues of the
@@ -451,12 +452,154 @@ issues of D11 opened, and the milestone closed. **Tests: none.** Commit:
 - **This repo is public.** The plan, the commits and the issue comments name the engine only, and the leak audit runs
   over each before its push.
 
-## Progress
+## Outcome
 
-| Step | Status |
-|---|---|
-| 1 — The plan | Done: approved as written on 2026-11-14 |
-| 2 — flywheel-dag#52: the benchmark counts through the counter | Done, `31630c4`. The check went in red as stated, then green, and A1 to A5 are reported as stated. The Mac passes 90 of 90 and `ubuntu-dev` 135 of 135, its clang-tidy gate on, and `CI` run 43584933802 passed 90 of 90 on both legs. The sweep on the committed files reads the rows −0.95% to +1.16% against the old benchmark with each row run once and +0.76% to +2.53% in rotation, and −0.13% to +0.49% against the control; its table goes in the Outcome. The README's line on `allocs/cycle` is edited here, where it becomes true, and not in Step 4; `CLAUDE.md` is 6,404 bytes |
-| 3 — flywheel-dag#38: the op nodes' skip, pinned | Done, `22a17b0`. The suite has 27 tests where it had 23, each of the three hand-made changes fails its own test and no other of the four, and the Mac passes 90 of 90. GCC 13.3 in `ubuntu-dev` also builds the suite with no warning and passes it, which the step did not ask for |
-| 4 — flywheel-dag#38: the three rows | Done, but for the sweep on the committed files and the reading of CI's two legs, which follow the push. The check went in red on the two rules that name the new rows, then green, and B1 to B6 are reported as stated. The benchmark prints seven rows with `allocs/cycle` 0 at 1,000, 10,000 and 200,000 cycles, the same text from Apple clang, GCC 13.3 and GCC 15.2, and the plain loop gives the two figures. E1 to E7 move the columns as the table says. The Mac passes 91 of 91 and `ubuntu-dev` 136 of 136, its clang-tidy gate on. `CLAUDE.md` is 6,469 bytes |
-| 5 — Close out | Not started |
+**Done 2026-11-14.** The two issues are closed, each with a closing comment, the two issues of D11 are open, and the
+milestone is closed. There is no release: nothing under `include/` changed.
+
+| Step | Status | Commit |
+|---|---|---|
+| 1 — The plan | Done | `5fdac13`, and `12cfbff` for the approval; each issue names the plan in a comment |
+| 2 — flywheel-dag#52: the benchmark counts through the counter | Done | `31630c4` |
+| 3 — flywheel-dag#38: the op nodes' skip, pinned | Done | `22a17b0` |
+| 4 — flywheel-dag#38: the three rows | Done | `cfd6db2` |
+| 5 — Close out | Done | the commit that adds this section |
+
+What each step's "done when" found, on the files as committed. Apple M4 Pro, Apple clang 21.0.0, CMake 4.4.5 and LLVM
+23.1.4 on the Mac; GCC 13.3.0, CMake 4.4.5 and LLVM 23.1.6 in `ubuntu-dev`; GCC 15.2.0 and CMake 4.2.3 in the throwaway
+container.
+
+- **Step 2.** `test_allocation_functions` went in first and failed naming `benchmarks/bench_hot_path.cpp`, "1 operator
+  new and 2 operator delete of its own", and no other file. With the change it reports that the counter defines the
+  twenty and that none of the other 79 sources declares one. A1 to A5 are reported as stated.
+  - The Mac configures and builds with no warning, passes `ctest`, 90 of 90, and the `clang_tidy_` tests, 45 of 45.
+    `ubuntu-dev` builds with no warning and passes 135 of 135, the 90 and the 45. `--invariants` is the committed
+    file's on both, and from GCC 15.2, which builds the benchmark from the preset with no warning.
+  - A tree configured with `-DFLYWHEEL_DAG_BUILD_TESTS=OFF` fetches no googletest, registers no test and builds the
+    benchmark.
+  - In the AddressSanitizer tree the benchmark runs 2,000 cycles to exit 0 with nothing on stderr, and so does a copy
+    with a `std::stable_sort` in `main()`, which prints the same columns. The same change to `528e466` aborts:
+    `alloc-dealloc-mismatch (operator new vs free)`.
+  - The machine code, by function, in the binaries the sweep runs. The committed benchmark is the prototype's in
+    every function. Against the control it differs in 8 of the 816 that both hold: the three allocation functions,
+    the four row functions, and one outlined helper, which the counter's own unit adds under a name the control has
+    too. Against the benchmark at `528e466`, 654 of 807 are the same once a release through `free()` and one through
+    `operator delete` count as the same call. `Engine::cycle()`, its timing guard's destructor,
+    `NodeBase::propagate()`, the four `equal()`, `AsyncInput<double>::flush()` and the 19 `eval()` are among them,
+    and the seven on a cycle's path that "Measured" names are among the 153 that differ.
+  - The sweep, on the committed files:
+
+  | ns/cycle over the 16 alignments | `chain` | `idle-queues` | `ingest` | `solve` |
+  |---|---|---|---|---|
+  | **Each row once.** The benchmark at `528e466` | 262.87 | 229.53 | 119.50 | 407.59 |
+  | At `31630c4` | 263.23 | 231.85 | 118.37 | 412.33 |
+  | Mean change | +0.14% | +1.01% | −0.95% | +1.16% |
+  | Range | −0.53% to +0.99% | +0.53% to +1.53% | −2.03% to +0.97% | −0.60% to +3.02% |
+  | Slower at | 10 of 16 | 16 of 16 | 2 of 16 | 14 of 16 |
+  | The control against `528e466` | +0.27%, 13 of 16 | +1.01%, 16 of 16 | −1.43%, 0 of 16 | +1.10%, 15 of 16 |
+  | `31630c4` against the control | −0.13%, 4 of 16 | −0.01%, 10 of 16 | +0.49%, 14 of 16 | +0.06%, 11 of 16 |
+  | **In rotation.** The benchmark at `528e466` | 264.30 | 230.08 | 121.00 | 409.85 |
+  | At `31630c4` | 270.57 | 231.84 | 122.46 | 420.21 |
+  | Mean change | +2.38% | +0.76% | +1.21% | +2.53% |
+  | Range | +1.30% to +3.27% | +0.53% to +0.98% | +0.13% to +2.45% | +1.49% to +3.93% |
+  | Slower at | 16 of 16 | 16 of 16 | 16 of 16 | 16 of 16 |
+  | The control against `528e466` | +2.25%, 16 of 16 | +0.77%, 16 of 16 | +1.22%, 15 of 16 | +2.24%, 16 of 16 |
+  | `31630c4` against the control | +0.13%, 9 of 16 | −0.01%, 7 of 16 | −0.01%, 7 of 16 | +0.29%, 11 of 16 |
+
+  It is what "Measured" found: −0.95% to +1.16% with each row run once, +0.76% to +2.53% in rotation, and the
+  control reads what the committed benchmark reads. `ingest` run once is 0.49% apart from the control, at 14 of 16
+  alignments, with the same engine code to the instruction, which is "What a sweep cannot say" again.
+- **Step 3.** The suite has 27 tests where it had 23. Against the unchanged headers all pass. With `UnaryOpNode`,
+  `BinaryOpNode` or `NAryOpNode` changed so that it never skips, the test for that template fails and no other test
+  of the suite does. The Mac passes 90 of 90, and the gate's clang-tidy has no finding in the file.
+- **Step 4.** `test_bench_invariants` went in first and failed on the two rules that name the new rows: "ops-held is
+  missing" and "ops-compute or ops-moving is missing". With the three lines it reports seven rows. B1 to B6 are
+  reported as stated.
+  - The benchmark prints seven rows, with `allocs/cycle` 0 in each at 1,000, 10,000 and 200,000 cycles. `--invariants`
+    is the committed file from Apple clang, GCC 13.3 and GCC 15.2, and the plain loop gives the two figures under
+    Apple clang and GCC 13.3.
+  - The Mac builds with no warning and passes 91 of 91 and the `clang_tidy_` tests, 45 of 45. `ubuntu-dev` builds
+    with no warning and passes 136 of 136.
+  - E1 to E7 move the exact columns as the table under "Measured" says, and E2 and E5 with the rows on the default
+    policy move none, as its last line says. One thing the table does not say: E1 fails a test of Step 3,
+    `AnNAryOpIsNotCalledWhenItsInputsDidNotMove`, which counts six calls of its op where it expects three, since a
+    skip then runs the fold.
+  - The machine code. The committed benchmark is the prototype's in every function. Of the 837 that the four-row
+    and the seven-row binaries both hold, 827 are the same. The other 10 are the benchmark's `main()` and the
+    sweep's, three cold fragments, `ComputeNode<double, double>::make()` and four outlined helpers. With E1, two
+    functions differ, the `eval()` of the two n-ary op nodes that the binary holds.
+  - The rows, on the committed files:
+
+  | ns/cycle over the 16 alignments | Each row once | In rotation |
+  |---|---|---|
+  | `ops-compute` | 267.76, from 264.33 to 273.54 | 272.28, from 269.64 to 278.76 |
+  | `ops-moving` | 287.38, from 283.07 to 294.67 | 292.02, from 289.70 to 296.74 |
+  | `ops-held` | 186.82, from 186.19 to 187.77 | 192.81, from 190.56 to 196.00 |
+  | `ops-moving` less `ops-compute`: the op-node shape | +19.62, from +17.14 to +23.14 | +19.75, from +16.84 to +22.05 |
+  | `ops-moving` less `ops-held`: the skip | +100.56, from +96.51 to +106.90 | +99.21, from +96.72 to +101.57 |
+
+  - What the four older rows read with the three in the file, against the file of `31630c4`, which is "What a sweep
+    cannot say" on the committed files:
+
+  | The seven-row file against the four-row file | `chain` | `idle-queues` | `ingest` | `solve` |
+  |---|---|---|---|---|
+  | Each row once | +0.22%, 11 of 16 | +0.02%, 8 of 16 | +1.42%, 15 of 16 | −0.41%, 3 of 16 |
+  | In rotation | +2.43%, 16 of 16 | −0.02%, 6 of 16 | +2.00%, 16 of 16 | +0.75%, 15 of 16 |
+
+  - E1 against the committed headers, both ways, which is what flywheel-dag#78 quotes:
+
+  | E1 against the committed headers | Each row once | In rotation |
+  |---|---|---|
+  | `ops-moving` | −4.96%, 14.3 ns; −8.05% to −2.59%; slower at 0 of 16 | −4.95%, 14.5 ns; −6.36% to −3.95%; slower at 0 of 16 |
+  | `ops-held` | +3.38%, 6.3 ns; +2.60% to +4.31%; slower at 16 of 16 | +3.64%, 7.0 ns; +1.54% to +4.95%; slower at 16 of 16 |
+  | `ops-compute` | −0.05%, slower at 9 of 16 | +0.04%, slower at 10 of 16 |
+  | `chain`, `idle-queues`, `ingest`, `solve` | −0.29% to +0.43% | −0.11% to +0.44% |
+
+- **CI.** Every run on this plan's commits finished, and none was cancelled by a push. `CI` run 43584933802 on
+  `31630c4` passed 90 of 90 on both legs, and run 43587179115 on `cfd6db2` passed 91 of 91 on both, under GCC 15.2.0
+  on x86-64 and Apple clang 21.0.0, with no `warning:` line in either log. On `cfd6db2` both legs print the seven
+  rows with the committed columns, so the assumption of the Self-review holds: the x86-64 checksum of the two folds
+  is 9333831.3161690123. `CI` run 43586511917 on `22a17b0` passed on both legs. The `clang-tidy` runs 43584933744,
+  43586511697 and 43587179093 passed on both. The nightly `Sanitizers` run 43586239739, on `31630c4`, passed `asan`
+  and `tsan`.
+- **23 hand-made changes** to scratch copies, each beside a control: A1 to A5, B1 to B6, E1 to E7, the three
+  never-skip templates, and E2 and E5 under the default policy. 18 fail the check, the column or the test written to
+  hold them. A5 is itself a control. Four move no exact column: E1, which a unit test now catches; E7, which nothing
+  catches; and the two under the default policy, which are the reason for D6.
+
+Where the work differs from the plan:
+
+- **The approval is a commit of its own,** `12cfbff`, as earlier plans recorded theirs.
+- **`CLAUDE.md` says that a program "counts through its `allocation_counter::` functions",** not that it calls
+  `allocations_during()`: the benchmark calls `start()` and `stop()`. So the file is 6,404 bytes after Step 2 and
+  6,469 after Step 4, three more than the rehearsal's.
+- **The README changed in Step 2 as well as Step 4.** Its line on `allocs/cycle` says what is counted from the commit
+  that makes it true. In Step 4 it also names `test_bench_invariants`, and its row for the three says "multiples"
+  and which row differs in what.
+- **The rows' comment says which nodes take `AlwaysChangedPolicy`:** the fold, the root and the difference. The
+  prototype said "the three op nodes", and in `ops-compute` the fold is a `ComputeNode`. The code is the prototype's.
+- **The check's last line counts the other sources,** 79, and not all 80.
+- **The function counts are of other binaries.** "Measured" compared the old benchmark and the prototype as the
+  benchmark is built, 647 of 797 the same. The Outcome counts the binaries that the sweep runs, which keep each row as
+  a function of its own: 654 of 807. Against the control both count 8 that differ.
+- **GCC 15.2 built the benchmark from the repo's preset,** in a copy of the checkout, where "Measured" compiled the
+  prototype by hand.
+- **Step 3 was also built under GCC.** GCC 13.3 in `ubuntu-dev` builds the suite with no warning and passes its 27
+  tests, and so does GCC 15.2 in Step 4's throwaway container. The step had left both to CI.
+- **The tree with the tests off was the Mac's.**
+- **E1 was swept again, both ways,** which Step 4 did not ask for: its table above is what the issue quotes.
+- **Two sessions read one binary about 1% apart.** The four-row binaries of `31630c4` read `chain` at 263.23 in Step
+  2's session and 265.80 in Step 4's, each row run once. Every comparison above is within one session.
+
+What this does not settle:
+
+- **[flywheel-dag#78](https://github.com/tomlin256/flywheel-dag/issues/78)**, opened for D11, `enhancement` and
+  `nodes`, with no milestone: `NAryOpNode::eval()` pulls every input twice. One pass takes back about 14 of the 20 ns
+  that the shape costs and adds 6 to 7 ns to a skip, and it changes what a skip promises, which Step 3's test holds.
+- **[flywheel-dag#79](https://github.com/tomlin256/flywheel-dag/issues/79)**, opened for D11, `enhancement` and
+  `engine`, with no milestone: the idle path of `AsyncQueue<T>::flush()` pays for the arrival path's registers.
+  `idle-queues` reads 0.8% to 1.0% more for it, at every alignment and both ways.
+- **The order of a fold.** E7 moves no column and fails no test.
+- **Why a row reads more in rotation.** The sweeps show that it does, with the same code, and not what on the heap or
+  in the caches does it.
+- **Timings on x86-64.** Every figure here is one machine's. CI prints its own and compares none.
