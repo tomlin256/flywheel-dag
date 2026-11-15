@@ -1,9 +1,10 @@
 # Close Out the Differentiable Subgraphs Milestone
 
-**Status: Approved (2026-11-15), as written, so D1 to D15 stand at their defaults.** The Progress table at the end
-says where each step stands. Everything under "Measured" was taken read-only at `ff19003`, in scratch copies and by
-hand-made builds outside the checkout. The prototypes are kept outside the checkout, and the code is written again
-from this plan, test first.
+**Status: Done (2026-11-15).** Approved as written, so D1 to D14 stood at their defaults, and D15 was put to you
+with its figures before the tag. v1.4.0 is released, the five issues are closed and the milestone is closed. The
+Outcome at the end records what each step found on the committed files and where the work differs from this text.
+Everything under "Measured" was taken read-only at `ff19003`, in scratch copies and by hand-made builds outside the
+checkout. The prototypes were kept outside the checkout, and the code was written again from this plan, test first.
 
 Closes [flywheel-dag#11](https://github.com/tomlin256/flywheel-dag/issues/11),
 [flywheel-dag#13](https://github.com/tomlin256/flywheel-dag/issues/13),
@@ -962,16 +963,134 @@ milestone`.
 - **Assumptions:** graphs are not rewired after they are built; CI stays on `ubuntu-latest` and `macos-latest`; LLVM
   23 stays the lint gate's major.
 
-## Progress
+## Outcome
 
-| Step | Status | Notes |
+**Done 2026-11-15.** v1.4.0 is tagged on the release commit and its release page is up, the five issues are closed,
+each with a closing comment, the two issues of D13 are open, and the milestone is closed. D1 to D14 stood at their
+defaults. D15 was put to you before the tag, with the figures under Step 7 below, and you chose to release.
+
+| Step | Status | Commit |
 |---|---|---|
-| 1 The plan | Done | Approved 2026-11-15 as written, so D1 to D15 stand at their defaults. Pushed, and each of the five issues names this file. The two issues of D13 are flywheel-dag#81 (derivatives through the state, over time) and flywheel-dag#82 (the `IDifferentiable` base off the engine's nodes), each `enhancement` and `aad` with no milestone. |
-| 2 flywheel-dag#11: a tape through the stateful nodes | Done | `ae5ce40`, 2026-11-15. 14 tests in `test_aad_timeseries` and one in `test_aad_reverse`; the checkpoint at 92 (138 with the gate) on the Mac and in `ubuntu-dev`, and under GCC 15.2; ten hand-made changes caught. No class grew; the cycle's code differs in two stores. |
-| 3 flywheel-dag#13: a tape that is kept | Done | `3bd9102`, 2026-11-15. 18 tests in `test_aad_tape` and seven in the two sensitivity-node suites; the checkpoint at 93 (140); twelve hand-made changes caught; the two rows' lines from three compilers and a plain loop. A `GradientNode`'s recompute: 582 to 584 ns, from 2,738 to 2,815. |
-| 4 flywheel-dag#75: several roots | Done | 2026-11-15. 17 tests in `test_dag_reduce_roots`, and the reduce suite's nodes and helpers in `tests/reduce_test_nodes.hpp`; the checkpoint at 94 (142) on the Mac and in `ubuntu-dev`, and under GCC 15.2; seven hand-made changes caught. |
-| 5 flywheel-dag#76: a condition an argument moves | Done | 2026-11-15. 16 tests in `test_dag_reduce_choice`, two tests of the reduce suite renamed for the rule; the checkpoint at 95 (144) on the Mac and in `ubuntu-dev`, and under GCC 15.2; six hand-made changes caught. The README's sentence on a moved condition says what is true now, ahead of Step 8. |
-| 6 flywheel-dag#11: a reduction through the stateful nodes | Done | 2026-11-15. 17 tests in `test_dag_reduce_timeseries`; six reduce tests take a `RollingMinMaxNode` under a compute node as their barrier; the checkpoint at 96 (146) on the Mac and in `ubuntu-dev`, and under GCC 15.2; nine hand-made changes caught. |
-| 7 flywheel-dag#74: `ReductionNode` | Done | 2026-11-15. 19 tests in `test_reduction_node`; the checkpoint at 97 (148) on the Mac and in `ubuntu-dev`, and under GCC 15.2; seven hand-made changes caught, and the 24 of Steps 4 to 6 again. Then, for D15, a commit of its own: `bind()` and `rebind()` share one body, with the clean check where each root is read. The probe read `bind()` over vol at 102.8 to 106.2 ns with the check ahead of `rebind()`, where v1.3.1's reads 100.2 to 103.2, and at 100.9 to 103.7 built this way. Two tests check that a refused bind lets go of its point; six hand-made changes caught. |
-| 8 Example and docs | Done | 2026-11-15. `examples/fit.cpp` and its test, `example_fit`; the README's features, Derivatives and "A subgraph as a function", whose three new snippets were compiled and run as written; two lines in `docs/engine_rules.md`, 5,887 of its 6,000 bytes. The checkpoint at 98 (150) on the Mac and in `ubuntu-dev`, and the four examples under GCC 15.2. |
-| 9 Release v1.4.0, and close out | Not started | |
+| 1 — The plan | Done | `489c895`, and `df84034` for the approval; each issue names the plan in a comment |
+| 2 — flywheel-dag#11: a tape through the stateful nodes | Done | `ae5ce40` |
+| 3 — flywheel-dag#13: a tape that is kept | Done | `3bd9102` |
+| 4 — flywheel-dag#75: several roots | Done | `97ab83e` |
+| 5 — flywheel-dag#76: a condition an argument moves | Done | `10aebe7` |
+| 6 — flywheel-dag#11: a reduction through the stateful nodes | Done | `d6cac06` |
+| 7 — flywheel-dag#74: `ReductionNode` | Done | `b79cad8`, and `1f31326` for D15 |
+| 8 — Example and docs | Done | `c3daa51` |
+| 9 — Release v1.4.0, and close out | Done | `8d6db44`, tagged `v1.4.0`, and the commit that adds this section |
+
+What each step's "done when" found, on the files as committed. Apple M4 Pro, Apple clang 21.0.0, CMake 4.4.5 and LLVM
+23.1.4 on the Mac; GCC 13.3.0, CMake 4.4.5 and LLVM 23.1.6 in `ubuntu-dev`; GCC 15.2.0 in a throwaway `ubuntu:26.04`.
+Every checkpoint passed as "Steps" defines it: no warning from any of the three compilers, `ctest` in full with the
+lint gate on the Mac and in `ubuntu-dev`, the new suites under GCC 15.2, and `bench_hot_path --invariants` equal to
+the committed file on all three. Every hand-made change failed a test written to hold it, beside a control that
+passed. The probe is the one of "What the changes cost the calls that exist", against Step 3's headers, whose
+reduction is v1.3.1's: 8 alignments, 8 rounds.
+
+- **Step 2.** Red: `test_aad_timeseries` did not compile, and `AadReverse.APassDoesNotAdvanceAStatefulNode` threw
+  "x reaches root root through ewma, which has no partials". `ANodeThatIsNotANodeBaseIsAskedThroughTheMixin` passed
+  at the old headers: it holds the new split. The checkpoint passed at 92 tests, 138 with the gate. Ten hand-made
+  changes. Every class is the size it was at `ff19003`. The benchmark's machine code against `ff19003`'s headers: of
+  909 functions, 842 are the same, `Engine::cycle()`, `NodeBase::propagate()`, the four `equal()`, the six
+  `flush()`, the four `emitImpl()` and 20 of the 22 `eval()` among them; 63 of the 67 that differ differ in one
+  immediate, and the other four are the `eval()` of `EWMANode` and of `DeltaNode<double>`, one store longer each, and
+  their constructors. The sweep against a second build of `ff19003`'s headers: each row once, `chain` +0.01% (slower
+  at 9 of 16) and `ops-moving` +0.30% (9 of 16), where the control read +0.01% and +0.17%; in rotation, `chain`
+  +0.79% (12 of 16) and `ops-moving` −0.19%, where the control read −0.13% on `chain`.
+  - Departures: each `static_assert` says `sizeof == sizeof(double) + alignof(state)`, not "two doubles", so that an
+    ABI with 4-byte alignment does not fail it; the suite also checks the two debounce nodes; `OPEN_ISSUES` gains
+    81, for the header's citation.
+- **Step 3.** Red at Step 2's headers: `test_aad_tape` did not compile, and both `AllocatesNothingOnceWarm` failed;
+  the other new tests of the two sensitivity-node suites passed there, as the guards they are. There are six of them,
+  not the seven an earlier note of this plan said. The checkpoint passed at 93, 140 with the gate. Twelve hand-made
+  changes. The two new rows' lines came from the three compilers and from a plain loop, at `-O0` and `-O2`, to 17
+  digits, and CI's Ubuntu leg read the same on x86-64. On the 17-node call, best of nine loops of 200,000, Step 2's
+  headers against Step 3's: a tape built for the pass and swept once, 2,710 to 2,808 ns against 2,569 to 2,613; a
+  `GradientNode`'s recompute, 2,738 to 2,815 against 582 to 584; a kept tape's `record()` and span sweep, 601 to 608,
+  of which the record is 491 to 496 and a further sweep 84 to 88; the graph's evaluation, 201 to 203 in both. The
+  nine rows swept against a control, each row once: every older row within −0.05% and +0.35%, slower at no more than
+  10 of 16, and `gradient` −74% and `tangent` −70% at 0 of 16; in rotation, every older row within −1.32% and +1.49%,
+  where the control read +0.01% to +1.35%. The +1.49% is `ingest`, slower at 15 of 16 in rotation and at 5 of 16
+  once, where it read −0.05%.
+- **Step 4.** Red: the new suite did not build at Step 3's headers. The checkpoint passed at 94, 142 with the gate.
+  Seven hand-made changes; "every root's value is the first root's" fails nine tests only when it is made at both
+  places a root's value is read. The probe: `gradient()` +3.0% over vol and +1.1% over five arguments, `bind()` +0.2%
+  and +0.4%. The `solve` row, each row once: +0.24%, slower at 11 of 16, where the control read −0.03%.
+  - Departures: `tests/reduce_test_nodes.hpp` also holds the suite's two message helpers; the comment on `bind()`
+    says that a bind that throws holds nothing of the last point, which `HEAD`'s did not say of one that throws part
+    of the way through.
+- **Step 5.** Red: the 16 tests and the two renamed ones failed at Step 4's headers. The checkpoint passed at 95, 144
+  with the gate. Six hand-made changes; the first reading that does not stop fails six tests here and eight at Step 7,
+  where the table said nine. The probe: `gradient()` +1.5% and +1.4%, `bind()` +0.8% and +1.2%. The `solve` row, each
+  row once: −1.21%, slower at 1 of 16.
+  - Departures: the comments on `ReduceReads::decides()`, `ConditionNode` and its step are written for the rule; the
+    README's sentence on a moved condition was made true here, ahead of Step 8.
+- **Step 6.** Red: the 17 tests failed at Step 5's headers. The checkpoint passed at 96, 146 with the gate. Nine
+  hand-made changes. Every node class is the size it was at `ff19003`. The benchmark's machine code against Step 5's
+  headers: of 1,027 functions, 1,019 are the same, every `eval()`, every function of `ZScoreNode` and
+  `Engine::cycle()` among them, and no row holds an `OutlierGateNode`, so `chain` was not swept. The probe:
+  `gradient()` +2.7% and +0.8%, `bind()` +1.1% and +1.1%.
+  - Departures: six reduce tests take a `Lazy` compute node over a `RollingMinMaxNode` as their barrier; the header
+    lists the six callable nodes, and `dag_timeseries.hpp` gains a "Reductions" paragraph.
+- **Step 7.** Red: the new suite did not build at Step 6's headers. The checkpoint passed at 97, 148 with the gate.
+  The seven hand-made changes of the table, and the 24 of Steps 4 to 6 made again on this code. The probe: a call
+  the same (+0.7% and −0.5%), `gradient()` +2.5% over vol and +1.4% over five, slower at 8 of 8, and `bind()` +3.8%
+  over vol (102.8 to 106.9 ns against 99.2 to 102.2) and +3.9% over five. `bind()` had grown from 831 instructions to
+  1,399, from 1,335 at Step 6.
+  - Two builds of these headers took `bind()`'s part apart. Without the store that keeps each argument's own value,
+    it read +2.1% and +1.2%. With `bind()` and `rebind()` as one body, which lets go of the point first and checks
+    each root clean where it reads it, as v1.3.1's `bind()` did, it read +0.1% over vol (100.9 to 103.7 ns against
+    100.2 to 103.2) and +1.7% over five, at 1,346 instructions; a `bind()` and six gradients −0.5%. `gradient()`'s
+    code is the same in the three builds, and read +0.2% to +2.6% between them: that is what layout gives it.
+  - The second build is `1f31326`, a commit of its own, its `bind()` the same instructions. Two tests check that a
+    refused bind lets go of its point, and pass at the headers before it. Six hand-made changes: `rebind()` checks
+    one root, or several; `bind()` skips the check of one root, or of several; a refused bind keeps its point, for one
+    root or for several. Its checkpoint passed at 98, 150 with the gate, on the Mac and in `ubuntu-dev`, and the 37
+    suites passed under GCC 15.2. The `solve` row alone, each row once, against Step 3's headers: −0.55%, slower at 2
+    of 16, where the control read +0.10%.
+  - The nine rows swept against Step 3's headers, with a control: each row once, every older row within −0.45% and
+    +0.04% but `solve`, −2.24% at 0 of 16, and `gradient` and `tangent` +0.30% and +0.32%, slower at 11 of 16; in
+    rotation, `idle-queues` +1.18%, `ops-moving` +1.08% and `ops-held` +0.80%, slower at 13 or 14 of 16, `solve`
+    −2.23%, and the rest within −0.57% and +0.29%. The control read −0.27% to +0.23% once and −0.20% to +0.50% in
+    rotation. Of the 1,010 functions both binaries hold, 1,001 are the same, `Engine::cycle()` and every `eval()`
+    among them; the nine that differ are four of `Reduction`'s, its `construct_at`, the `solve` row, in an
+    immediate, two of `Tape`'s, at the same lengths, and the stubs. So what moves three rows in rotation is the layout
+    and the heap behind a `Reduction` of 680 bytes, which "Measured" found too.
+  - D15, put to you with these figures before the tag: `bind()` over one argument and a call cost what they cost at
+    v1.3.1; `bind()` over five arguments 1.7% more, the store D11 accepted; `gradient()` 0.2% to 2.6% more, within
+    what layout gives it. You chose to release.
+  - Departures: the code is the second prototype's but for a guard that measured the store `argument()` needs, which
+    is dropped, the order of the declarations and the comments; the suite takes the call price of
+    `tests/reduce_test_nodes.hpp`.
+- **Step 8.** The checkpoint passed at 98, 150 with the gate, on the Mac and in `ubuntu-dev`, and the four examples
+  build with no warning and agree under GCC 15.2. The README's three new snippets were compiled with `-Wall -Wextra
+  -Wpedantic -Werror` and run outside the tree. `docs/engine_rules.md` is 5,887 of its 6,000 bytes, 166 more, where
+  the plan said about 250; `CLAUDE.md` did not change, and `test_claude_md_budget` and `test_comment_refs` pass.
+- **Step 9.** Eight commits change what a consumer sees. Every signature they change is public and new; `aad::Tape`'s
+  default constructor, `add()` and `record(root)`, which it lost, were private. So the number is v1.4.0, as D12 said.
+  The gate on the tree as committed: the Mac and `ubuntu-dev` configure with CI's flags and the lint gate, build with
+  no warning and pass 150 of 150, `test_package_version` among them, and `--invariants` is the committed file; under
+  GCC 15.2 the four examples build with no warning and agree. Sizes against v1.3.1: `aad::Tape` 416 bytes, from 112,
+  `GradientNode` 632, from 192, `TangentNode` 640, from 200, `Reduction` 680, from 344, and the other 28 lines of the
+  size table as they were. The benchmark built from one source against v1.3.1's headers and against v1.4.0's: of the
+  966 functions both hold, 880 are the same and 63 differ in one immediate, and `Engine::cycle()` and every `eval()`
+  of the seven older rows but `EWMANode`'s and `DeltaNode<double>`'s, one store longer each, are among the 880. The
+  release page is up, and `v1.4.0` is the latest release.
+- **CI.** Every run on this plan's commits finished, and none was cancelled by a push. `CI` passed on `ae5ce40`
+  (43715169832), `3bd9102` (43717774866), `97ab83e` (43723178687), `10aebe7` (43724534651), `d6cac06`
+  (43725892077), `b79cad8` (43726683237), `c3daa51` (43730732156), `1f31326` (43731399874) and the release commit
+  (43735357847), and `clang-tidy` on each of them (43715169833, 43717774862, 43723178612, 43724534589, 43725892114,
+  43726683304, 43730732122, 43731399916 and 43735357821). The nightly `Sanitizers` run before them, 43707700589 on
+  `ff19003`, passed; the first on these commits is the next night's.
+
+Where the work differs from the plan:
+
+- **`1f31326`**, which is not a step: Step 7's code, made again so that `bind()` costs what it did (above).
+- **Steps 4 to 7 were staged** each in a scratch copy, from the prototypes and test first, and verified there with
+  the same checks before they were applied to the checkout.
+- **The six tests of Step 3** in the two sensitivity-node suites, where a note said seven.
+- **`docs/engine_rules.md` took 166 bytes**, not about 250.
+
+Left for later: nothing of this plan. Open: flywheel-dag#80, flywheel-dag#81 and flywheel-dag#82.
