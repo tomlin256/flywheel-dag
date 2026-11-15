@@ -972,6 +972,6 @@ milestone`.
 | 4 flywheel-dag#75: several roots | Done | 2026-11-15. 17 tests in `test_dag_reduce_roots`, and the reduce suite's nodes and helpers in `tests/reduce_test_nodes.hpp`; the checkpoint at 94 (142) on the Mac and in `ubuntu-dev`, and under GCC 15.2; seven hand-made changes caught. |
 | 5 flywheel-dag#76: a condition an argument moves | Done | 2026-11-15. 16 tests in `test_dag_reduce_choice`, two tests of the reduce suite renamed for the rule; the checkpoint at 95 (144) on the Mac and in `ubuntu-dev`, and under GCC 15.2; six hand-made changes caught. The README's sentence on a moved condition says what is true now, ahead of Step 8. |
 | 6 flywheel-dag#11: a reduction through the stateful nodes | Done | 2026-11-15. 17 tests in `test_dag_reduce_timeseries`; six reduce tests take a `RollingMinMaxNode` under a compute node as their barrier; the checkpoint at 96 (146) on the Mac and in `ubuntu-dev`, and under GCC 15.2; nine hand-made changes caught. |
-| 7 flywheel-dag#74: `ReductionNode` | Not started | |
+| 7 flywheel-dag#74: `ReductionNode` | Done | 2026-11-15. 19 tests in `test_reduction_node`; the checkpoint at 97 (148) on the Mac and in `ubuntu-dev`, and under GCC 15.2; seven hand-made changes caught, and the 24 of Steps 4 to 6 again. |
 | 8 Example and docs | Not started | |
 | 9 Release v1.4.0, and close out | Not started | |

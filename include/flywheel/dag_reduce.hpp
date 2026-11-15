@@ -110,7 +110,7 @@
 //     and its callback misses the change. A clean root's inputs are clean too,
 //     so every value bind() pulls is a cached one. Bind in the root's output
 //     callback, in a node that has just pulled the root, or after evaluating
-//     the root.
+//     the root. A ReductionNode (below) is the node that binds.
 //   • bind() follows only the inputs each node reads at this point
 //     (NodeBase::reduceReads()). A ConditionNode reads its condition and the
 //     branch the condition selects, never the other, which can be stale. A
@@ -134,10 +134,10 @@
 //     reduction evaluates nothing, and the value above an input the graph did
 //     not read is the graph's only where something else has evaluated it at
 //     this point. Give such an input to the node that binds as an input of its
-//     own, or evaluate it. A call then runs the steps of every branch, as the
-//     graph evaluates every branch at its own point, and the choosing node's
-//     step selects. A barrier on a branch the graph did not take, with an
-//     argument above it, is a barrier here.
+//     own (ReductionNode), or evaluate it. A call then runs the steps of every
+//     branch, as the graph evaluates every branch at its own point, and the
+//     choosing node's step selects. A barrier on a branch the graph did not
+//     take, with an argument above it, is a barrier here.
 //   • Any node can be an argument, not only a leaf. The function is then what
 //     the root would hold had that node's value been x, and the node's own
 //     inputs are not read. An argument the roots do not depend on at this
@@ -201,11 +201,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
@@ -277,6 +280,13 @@ public:
     void jacobian(std::span<const double> x, std::span<double> y, std::span<double> j);
     void jacobian(std::initializer_list<double> x, std::span<double> y, std::span<double> j);
 
+    /// The value argument i itself holds at the bound point: where a solver
+    /// starts. Throws std::logic_error on an unbound reduction,
+    /// std::out_of_range for an argument the reduction does not have, and
+    /// std::domain_error for one the roots do not depend on at the bound
+    /// point, whose value bind() does not read.
+    double argument(std::size_t i) const;
+
     /// The number of arguments.
     std::size_t arity() const noexcept;
 
@@ -287,6 +297,10 @@ public:
     std::size_t size() const noexcept;
 
 private:
+    // A ReductionNode binds the roots it has just pulled, through rebind().
+    template<typename Out, typename... Ins>
+    friend class ReductionNode;
+
     /// What a node is to the function. An Argument's value comes from the
     /// caller. A Candidate has an argument above it, so at some point it may be
     /// a step. A Constant has none: it is read from the graph, and only as an
@@ -318,9 +332,25 @@ private:
     /// Why bind() cannot follow entries_[chooser], whose input inputs_[stale]
     /// the graph did not read and nothing has evaluated.
     std::string staleMessage(std::size_t chooser, std::size_t stale) const;
+    /// Why `binder` cannot bind a point that follows entries_[unheard], which
+    /// it was not given as an input.
+    std::string unheardMessage(std::size_t unheard, const std::string& binder) const;
     /// "root r", or "roots r, s and t".
     std::string rootNames() const;
 
+    /// Forgets the bound point, and lets go of every value it held.
+    [[gnu::always_inline]] void release() noexcept;
+    /// bind() without the clean check, for roots the caller has just pulled.
+    /// An always-dirty node that reaches a root by two paths leaves it dirty
+    /// after its pull, and the pulls below then evaluate what went dirty
+    /// again, as they evaluate any always-dirty node they meet.
+    [[gnu::always_inline]] void rebind();
+    /// Throws std::domain_error unless every input the bound point follows
+    /// although the graph did not read it (followed_) is an argument or one of
+    /// `heard`, the inputs of the node `binder` that binds this reduction. The
+    /// function reads such an input, and the root does not hear it, so a node
+    /// that is not given it would keep a value the function has moved from.
+    void requireHeard(std::span<const NodePtr> heard, const std::string& binder) const;
     /// One reading of the point: what the roots depend on, with every node of
     /// choosing_ reading all its inputs, and which of that an argument moves.
     /// True when it found a node that an argument makes choose and choosing_
@@ -391,8 +421,12 @@ private:
     /// One per entry: its step reads its node at bind() (IReduceStep::binds()).
     std::vector<std::uint32_t>    binds_;
     bool                          anyBinds_ = false;
+    /// The inputs of the nodes of choosing_ that the graph did not read, and
+    /// the bound point follows, as positions in entries_.
+    std::vector<std::size_t>      followed_;
     std::vector<std::size_t>      run_;       ///< the candidates a call runs, in order
     std::vector<std::size_t>      live_;      ///< the arguments a call writes
+    std::vector<double>           own_;       ///< one per argument: the value it held at bind()
     std::vector<ValuePtr>         rootValue_; ///< one per root, while bind() reads the point
     bool                          bound_ = false;
     bool                          single_ = true;    ///< one root
@@ -426,6 +460,133 @@ Reduction reduce(NodePtr root, std::vector<NodePtr> args);
 
 /// The same, for several roots.
 Reduction reduce(std::vector<NodePtr> roots, std::vector<NodePtr> args);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ReductionNode<Out, Ins...> — a node that owns a Reduction, binds it each time
+// it recomputes, and hands it to a functor that returns the node's value: a
+// solver as a node.
+//
+//   auto implied = ReductionNode<double, double>::make(
+//       "implied vol", price, {vol}, {quote},
+//       [](Reduction& f, const double& target) {
+//           double v = f.argument(0), vega = 0.0;       // from the vol the graph holds
+//           for (int i = 0; i < 20; ++i) {
+//               const double miss = f.gradient({v}, {&vega, 1}) - target;
+//               if (std::abs(miss) < 1e-12) break;
+//               v -= miss / vega;
+//           }
+//           return v;
+//       });
+//
+// Its inputs are its roots, in order, and then the inputs given as `ins`, whose
+// values the functor is handed, as a ComputeNode's functor is. The arguments
+// are not inputs: one the roots depend on is upstream of a root, which carries
+// its changes, and pulling one they do not depend on would evaluate a node the
+// roots do not read.
+//
+// It is Eager, fixed here. The function it is handed depends on every value
+// the reduction reads, and it declares none of them as inputs. A change
+// upstream of a root marks it at least Maybe, and an Eager node recomputes
+// then. A Lazy node would skip whenever the roots' values stood still, and the
+// point can move while they do: a·x + b is 2 at x = 2 for (a, b) = (2, −2) and
+// for (4, −6), and its zero is not where it was.
+//
+// Each time it recomputes, it pulls its roots and its other inputs, binds the
+// reduction, and runs the functor. It binds the roots it has just pulled,
+// clean or not (Reduction::rebind()). An always-dirty node that reaches a root
+// by two paths leaves the root dirty after its own pull, and requiring it clean
+// would make this node throw on every evaluation. It stays dirty when a root
+// goes dirty again during its evaluation, as any node does when an input it
+// read does (NodeBase::endEval()).
+//
+// eval() throws what the bind throws and what the functor throws, and the node
+// then stays dirty and keeps the value it had, so the next eval() tries again.
+// What a solver that does not converge publishes is the functor's to say: it
+// returns the value it wants published, an Out that can say "none" among them,
+// or it throws.
+//
+// To follow a ConditionNode whose condition an argument moves, give the node
+// both of its branches as inputs: it then pulls the one the graph did not take,
+// which a reduction needs evaluated and never evaluates itself, and it hears
+// that branch move, which its root does not. The node insists on it: where the
+// bound point follows an input the graph did not read, and the node was not
+// given that input, eval() throws std::domain_error, even if something else
+// had evaluated it. An argument is the exception: the function takes its value
+// from the caller.
+//
+// TWO FUNCTOR SHAPES. make() takes a functor that returns Out. makeInPlace()
+// takes one that writes into `out`, under InPlaceComputeNode's contract: `out`
+// arrives holding the previous evaluation's value, and the functor overwrites
+// everything it owns on every path. An Out that owns heap, such as the
+// std::vector<double> of a solution in several unknowns, then allocates
+// nothing once warm.
+//
+// It gives a Reduction no step and a tape no partials: its value is not a
+// function of its inputs' values alone.
+// ─────────────────────────────────────────────────────────────────────────────
+template<typename Out, typename... Ins>
+class ReductionNode
+    : public NodeBase
+    , public std::enable_shared_from_this<ReductionNode<Out, Ins...>>
+{
+public:
+    using Fn         = std::function<Out(Reduction&, const Ins&...)>;
+    using InPlaceFn  = std::function<void(Out& out, Reduction&, const Ins&...)>;
+    using InputTuple = std::tuple<std::conditional_t<true, NodePtr, Ins>...>;
+
+    /// A node over one root. Throws what Reduction's constructor throws. The
+    /// default policy is TypedEqualityPolicy<Out>.
+    static std::shared_ptr<ReductionNode> make(
+        std::string name, NodePtr root, std::vector<NodePtr> args, InputTuple ins, Fn fn,
+        EqualityPolicyPtr eq = nullptr);
+    /// A node over several roots.
+    static std::shared_ptr<ReductionNode> make(
+        std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args, InputTuple ins,
+        Fn fn, EqualityPolicyPtr eq = nullptr);
+
+    /// The same two, for a functor that writes into `out`.
+    static std::shared_ptr<ReductionNode> makeInPlace(
+        std::string name, NodePtr root, std::vector<NodePtr> args, InputTuple ins, InPlaceFn fn,
+        EqualityPolicyPtr eq = nullptr);
+    static std::shared_ptr<ReductionNode> makeInPlace(
+        std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args, InputTuple ins,
+        InPlaceFn fn, EqualityPolicyPtr eq = nullptr);
+
+    ValuePtr eval(EvalContext& ctx) override;
+    std::string name() const override;
+    /// The roots, in order, and then the inputs given as `ins`.
+    std::vector<NodePtr> inputs() const override;
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+private:
+    ReductionNode(std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args,
+                  InputTuple ins, InPlaceFn fn, EqualityPolicyPtr eq);
+
+    /// Pull the other inputs, bind, invoke fn_ into scratch_, publish. The same
+    /// two paths as ComputeNode::applyInputs, chosen the same way.
+    template<std::size_t... Is>
+    ValuePtr applyInputs(EvalContext& ctx, std::index_sequence<Is...>);
+    ValuePtr publish();
+    template<std::size_t... Is>
+    void collectInputs(std::vector<NodePtr>& out, std::index_sequence<Is...>) const;
+
+    std::string          name_;
+    std::vector<NodePtr> roots_;
+    /// The roots and then the other inputs: what inputs() returns, and what the
+    /// node hears.
+    std::vector<NodePtr> heard_;
+    InputTuple           inputs_;
+    InPlaceFn            fn_;
+    EqualityPolicyPtr    eq_;
+    Reduction            reduction_;
+    ValuePtr             cached_;
+    /// The retained output buffer, as InPlaceComputeNode's.
+    Out                  scratch_{};
+    ValueSlot<Out>       slot_;
+};
+
+template<typename Out, typename... Ins>
+using ReductionNodePtr = std::shared_ptr<ReductionNode<Out, Ins...>>;
 
 } // namespace dag
 

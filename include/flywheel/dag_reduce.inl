@@ -131,8 +131,10 @@ inline Reduction::Reduction(std::vector<NodePtr> roots, std::vector<NodePtr> arg
     binds_.assign(entries_.size(), 0);
     for (std::size_t i = 0; i < entries_.size(); ++i)
         if (entries_[i].step && entries_[i].step->binds()) { binds_[i] = 1; anyBinds_ = true; }
+    followed_.reserve(inputs_.size());
     run_.reserve(candidates);
     live_.reserve(args_.size());
+    own_.assign(args_.size(), 0.0);
     rootValue_.resize(roots_.size());
     argValues_.resize(args_.size());
     adjoints_.assign(entries_.size(), 0.0);
@@ -186,37 +188,58 @@ inline std::string Reduction::staleMessage(std::size_t chooser, std::size_t stal
          + ", or give it as an input to the node that binds the reduction";
 }
 
-// The roots are checked clean first, and a clean node's inputs are clean too:
-// an input that moves invalidates its consumers, and a node does not end an
-// evaluation clean over an input that went dirty again. So every eval() that
-// bind() makes returns a cached value, an always-dirty node's apart.
-//
-// The point is read, and read again for as long as a reading finds a node that
-// an argument makes choose: such a node reads every input it has, so the
-// reading that found it stopped short of the inputs the graph did not read.
-// Each reading marks at least one more node, and no mark is taken back, so the
-// readings end. With no such node there is one reading.
-inline void Reduction::bind() {
+inline void Reduction::release() noexcept {
     bound_ = false;
-    // The last point's values go first: a bind holds only what its own point
-    // reads, and one that throws holds nothing of the last point.
     for (auto& v : values_) v.reset();
     run_.clear();
     live_.clear();
+}
+
+// The roots are checked clean first, and a clean node's inputs are clean too:
+// an input that moves invalidates its consumers, and a node does not end an
+// evaluation clean over an input that went dirty again. So every eval() that
+// rebind() makes returns a cached value, an always-dirty node's apart.
+//
+// A bind that throws here holds nothing of the last point.
+inline void Reduction::bind() {
+    if (single_) {
+        // One root: no loop over a list of one.
+        if (root0Node_->dirty()) {
+            release();
+            throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
+                + " is dirty. A reduction reads only evaluated values: evaluate it first");
+        }
+    } else {
+        for (const auto& root : roots_) {
+            if (!root->dirty()) continue;
+            release();
+            throw std::invalid_argument("dag::Reduction: root " + root->name()
+                + " is dirty. A reduction reads only evaluated values: evaluate it first");
+        }
+    }
+    rebind();
+}
+
+// The last point's values go first: a bind holds only what its own point
+// reads. Then the point is read, and read again for as long as a reading finds
+// a node that an argument makes choose: such a node reads every input it has,
+// so the reading that found it stopped short of the inputs the graph did not
+// read. Each reading marks at least one more node, and no mark is taken back,
+// so the readings end. With no such node there is one reading.
+inline void Reduction::rebind() {
+    release();
     EvalContext ctx;
 
     // One root, held in a local as its position is held in a member: a
     // reduction of one root takes no loop over a list of one.
     if (single_) {
-        if (root0Node_->dirty())
-            throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
-                + " is dirty. A reduction reads only evaluated values: evaluate it first");
         const ValuePtr rootValue = root0Node_->eval(ctx);
         if (!holdsDouble(rootValue))
             throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
                                         + " does not hold a double");
         if (chose_) {
             std::fill(choosing_.begin(), choosing_.end(), kNone);
+            followed_.clear();
             chose_ = false;
         }
         if (readPoint<false>(ctx)) readFollowing(ctx);
@@ -228,11 +251,6 @@ inline void Reduction::bind() {
         bound_ = true;
         return;
     }
-
-    for (const auto& root : roots_)
-        if (root->dirty())
-            throw std::invalid_argument("dag::Reduction: root " + root->name()
-                + " is dirty. A reduction reads only evaluated values: evaluate it first");
 
     // The roots' values are held while the point is read, and let go on every
     // way out, a throw included.
@@ -250,6 +268,7 @@ inline void Reduction::bind() {
 
     if (chose_) {
         std::fill(choosing_.begin(), choosing_.end(), kNone);
+        followed_.clear();
         chose_ = false;
     }
     if (readPoint<false>(ctx)) readFollowing(ctx);
@@ -291,6 +310,7 @@ template<bool Following>
 inline bool Reduction::readPoint(EvalContext& ctx) {
     std::fill(reached_.begin(), reached_.end(), std::uint8_t{0});
     std::fill(uses_.begin(), uses_.end(), ReduceReads::Use::Unread);
+    if (Following) followed_.clear();
     if (single_) reached_[root0_] = 1;
     else for (const std::size_t p : rootPosition_) reached_[p] = 1;
     for (std::size_t i = entries_.size(); i-- > 0;) {
@@ -311,6 +331,7 @@ inline bool Reduction::readPoint(EvalContext& ctx) {
                 if (entries_[inputs_[k]].node->dirty())
                     throw std::domain_error(staleMessage(i, k));
                 uses_[k] = ReduceReads::Use::Read;
+                followed_.push_back(inputs_[k]);
             }
         }
         for (std::size_t k = e.firstInput; k < e.lastInput; ++k)
@@ -330,6 +351,7 @@ inline bool Reduction::readPoint(EvalContext& ctx) {
             if (!holdsDouble(held))
                 throw std::invalid_argument("dag::Reduction: argument " + e.node->name()
                                             + " does not hold a double");
+            own_[e.argument] = static_cast<const TypedValue<double>*>(held.get())->get();
             movedBy_[i] = e.argument;
             live_.push_back(e.argument);
             continue;
@@ -363,6 +385,30 @@ inline bool Reduction::readPoint(EvalContext& ctx) {
         run_.push_back(i);
     }
     return found;
+}
+
+// The function reads every input in followed_, and the root that was bound
+// does not hear them: a ConditionNode hears only the branch it took. A node
+// that binds, and is not given such an input as one of its own, is not told
+// when the input moves, and would keep a value the function has moved from. An
+// argument needs no hearing: the function takes its value from the caller.
+inline void Reduction::requireHeard(std::span<const NodePtr> heard,
+                                    const std::string& binder) const {
+    for (const std::size_t p : followed_) {
+        const Entry& e = entries_[p];
+        if (e.role == Role::Argument) continue;
+        const bool given = std::any_of(heard.begin(), heard.end(),
+            [&e](const NodePtr& h) { return h == e.node; });
+        if (!given) throw std::domain_error(unheardMessage(p, binder));
+    }
+}
+
+inline std::string Reduction::unheardMessage(std::size_t unheard, const std::string& binder) const {
+    const std::string& input = entries_[unheard].node->name();
+    return "dag::Reduction: " + rootNames() + ": the function reads " + input
+         + ", which the graph did not read at this point, and " + binder
+         + " is not given it as an input, so it would not hear it move. Give " + binder + " "
+         + input + " as an input";
 }
 
 // An argument's value is published through a slot of the reduction's, as a
@@ -624,6 +670,24 @@ inline void Reduction::jacobian(std::initializer_list<double> x, std::span<doubl
     jacobian(std::span<const double>(x.begin(), x.size()), y, j);
 }
 
+// bind() reads each argument a step reads, to see that it holds a double, and
+// keeps what it held.
+inline double Reduction::argument(std::size_t i) const {
+    if (!bound_)
+        throw std::logic_error("dag::Reduction: " + rootNames()
+            + (roots_.size() == 1 ? " is" : " are") + " not bound: bind() it first");
+    if (i >= args_.size())
+        throw std::out_of_range("dag::Reduction: argument " + std::to_string(i) + " of "
+            + rootNames() + ", which " + (roots_.size() == 1 ? "has " : "have ")
+            + std::to_string(args_.size()));
+    const std::size_t p = argPosition_[i];
+    if (p == kNone || movedBy_[p] == kNone)
+        throw std::domain_error("dag::Reduction: " + rootNames()
+            + (roots_.size() == 1 ? " does" : " do") + " not depend on argument "
+            + args_[i]->name() + " at the bound point, so its value was not read");
+    return own_[i];
+}
+
 inline std::size_t Reduction::arity() const noexcept { return args_.size(); }
 
 inline std::size_t Reduction::roots() const noexcept { return roots_.size(); }
@@ -644,6 +708,141 @@ inline Reduction reduce(std::vector<NodePtr> roots, std::vector<NodePtr> args) {
     Reduction f(std::move(roots), std::move(args));
     f.bind();
     return f;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ReductionNode<Out, Ins...>
+// ─────────────────────────────────────────────────────────────────────────────
+
+template<typename Out, typename... Ins>
+ReductionNodePtr<Out, Ins...> ReductionNode<Out, Ins...>::make(
+    std::string name, NodePtr root, std::vector<NodePtr> args, InputTuple ins, Fn fn,
+    EqualityPolicyPtr eq)
+{
+    return make(std::move(name), std::vector<NodePtr>{std::move(root)}, std::move(args),
+                std::move(ins), std::move(fn), std::move(eq));
+}
+
+// A functor that returns its value is run as one that writes it: the value is
+// assigned to `out`, which for an Out that owns heap gives up the storage `out`
+// held. That is what a ComputeNode's functor costs too. makeInPlace() is the
+// way to keep the storage.
+template<typename Out, typename... Ins>
+ReductionNodePtr<Out, Ins...> ReductionNode<Out, Ins...>::make(
+    std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args, InputTuple ins,
+    Fn fn, EqualityPolicyPtr eq)
+{
+    return makeInPlace(std::move(name), std::move(roots), std::move(args), std::move(ins),
+        InPlaceFn([fn = std::move(fn)](Out& out, Reduction& f, const Ins&... in) {
+            out = fn(f, in...);
+        }),
+        std::move(eq));
+}
+
+template<typename Out, typename... Ins>
+ReductionNodePtr<Out, Ins...> ReductionNode<Out, Ins...>::makeInPlace(
+    std::string name, NodePtr root, std::vector<NodePtr> args, InputTuple ins, InPlaceFn fn,
+    EqualityPolicyPtr eq)
+{
+    return makeInPlace(std::move(name), std::vector<NodePtr>{std::move(root)}, std::move(args),
+                       std::move(ins), std::move(fn), std::move(eq));
+}
+
+template<typename Out, typename... Ins>
+ReductionNodePtr<Out, Ins...> ReductionNode<Out, Ins...>::makeInPlace(
+    std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args, InputTuple ins,
+    InPlaceFn fn, EqualityPolicyPtr eq)
+{
+    if (!eq) eq = std::make_shared<TypedEqualityPolicy<Out>>();
+    auto self = std::shared_ptr<ReductionNode>(new ReductionNode(
+        std::move(name), std::move(roots), std::move(args), std::move(ins), std::move(fn),
+        std::move(eq)));
+    wire(self, self->inputs());
+    return self;
+}
+
+// Eager, fixed here, with no mode to take: see the class comment. The
+// reduction is built here, so a null root or a repeated argument throws from
+// make(), before the node is wired.
+template<typename Out, typename... Ins>
+ReductionNode<Out, Ins...>::ReductionNode(
+    std::string name, std::vector<NodePtr> roots, std::vector<NodePtr> args, InputTuple ins,
+    InPlaceFn fn, EqualityPolicyPtr eq)
+    : NodeBase(InvalidationMode::Eager), name_(std::move(name)), roots_(roots)
+    , inputs_(std::move(ins)), fn_(std::move(fn)), eq_(std::move(eq))
+    , reduction_(std::move(roots), std::move(args))
+{
+    heard_ = roots_;
+    collectInputs(heard_, std::index_sequence_for<Ins...>{});
+}
+
+// The roots are pulled first, in order, and then the other inputs: by the time
+// the reduction is bound, everything the node was given has been evaluated, an
+// input that is a branch its root did not take included.
+//
+// A throw from the bind or from the functor leaves this node dirty, and cached_
+// as it was.
+template<typename Out, typename... Ins>
+ValuePtr ReductionNode<Out, Ins...>::eval(EvalContext& ctx) {
+    if (!dirty() && !ctx.forceRecompute) return cached_;
+    beginEval();
+    for (const auto& root : roots_) root->eval(ctx);
+    return applyInputs(ctx, std::index_sequence_for<Ins...>{});
+}
+
+// ComputeNode's two paths, for the inputs the functor is handed: copied out
+// when every type is trivially copyable, and otherwise bound by reference into
+// values that `held` keeps alive and unmodified for the call. See
+// ComputeNode::applyInputs in dag.inl.
+//
+// The bind takes no clean root for granted: an always-dirty node that reaches a
+// root by two paths leaves it dirty after its pull (Reduction::rebind()).
+template<typename Out, typename... Ins>
+template<std::size_t... Is>
+ValuePtr ReductionNode<Out, Ins...>::applyInputs(
+    [[maybe_unused]] EvalContext& ctx, std::index_sequence<Is...>)
+{
+    if constexpr ((std::is_trivially_copyable_v<Ins> && ...)) {
+        [[maybe_unused]] const std::tuple<Ins...> vals{
+            get_value<Ins>(std::get<Is>(inputs_)->eval(ctx))... };
+        reduction_.rebind();
+        reduction_.requireHeard(heard_, name_);
+        fn_(scratch_, reduction_, std::get<Is>(vals)...);
+    } else {
+        const ValuePtr held[] = { std::get<Is>(inputs_)->eval(ctx)... };
+        reduction_.rebind();
+        reduction_.requireHeard(heard_, name_);
+        fn_(scratch_, reduction_, get_value<Ins>(held[Is])...);
+    }
+    return publish();
+}
+
+// InPlaceComputeNode's publish: emit takes a const lvalue, so the slot
+// copy-assigns scratch_ into a recycled buffer, and neither gives its storage
+// back.
+template<typename Out, typename... Ins>
+ValuePtr ReductionNode<Out, Ins...>::publish() {
+    auto newV = slot_.emit(std::as_const(scratch_));
+    if (!eq_->equal(cached_, newV)) {
+        cached_ = newV;
+        notifyDownstream();
+    }
+    endEval();
+    return cached_;
+}
+
+template<typename Out, typename... Ins>
+std::string ReductionNode<Out, Ins...>::name() const { return name_; }
+
+template<typename Out, typename... Ins>
+std::vector<NodePtr> ReductionNode<Out, Ins...>::inputs() const { return heard_; }
+
+template<typename Out, typename... Ins>
+template<std::size_t... Is>
+void ReductionNode<Out, Ins...>::collectInputs(
+    [[maybe_unused]] std::vector<NodePtr>& out, std::index_sequence<Is...>) const
+{
+    (out.push_back(std::get<Is>(inputs_)), ...);
 }
 
 } // namespace dag

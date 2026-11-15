@@ -29,6 +29,7 @@ set(FLYWHEEL_DAG_TESTS
   test_engine_stateful_discovery
   test_json_state_store
   test_lazy_invalidation
+  test_reduction_node
   test_ring_buffer
   test_stateful_node_base
   test_timeseries
@@ -52,6 +53,7 @@ set(FLYWHEEL_DAG_COUNTING_TESTS
   test_dag_reduce_choice
   test_dag_reduce_roots
   test_dag_reduce_timeseries
+  test_reduction_node
   test_value_slot
 )
 
