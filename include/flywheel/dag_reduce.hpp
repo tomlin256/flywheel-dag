@@ -47,7 +47,8 @@
 //   2. bind(), once per point. It follows what the roots depend on at the
 //      values the graph holds now, decides which of those nodes an argument
 //      moves here, and reads the value of every node they read that no
-//      argument moves.
+//      argument moves, and what a stateful node's step needs of its node
+//      (IReduceStep::bind()).
 //   3. Call, many times. The arguments' values go into the reduction's own
 //      buffers, each step runs in order, and the roots' values come out.
 //      Nothing in the graph is read or written.
@@ -89,10 +90,14 @@
 //     state must be: called at trial values, such a functor would advance on
 //     every one.
 //   • ConditionNode. It selects, and has no functor.
+//   • EWMANode, RollingStats, RollingSumNode, ZScoreNode, OutlierGateNode,
+//     and a DelayNode of no ticks. The step applies the node's last update to
+//     another sample, from what it read of the node at bind(), so a call
+//     advances nothing (dag_timeseries.hpp).
 //   • A node of your own that overrides NodeBase::reduceStep().
 //
 // A node gives no step unless it says otherwise, and a node that gives none,
-// with an argument above it, is a BARRIER: every dag::ts node, an Eager
+// with an argument above it, is a BARRIER: every other dag::ts node, an Eager
 // compute node, and a node that does not derive NodeBase.
 //
 // The rules
@@ -383,6 +388,9 @@ private:
     /// it choose at each call, or kNone.
     std::vector<std::size_t>      choosing_;
     bool                          chose_ = false;   ///< choosing_ holds a mark
+    /// One per entry: its step reads its node at bind() (IReduceStep::binds()).
+    std::vector<std::uint32_t>    binds_;
+    bool                          anyBinds_ = false;
     std::vector<std::size_t>      run_;       ///< the candidates a call runs, in order
     std::vector<std::size_t>      live_;      ///< the arguments a call writes
     std::vector<ValuePtr>         rootValue_; ///< one per root, while bind() reads the point

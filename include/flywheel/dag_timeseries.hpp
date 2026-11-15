@@ -55,6 +55,27 @@
 // a double gives no partials, and is a barrier: WindowNode, RollingMinMaxNode,
 // ThresholdNode, the two debounce nodes, and the templates at any type but
 // double. makeTimeDelayNode builds an Eager ComputeNode, a barrier too.
+//
+// Reductions
+// ──────────
+// Six nodes give a dag::Reduction (dag_reduce.hpp) a step, which applies the
+// node's last update to another sample: EWMANode, RollingStats,
+// RollingSumNode, ZScoreNode, OutlierGateNode, and a DelayNode of no ticks,
+// which passes its sample through at any type. A step reads what it needs of
+// the node at bind() (IReduceStep::bind()), so it answers for the point it was
+// bound at until the next bind(), however the node moves on, and a call
+// advances nothing. The average's, the mean's and the sum's steps, and the
+// gate's where it replaces a sample by the mean, work from the value the node
+// holds and the sample its update took: to the bit at that sample, and at
+// another to within the rounding of the numbers on the way, so not finite at
+// any sample once the node has taken one that is not. The z-score's step, and
+// the gate's where a sample passes, are the update itself.
+//
+// A node that reads no sample at this point is a constant to a reduction, as
+// it is to a pass: a delay of a tick or more, a tick rate, and a z-score with
+// no spread. Every other node gives no step, and is a barrier: DeltaNode and
+// RateLimiterNode, whose state keeps nothing their last update started from,
+// WindowNode, RollingMinMaxNode, ThresholdNode and the two debounce nodes.
 
 #include "dag.hpp"
 #include "dag_ring_buffer.hpp"
@@ -298,11 +319,17 @@ public:
     /// 1/count: the mean of count samples moves by 1/count of a move in one.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// A step that gives the mean, had the sample the node last took been
+    /// another one.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
 
 private:
+    class Step;
+
     RollingStats(std::string n, NodePtr up, std::size_t w,
                  EqualityPolicyPtr eq);
     void push(double x, State& s);
@@ -346,11 +373,17 @@ public:
     /// 1: the latest sample is one term of the sum.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// A step that gives the sum, had the sample the node last took been
+    /// another one.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
 
 private:
+    class Step;
+
     RollingSumNode(std::string n, NodePtr up, std::size_t w, EqualityPolicyPtr eq);
     /// Re-sum the buffer exactly, discarding accumulated incremental error.
     static void recompute(State& s);
@@ -417,11 +450,17 @@ public:
     /// sample, which it takes whole.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// A step that gives the average, had the sample the node last took been
+    /// another one.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
 
 private:
+    class Step;
+
     EWMANode(std::string n, NodePtr up, double a, EqualityPolicyPtr eq);
     double alpha_;
 };
@@ -444,6 +483,10 @@ public:
 
     /// No input: the rate counts evaluations and never reads the sample.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
+
+    /// No input: the rate counts evaluations, and never reads the sample. So
+    /// to a Reduction the node is a constant at every point.
+    void reduceReads(EvalContext& ctx, ReduceReads& out) override;
 
     double doCompute(const double& /*trigger*/, State& s);
     void doSaveState(INodeState& s, const State& st) const;
@@ -535,11 +578,23 @@ public:
     ValuePtr eval(EvalContext& ctx) override;
     RollingStats& stats();
 
+    /// The z-score of x against a mean and a spread: (x − mean)/stddev, and 0
+    /// where the spread is too small to measure against. eval() and the steps
+    /// that apply it to another sample share this one expression.
+    static double score(double x, double mean, double stddev) noexcept;
+
     /// 1/σ, with σ the spread before the sample joined the window, as eval()
     /// takes it. No input where σ is too small to divide by, and z is 0. It
     /// reads σ from the stats node, so it holds for a stats node over the same
     /// upstream, as the make() that builds one gives.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
+
+    /// A step that gives the z-score of another sample, against the mean and
+    /// the spread the node last scored against.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+    /// The sample, where there is a spread to measure it against. Where there
+    /// is none the score is 0 whatever the sample, and the node reads nothing.
+    void reduceReads(EvalContext& ctx, ReduceReads& out) override;
 
     // Trivial stub — eval() is overridden; doCompute is not called via the base scaffold.
     double doCompute(const double&, State&) { return 0.0; }
@@ -547,6 +602,8 @@ public:
     void doRestoreState(const INodeState& s, State&);
 
 private:
+    class Step;
+
     ZScoreNode(std::string n, NodePtr up,
                RollingStatsPtr stats,
                EqualityPolicyPtr eq);
@@ -580,12 +637,19 @@ public:
     /// that is gated, which the rolling mean holds as one sample of count.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// A step that gates another sample as the node's last update would have:
+    /// against the mean and the spread it scored against, with the rolling
+    /// mean that holds the sample when it is gated.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+
     // Trivial stub — eval() is overridden; doCompute is not called via the base scaffold.
     double doCompute(const double&, State&) { return 0.0; }
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
 
 private:
+    class Step;
+
     OutlierGateNode(std::string n, NodePtr up,
                     std::shared_ptr<ZScoreNode> z, double thr,
                     EqualityPolicyPtr eq);
@@ -721,11 +785,21 @@ public:
     /// and none for one at a T other than double.
     bool partials(EvalContext& ctx, aad::Partials& out) override;
 
+    /// With a delay of 0, a step that passes its sample through. Null with a
+    /// delay of a tick or more, where the node reads nothing and needs none.
+    std::unique_ptr<IReduceStep> reduceStep() override;
+    /// The sample, with a delay of 0. With a delay of a tick or more the value
+    /// is an older sample, or the initial value, so the node reads nothing and
+    /// is a constant to a Reduction at every point.
+    void reduceReads(EvalContext& ctx, ReduceReads& out) override;
+
     T    doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
 
 private:
+    class Step;
+
     DelayNode(std::string n, NodePtr up, std::size_t delay,
               T initial, EqualityPolicyPtr eq);
     std::size_t delay_;

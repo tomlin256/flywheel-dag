@@ -175,6 +175,48 @@ inline bool RollingStats::partials(EvalContext&, aad::Partials& out) {
     return true;
 }
 
+// The mean, had the sample the node last took been another one: the mean it
+// holds, moved by 1/count of the sample's move. The update that took the
+// sample has already folded it into the mean, and what the mean was before is
+// not kept, so the step works from the result, as EWMANode's does, and what
+// that step says of its accuracy holds here: the node's mean at the sample the
+// node took, and at any other the mean it would hold to within the rounding of
+// the numbers on the way. The spread (variance(), stddev()) is not a value of
+// the node, and the step does not give it.
+class RollingStats::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const RollingStats> node) : node_(std::move(node)) {}
+
+    void bind(EvalContext& ctx) override {
+        const ValuePtr sample = node_->upstream_->eval(ctx);
+        sample_ = get_value<double>(sample);
+        held_   = node_->state_.mean;
+        count_  = static_cast<double>(node_->state_.count);
+    }
+    bool binds() const noexcept override { return true; }
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        const double x = get_value<double>(in[0]);
+        return slot_.emit(held_ + (x - sample_) / count_);
+    }
+
+    bool partials(const ReduceInputs&, aad::Partials& out) override {
+        out.add(0, 1.0 / count_);
+        return true;
+    }
+
+private:
+    std::shared_ptr<const RollingStats> node_;
+    double            sample_ = 0.0;   ///< the sample the node's last update took
+    double            held_   = 0.0;   ///< the mean that update left
+    double            count_  = 1.0;   ///< the samples in that mean
+    ValueSlot<double> slot_;
+};
+
+inline std::unique_ptr<IReduceStep> RollingStats::reduceStep() {
+    return std::make_unique<Step>(shared_from_this());
+}
+
 inline double RollingStats::doCompute(const double& x, State& s) {
     // Capture stats BEFORE including this sample — used by ZScoreNode for outlier detection
     s.prevMean   = s.count > 0 ? s.mean : 0.0;
@@ -261,6 +303,44 @@ inline RollingSumNode::RollingSumNode(std::string n, NodePtr up, std::size_t w,
 inline bool RollingSumNode::partials(EvalContext&, aad::Partials& out) {
     out.add(0, 1.0);
     return true;
+}
+
+// The sum, had the sample the node last took been another one: the sum it
+// holds, moved by the sample's move. It works from the result, as EWMANode's
+// step does, whether the update added the sample to a running total or
+// re-summed the window, and what that step says of its accuracy holds here:
+// the node's sum at the sample the node took, and at any other the sum it would
+// hold to within the rounding of the numbers on the way.
+class RollingSumNode::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const RollingSumNode> node) : node_(std::move(node)) {}
+
+    void bind(EvalContext& ctx) override {
+        const ValuePtr sample = node_->upstream_->eval(ctx);
+        sample_ = get_value<double>(sample);
+        held_   = node_->state_.sum;
+    }
+    bool binds() const noexcept override { return true; }
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        const double x = get_value<double>(in[0]);
+        return slot_.emit(held_ + (x - sample_));
+    }
+
+    bool partials(const ReduceInputs&, aad::Partials& out) override {
+        out.add(0, 1.0);
+        return true;
+    }
+
+private:
+    std::shared_ptr<const RollingSumNode> node_;
+    double            sample_ = 0.0;   ///< the sample the node's last update took
+    double            held_   = 0.0;   ///< the sum that update left
+    ValueSlot<double> slot_;
+};
+
+inline std::unique_ptr<IReduceStep> RollingSumNode::reduceStep() {
+    return std::make_unique<Step>(shared_from_this());
 }
 
 inline double RollingSumNode::doCompute(const double& x, State& s) {
@@ -418,6 +498,55 @@ inline bool EWMANode::partials(EvalContext&, aad::Partials& out) {
     return true;
 }
 
+// The node's last update, applied to another sample, from the state bind()
+// read. A blended update is α·x + (1 − α)·previous, and the node keeps its
+// result and not the value it started from. So the step moves the result by α
+// times the sample's move: held + α·(x − sample). The first update took its
+// sample whole, and so does the step.
+//
+// At the sample the node took the move is exactly 0, and the step gives the
+// value the node holds (a negative zero comes back positive). At any other it
+// gives what the node would hold to within the rounding of the numbers on the
+// way, which are the average held and α times each of the two samples, and not
+// to within the rounding of the answer. A sample many orders of magnitude
+// larger than the average it was blended into leaves little of that average to
+// work from. One that is not finite leaves none, and the step then has no
+// value at any sample.
+class EWMANode::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const EWMANode> node) : node_(std::move(node)) {}
+
+    void bind(EvalContext& ctx) override {
+        const ValuePtr sample = node_->upstream_->eval(ctx);
+        sample_  = get_value<double>(sample);
+        held_    = node_->state_.ewma;
+        blended_ = node_->state_.blended;
+    }
+    bool binds() const noexcept override { return true; }
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        const double x = get_value<double>(in[0]);
+        return slot_.emit(blended_ ? held_ + node_->alpha_ * (x - sample_) : x);
+    }
+
+    // The node's own partials(), which do not depend on the sample.
+    bool partials(const ReduceInputs&, aad::Partials& out) override {
+        out.add(0, blended_ ? node_->alpha_ : 1.0);
+        return true;
+    }
+
+private:
+    std::shared_ptr<const EWMANode> node_;
+    double            sample_  = 0.0;     ///< the sample the node's last update took
+    double            held_    = 0.0;     ///< the average that update left
+    bool              blended_ = false;   ///< the update had an average to blend into
+    ValueSlot<double> slot_;
+};
+
+inline std::unique_ptr<IReduceStep> EWMANode::reduceStep() {
+    return std::make_unique<Step>(shared_from_this());
+}
+
 inline void EWMANode::doSaveState(INodeState& s, const State& st) const {
     s["ewma"]        = st.ewma;
     s["initialized"] = st.initialized;
@@ -459,6 +588,10 @@ inline double EWMATickRateNode::doCompute(const double& /*trigger*/, State& s) {
 }
 
 inline bool EWMATickRateNode::partials(EvalContext&, aad::Partials&) { return true; }
+
+// As partials(): no input is read. A reduction then takes the rate as a
+// constant, reads nothing above the node, and asks it for no step.
+inline void EWMATickRateNode::reduceReads(EvalContext&, ReduceReads&) {}
 
 inline void EWMATickRateNode::doSaveState(INodeState& s, const State& st) const {
     s["rate"] = st.rate;
@@ -603,7 +736,7 @@ inline ValuePtr ZScoreNode::eval(EvalContext& ctx) {
     stats_->eval(ctx);
     double mu = stats_->prevMean();
     double sd = stats_->prevStddev();
-    double z  = (sd < kFlat) ? 0.0 : (x - mu) / sd;
+    double z  = score(x, mu, sd);
     // notifyDownstream() owns cached_ — see StatefulNodeBase::eval.
     this->notifyDownstream(slot_.emit(z), eq_);
     return this->cached_;
@@ -617,6 +750,53 @@ inline bool ZScoreNode::partials(EvalContext&, aad::Partials& out) {
     const double sd = stats_->prevStddev();
     if (!(sd < kFlat)) out.add(0, 1.0 / sd);
     return true;
+}
+
+inline double ZScoreNode::score(double x, double mean, double stddev) noexcept {
+    return (stddev < kFlat) ? 0.0 : (x - mean) / stddev;
+}
+
+// The score of another sample against the mean and the spread the node last
+// scored against, which bind() reads from the stats. Both were taken before
+// the sample joined the window, so they are what the node's last update
+// started from, and the step is that update itself: score(), as eval() calls
+// it. So it gives the node's value to the bit at every sample.
+class ZScoreNode::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const ZScoreNode> node) : node_(std::move(node)) {}
+
+    void bind(EvalContext&) override {
+        mean_   = node_->stats_->prevMean();
+        stddev_ = node_->stats_->prevStddev();
+    }
+    bool binds() const noexcept override { return true; }
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        return slot_.emit(score(get_value<double>(in[0]), mean_, stddev_));
+    }
+
+    // The node's own partials(), from the spread bind() read.
+    bool partials(const ReduceInputs&, aad::Partials& out) override {
+        if (!(stddev_ < kFlat)) out.add(0, 1.0 / stddev_);
+        return true;
+    }
+
+private:
+    std::shared_ptr<const ZScoreNode> node_;
+    double            mean_   = 0.0;   ///< the mean the node last scored against
+    double            stddev_ = 0.0;   ///< and the spread
+    ValueSlot<double> slot_;
+};
+
+inline std::unique_ptr<IReduceStep> ZScoreNode::reduceStep() {
+    return std::make_unique<Step>(shared_from_this());
+}
+
+// As partials(): the sample is read only where there is a spread to measure it
+// against. Without one the score is 0 whatever the sample, so a reduction takes
+// it as a constant and reads nothing above the node.
+inline void ZScoreNode::reduceReads(EvalContext&, ReduceReads& out) {
+    if (!(stats_->prevStddev() < kFlat)) out.reads(0);
 }
 
 inline void ZScoreNode::doSaveState(INodeState& s, const State&) const {
@@ -673,6 +853,58 @@ inline bool OutlierGateNode::partials(EvalContext&, aad::Partials& out) {
                    ? 1.0 / static_cast<double>(zNode_->stats().count())
                    : 1.0);
     return true;
+}
+
+// The node's last update, applied to another sample. Whether a sample is gated
+// is its z-score against the mean and the spread from before it joined the
+// window, which is ZScoreNode::score() on what bind() read: the test eval()
+// makes, so the step is on the node's side of the threshold at the sample the
+// node took, and can be on the other side at another one. A sample that passes
+// is the value. A gated one is replaced by the rolling mean, which holds it as
+// one sample of `count`: the mean the node holds, moved by 1/count of the
+// sample's move, as RollingStats' step gives it.
+class OutlierGateNode::Step final : public IReduceStep {
+public:
+    explicit Step(std::shared_ptr<const OutlierGateNode> node) : node_(std::move(node)) {}
+
+    void bind(EvalContext& ctx) override {
+        const ValuePtr sample = node_->upstream_->eval(ctx);
+        sample_ = get_value<double>(sample);
+        const RollingStats* const stats = &node_->zNode_->stats();
+        prevMean_   = stats->prevMean();
+        prevStddev_ = stats->prevStddev();
+        mean_       = stats->mean();
+        count_      = static_cast<double>(stats->count());
+    }
+    bool binds() const noexcept override { return true; }
+
+    ValuePtr apply(const ReduceInputs& in) override {
+        const double x = get_value<double>(in[0]);
+        return slot_.emit(gated(x) ? mean_ + (x - sample_) / count_ : x);
+    }
+
+    // The node's own partials(), on the side of the threshold this sample is.
+    bool partials(const ReduceInputs& in, aad::Partials& out) override {
+        out.add(0, gated(get_value<double>(in[0])) ? 1.0 / count_ : 1.0);
+        return true;
+    }
+
+private:
+    bool gated(double x) const noexcept {
+        return std::abs(ZScoreNode::score(x, prevMean_, prevStddev_)) >= node_->threshold_;
+    }
+
+    std::shared_ptr<const OutlierGateNode> node_;
+    double            sample_     = 0.0;   ///< the sample the node's last update took
+    double            prevMean_   = 0.0;   ///< the mean before that sample joined the window
+    double            prevStddev_ = 0.0;   ///< and the spread
+    double            mean_       = 0.0;   ///< the mean with it
+    double            count_      = 1.0;   ///< the samples in that mean
+    ValueSlot<double> slot_;
+};
+
+inline std::unique_ptr<IReduceStep> OutlierGateNode::reduceStep() {
+    return std::make_unique<Step>(shared_from_this());
 }
 
 inline void OutlierGateNode::doSaveState(INodeState& s, const State& st) const {
@@ -865,6 +1097,38 @@ bool DelayNode<T>::partials(EvalContext&, [[maybe_unused]] aad::Partials& out) {
     } else {
         return false;
     }
+}
+
+// A delay of 0 passes its sample through, so the step returns the sample's own
+// value, as ConditionNode's step returns its branch's, and needs no slot. It
+// holds nothing of the node.
+template<typename T>
+class DelayNode<T>::Step final : public IReduceStep {
+public:
+    ValuePtr apply(const ReduceInputs& in) override { return in[0]; }
+
+    bool partials(const ReduceInputs&, [[maybe_unused]] aad::Partials& out) override {
+        if constexpr (std::is_same_v<T, double>) {
+            out.add(0, 1.0);
+            return true;
+        } else {
+            return false;
+        }
+    }
+};
+
+template<typename T>
+std::unique_ptr<IReduceStep> DelayNode<T>::reduceStep() {
+    if (delay_ > 0) return nullptr;
+    return std::make_unique<Step>();
+}
+
+// As partials(): only a delay of 0 reads the sample. With a delay of a tick or
+// more a reduction takes the delayed value as a constant and reads nothing
+// above the node.
+template<typename T>
+void DelayNode<T>::reduceReads(EvalContext&, ReduceReads& out) {
+    if (delay_ == 0) out.reads(0);
 }
 
 template<typename T>

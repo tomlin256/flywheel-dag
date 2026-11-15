@@ -128,6 +128,9 @@ inline Reduction::Reduction(std::vector<NodePtr> roots, std::vector<NodePtr> arg
     reached_.assign(entries_.size(), 0);
     movedBy_.assign(entries_.size(), kNone);
     choosing_.assign(entries_.size(), kNone);
+    binds_.assign(entries_.size(), 0);
+    for (std::size_t i = 0; i < entries_.size(); ++i)
+        if (entries_[i].step && entries_[i].step->binds()) { binds_[i] = 1; anyBinds_ = true; }
     run_.reserve(candidates);
     live_.reserve(args_.size());
     rootValue_.resize(roots_.size());
@@ -157,7 +160,8 @@ inline std::string Reduction::barrierMessage(std::size_t barrier, std::size_t by
     const Entry& e = entries_[barrier];
     std::string why;
     if (e.node->kind() == NodeKind::TimeSeries)
-        why = "is a time-series node, whose value is not a function of its inputs' values alone";
+        why = "is a time-series node that gives no step: it cannot apply its last update to"
+              " another sample";
     else if (e.hooks && e.hooks->invalidationMode() == InvalidationMode::Eager)
         why = "is Eager, and gives no step. A compute node gives one when it is built with"
               " InvalidationMode::Lazy, which says that its functor is a pure function of its"
@@ -217,6 +221,9 @@ inline void Reduction::bind() {
         }
         if (readPoint<false>(ctx)) readFollowing(ctx);
         precise_ = chose_;
+        if (anyBinds_)
+            for (const std::size_t i : run_)
+                if (binds_[i] != 0) entries_[i].step->bind(ctx);
         if (movedBy_[root0_] == kNone) values_[root0_] = rootValue;
         bound_ = true;
         return;
@@ -247,6 +254,13 @@ inline void Reduction::bind() {
     }
     if (readPoint<false>(ctx)) readFollowing(ctx);
     precise_ = chose_;
+
+    // Each step that runs keeps what it needs of its node at this point: a
+    // stateful node's state, and the sample its last update took. Once, after
+    // the last reading of the point, which is the one that stands.
+    if (anyBinds_)
+        for (const std::size_t i : run_)
+            if (binds_[i] != 0) entries_[i].step->bind(ctx);
 
     // A root that no argument moves is its own value at every call.
     for (std::size_t r = 0; r < roots_.size(); ++r) {

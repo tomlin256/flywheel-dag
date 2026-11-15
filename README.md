@@ -232,7 +232,9 @@ f.bind();                                       // so read it again
   | Every `dag::ops` node, and `ConditionNode` | Always |
   | `aad::DifferentiableNode`, `MemoizedComputeNode` | Always: the one's functor has no side effects, and the other's is a pure function |
   | `ComputeNode`, `InPlaceComputeNode`, `TweakableComputeNode` | When `Lazy`, which says that the functor is a pure function of its inputs |
-  | Every `dag::ts` node, an `Eager` compute node, any node that does not override `reduceStep()` | Never: a barrier |
+  | `EWMANode`, `RollingStats`, `RollingSumNode`, `ZScoreNode`, `OutlierGateNode`, a `DelayNode` of no ticks | Always: the step applies the node's last update to another sample, and advances nothing |
+  | A `DelayNode` of a tick or more, `EWMATickRateNode`, a `ZScoreNode` with no spread | Never, and not needed: none reads its sample, so each is a constant |
+  | Every other `dag::ts` node, an `Eager` compute node, any node that does not override `reduceStep()` | Never: a barrier |
 
   A barrier that an argument moves makes `bind()` throw `std::domain_error`, naming the argument and the node. A node
   of your own joins by overriding `NodeBase::reduceStep()`, and no node is larger for it.

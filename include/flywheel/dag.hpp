@@ -409,6 +409,21 @@ public:
     /// when the step cannot say: a reduction that runs it then has a value and
     /// no gradient. A Reduction asks after apply(), with the same values.
     virtual bool partials(const ReduceInputs& in, aad::Partials& out);
+
+    /// Reads from the node whatever the step needs that is not an input's
+    /// value: a stateful node's state, and the sample its last update took. A
+    /// Reduction calls it at each bind(), for each step the bound point runs,
+    /// before any call. The node is clean then, so a pull with eval(ctx)
+    /// returns a cached value. What the step reads here it keeps until the
+    /// next bind(), so that a bound reduction goes on answering for the point
+    /// it was bound at once the node has moved on. The default reads nothing:
+    /// a step whose value is a function of its inputs' values alone has
+    /// nothing to keep.
+    virtual void bind(EvalContext& ctx);
+
+    /// True when bind() reads something. A Reduction asks once, when it is
+    /// built, and calls bind() only on a step that says so.
+    virtual bool binds() const noexcept;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

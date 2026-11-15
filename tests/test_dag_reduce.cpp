@@ -108,6 +108,15 @@ void expectTheGraphsValue(const Graph& g) {
     EXPECT_EQ(there, get_value<double>(moved));
 }
 
+/// The width of a RollingMinMaxNode's range, as a Lazy compute node. The node
+/// gives a reduction a step, and the range gives none, so a reduction through
+/// the width over an argument above the range is refused at the range.
+NodePtr widthOf(std::string name, const NodePtr& range) {
+    return ComputeNode<double, std::pair<double, double>>::make(std::move(name), {range},
+        [](const std::pair<double, double>& minMax) { return minMax.second - minMax.first; },
+        InvalidationMode::Lazy);
+}
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,7 +202,7 @@ TEST(Reduction, IsUnboundUntilABindSucceeds) {
     auto x       = Input<double>::make("x", 2.0);
     auto which   = Input<double>::make("which", 0.0);
     auto inner   = Counted<>::make("inner", x);
-    auto barrier = ts::EWMANode::make("barrier", x, 0.5);
+    auto barrier = widthOf("barrier", ts::RollingMinMaxNode::make("range", x, 4));
     auto root    = Chooser::make("root", which, inner, barrier);
 
     Reduction f(root, {x});
@@ -709,12 +718,12 @@ TEST(Reduction, ABranchNoArgumentReachesIsAConstant) {
 }
 
 // A tweaked node holds its frozen value whatever its inputs do, so it reads
-// none of them: the EWMA above it is never pulled, and is no barrier.
+// none of them: the range above it is never pulled, and is no barrier.
 TEST(Reduction, ATweakedNodeIsAConstant) {
-    auto x        = Input<double>::make("arg.x", 2.0);
-    auto smoothed = ts::EWMANode::make("smoothed", x, 0.5);
+    auto x     = Input<double>::make("arg.x", 2.0);
+    auto range = ts::RollingMinMaxNode::make("range", x, 4);
     int calls = 0;
-    auto lazy = TweakableComputeNode<double, double>::make("node.lazy", {smoothed},
+    auto lazy = TweakableComputeNode<double, double>::make("node.lazy", {widthOf("width", range)},
         [&calls](const double& a) { ++calls; return 10.0 * a; }, InvalidationMode::Lazy);
     auto root = ops::SumNode<>::make("root.out", {lazy, x});
     lazy->tweak(100.0);
@@ -725,8 +734,8 @@ TEST(Reduction, ATweakedNodeIsAConstant) {
     EXPECT_EQ(f.size(), 1u);
     EXPECT_EQ(f({3.0}), 103.0);
     EXPECT_EQ(calls, 0);
-    EXPECT_TRUE(smoothed->dirty());
-    EXPECT_FALSE(smoothed->isInitialized());
+    EXPECT_TRUE(range->dirty());
+    EXPECT_EQ(range->filled(), 0u);
 
     // Untweaked and Lazy, it is called.
     auto called  = TweakableComputeNode<double, double>::make("node.called", {x},
@@ -1217,16 +1226,16 @@ TEST(Reduction, ANodeNoArgumentReachesIsAConstant) {
 // The structure is no barrier: the constructor accepts it. The point is one,
 // because the argument moves a node that has no function to call.
 TEST(Reduction, ANodeThatCannotBeCalledIsABarrier) {
-    auto x    = Input<double>::make("arg.x", 2.0);
-    auto ewma = ts::EWMANode::make("node.ewma", x, 0.5);
-    auto root = ops::NegateNode<>::make("root.out", ewma);
+    auto x     = Input<double>::make("arg.x", 2.0);
+    auto range = ts::RollingMinMaxNode::make("node.range", x, 4);
+    auto root  = ops::NegateNode<>::make("root.out", widthOf("node.width", range));
     EvalContext ctx;
     root->eval(ctx);
 
     Reduction f(root, {x});
     const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
-    EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.ewma")) << why;
-    EXPECT_TRUE(mentions(why, "is a time-series node")) << why;
+    EXPECT_TRUE(mentions(why, "arg.x reaches root root.out through node.range")) << why;
+    EXPECT_TRUE(mentions(why, "is a time-series node that gives no step")) << why;
     EXPECT_FALSE(mentions(why, "Lazy")) << why;   // which a stateful node cannot be
 
     // A Lazy node that gives no step is one too.
@@ -1263,12 +1272,14 @@ TEST(Reduction, ANodeThatIsNotANodeBaseIsABarrier) {
 }
 
 // The Chooser takes `taken`, so it never pulls `other`, which stays dirty.
-// `other` is a barrier over the argument, and the bind does not reach it.
+// `other` is the width of a range over the argument, the range is a barrier,
+// and the bind reaches neither.
 TEST(Reduction, FollowsOnlyTheInputsANodeReads) {
     auto x     = Input<double>::make("x", 2.0);
     auto which = Input<double>::make("which", 0.0);
     auto taken = ops::NegateNode<>::make("taken", x);
-    auto other = ts::EWMANode::make("other", x, 0.5);
+    auto range = ts::RollingMinMaxNode::make("range", x, 4);
+    auto other = widthOf("other", range);
     auto root  = Chooser::make("root", which, taken, other);
     EvalContext ctx;
     root->eval(ctx);
@@ -1278,7 +1289,7 @@ TEST(Reduction, FollowsOnlyTheInputsANodeReads) {
     EXPECT_EQ(f.size(), 2u);   // taken and the Chooser
     EXPECT_EQ(f({5.0}), -5.0);
     EXPECT_TRUE(other->dirty());
-    EXPECT_FALSE(other->isInitialized());
+    EXPECT_EQ(range->filled(), 0u);
 }
 
 // 0·x chooses, so the argument moves what decides which input is read. The
@@ -1312,12 +1323,13 @@ TEST(Reduction, ADecidingInputAnArgumentMovesIsRefusedWhileItsOtherBranchIsStale
 }
 
 // Held, the Chooser reads nothing, so it is a constant, although the argument
-// is above it. Its inputs are never pulled, and the barrier among them is never
-// reached: the EWMA is still as it was built.
+// is above it. Its inputs are never pulled, and the barrier above one of them
+// is never reached: the range is still as it was built.
 TEST(Reduction, ANodeThatReadsNothingIsAConstant) {
     auto x      = Input<double>::make("x", 2.0);
-    auto ewma   = ts::EWMANode::make("ewma", x, 0.5);
-    auto held   = Chooser::make("held", Input<double>::make("which", 0.0), ewma, x);
+    auto range  = ts::RollingMinMaxNode::make("range", x, 4);
+    auto held   = Chooser::make("held", Input<double>::make("which", 0.0),
+                                widthOf("width", range), x);
     auto root   = ops::ProductNode<>::make("root", {held, x});
     held->hold(7.0);
     EvalContext ctx;
@@ -1326,8 +1338,8 @@ TEST(Reduction, ANodeThatReadsNothingIsAConstant) {
     Reduction f = reduce(root, {x});
     EXPECT_EQ(f.size(), 1u);
     EXPECT_EQ(f({3.0}), 21.0);
-    EXPECT_TRUE(ewma->dirty());
-    EXPECT_FALSE(ewma->isInitialized());
+    EXPECT_TRUE(range->dirty());
+    EXPECT_EQ(range->filled(), 0u);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1363,10 +1375,10 @@ TEST(ReduceContract, ReadsRecordsWhatANodeNames) {
 // a node a barrier, and every input read.
 TEST(ReduceContract, ANodeGivesNoStepUnlessItSaysOtherwise) {
     using Use = ReduceReads::Use;
-    auto x    = Input<double>::make("x", 1.0);
-    auto ewma = ts::EWMANode::make("ewma", x, 0.5);
+    auto x     = Input<double>::make("x", 1.0);
+    auto range = ts::RollingMinMaxNode::make("range", x, 4);
     EXPECT_EQ(x->reduceStep(), nullptr);
-    EXPECT_EQ(ewma->reduceStep(), nullptr);
+    EXPECT_EQ(range->reduceStep(), nullptr);
 
     // An op gives a step, and does not say what it reads.
     auto sum = ops::SumNode<>::make("sum", {x, x, x});

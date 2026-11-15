@@ -128,6 +128,10 @@ inline ReduceReads::Use& ReduceReads::at(std::size_t input) {
 
 inline bool IReduceStep::partials(const ReduceInputs&, aad::Partials&) { return false; }
 
+inline void IReduceStep::bind(EvalContext&) {}
+
+inline bool IReduceStep::binds() const noexcept { return false; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // NodeBase: the reduction hooks and the derivative hook
 // ─────────────────────────────────────────────────────────────────────────────
