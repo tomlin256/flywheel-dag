@@ -1,8 +1,9 @@
 # Close Out the Differentiable Subgraphs Milestone
 
-**Status: Proposed (2026-11-15), awaiting approval.** No implementation has started. Everything under "Measured" was
-taken read-only at `ff19003`, in scratch copies and by hand-made builds outside the checkout. The prototypes were not
-kept, so the code is written again from this plan, test first.
+**Status: Approved (2026-11-15), as written, so D1 to D15 stand at their defaults.** The Progress table at the end
+says where each step stands. Everything under "Measured" was taken read-only at `ff19003`, in scratch copies and by
+hand-made builds outside the checkout. The prototypes are kept outside the checkout, and the code is written again
+from this plan, test first.
 
 Closes [flywheel-dag#11](https://github.com/tomlin256/flywheel-dag/issues/11),
 [flywheel-dag#13](https://github.com/tomlin256/flywheel-dag/issues/13),
@@ -588,7 +589,9 @@ D15 is a cost I would rather you saw now than at the release.
   derivative through one of nine stateful nodes, a reduction through six, and a bind at a condition an argument
   moves where the other branch is clean. A program that relied on the throw sees a value. *Alternative:* leave the
   release until you ask.
-- **D13. Two issues to open at approval**, each with the figures above, `enhancement` and `aad`, and no milestone:
+- **D13. Two issues to open at approval**, each with the figures above, `enhancement` and `aad`, and no milestone
+  (opened: [flywheel-dag#81](https://github.com/tomlin256/flywheel-dag/issues/81) and
+  [flywheel-dag#82](https://github.com/tomlin256/flywheel-dag/issues/82)):
   neither is a step of this plan, and the other open milestone is about the engine's threads and lifecycle.
   - derivatives through the state, over time (D2);
   - the engine's own nodes giving their partials through `NodeBase::partials()` and dropping the `IDifferentiable`
@@ -958,3 +961,17 @@ milestone`.
   runs over each before its push.
 - **Assumptions:** graphs are not rewired after they are built; CI stays on `ubuntu-latest` and `macos-latest`; LLVM
   23 stays the lint gate's major.
+
+## Progress
+
+| Step | Status | Notes |
+|---|---|---|
+| 1 The plan | Done | Approved 2026-11-15 as written, so D1 to D15 stand at their defaults. Pushed, and each of the five issues names this file. The two issues of D13 are flywheel-dag#81 (derivatives through the state, over time) and flywheel-dag#82 (the `IDifferentiable` base off the engine's nodes), each `enhancement` and `aad` with no milestone. |
+| 2 flywheel-dag#11: a tape through the stateful nodes | Not started | |
+| 3 flywheel-dag#13: a tape that is kept | Not started | |
+| 4 flywheel-dag#75: several roots | Not started | |
+| 5 flywheel-dag#76: a condition an argument moves | Not started | |
+| 6 flywheel-dag#11: a reduction through the stateful nodes | Not started | |
+| 7 flywheel-dag#74: `ReductionNode` | Not started | |
+| 8 Example and docs | Not started | |
+| 9 Release v1.4.0, and close out | Not started | |
