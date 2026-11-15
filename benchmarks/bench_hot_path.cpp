@@ -7,7 +7,7 @@
 // full license information.
 // =============================================================================
 
-// bench_hot_path.cpp — what one engine cycle costs, on five generic workloads.
+// bench_hot_path.cpp — what one engine cycle costs, on six generic workloads.
 //
 // A measurement tool, not a test: it is EXCLUDE_FROM_ALL and not registered
 // with ctest, because a wall-clock threshold would make ctest flaky. Run it by
@@ -53,6 +53,7 @@
 #include "bench_report.hpp"
 
 #include <flywheel/dag.hpp>
+#include <flywheel/dag_aad.hpp>
 #include <flywheel/dag_async.hpp>
 #include <flywheel/dag_engine.hpp>
 #include <flywheel/dag_ops.hpp>
@@ -381,6 +382,74 @@ bench::Row opsCompute(long cycles) { return opsRow("ops-compute", cycles, Fold::
 bench::Row opsMoving(long cycles)  { return opsRow("ops-moving", cycles, Fold::Op, 0.0); }
 bench::Row opsHeld(long cycles)    { return opsRow("ops-held", cycles, Fold::Op, kCap); }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// gradient, tangent — a derivative pass on every cycle.
+//
+//   a ── EWMANode ── level ─┬────────────┐
+//                           ├─ blend ─┬─ area ─┬─ area − √blend = root
+//   b ──────────────────────┴─────────┴────────┘
+//
+//     blend = level·b + √level / b     a DifferentiableNode, on dual numbers
+//     area  = blend · level · b        a ProductNode of three
+//
+// One graph, two rows, each with a sensitivity node as its one output. Both
+// sources move on every cycle, so the node recomputes on every cycle: it pulls
+// its roots, records its tape again, sweeps it, and delivers.
+//
+//   gradient  a GradientNode: ∂root/∂a and ∂root/∂b, from one reverse sweep.
+//   tangent   a TangentNode: root's and blend's derivative along a, from one
+//             forward sweep.
+//
+// The pass goes through a stateful node, whose partial is its α, through a
+// functor differentiated on duals, and through an n-ary product, whose partials
+// need every factor at once. Its allocs/cycle is 0, which holds the tape the
+// node keeps, the vector it sweeps into, and the working storage a pass lends
+// an n-ary node. The values and the partials are nothing but +, −, ×, ÷ and
+// sqrt, so the checksum is the same everywhere.
+// ─────────────────────────────────────────────────────────────────────────────
+enum class Sweep : std::uint8_t { Reverse, Forward };
+
+bench::Row sensitivityRow(const char* name, long cycles, Sweep sweep) {
+    async::Engine engine;
+    auto a = async::AsyncInput<double>::make("a", 1.0);
+    auto b = async::AsyncInput<double>::make("b", 2.0);
+    engine.addSource(a);
+    engine.addSource(b);
+
+    auto level = ts::EWMANode::make("a.level", a, 0.25);
+    auto blend = aad::DifferentiableNode<2>::make(
+        "blend", {level, b},
+        [](const auto& x, const auto& y) {
+            using std::sqrt;
+            return x * y + sqrt(x) / y;
+        });
+    auto area = ops::ProductNode<double>::make("area", {blend, level, b});
+    auto root = ops::DiffNode<double>::make(
+        "area-sqrt(blend)", area, ops::SqrtNode<double>::make("sqrt(blend)", blend));
+
+    NodePtr sensitivities;
+    if (sweep == Sweep::Reverse)
+        sensitivities = aad::GradientNode::make("d(root)", root, {a, b});
+    else
+        sensitivities = aad::TangentNode::make("along a", {root, blend}, {{a, 1.0}});
+
+    double sink  = 0.0;
+    long   fired = 0;
+    engine.addOutput<std::vector<double>>(sensitivities, [&](const std::vector<double>& d) {
+        sink += d[0] + d[1];
+        ++fired;
+    });
+
+    return measure(name, cycles, sink, fired, [&](long i) {
+        a->post(1.5 + 0.5 * noise(i));        // in [1, 2)
+        b->post(2.0 + 0.5 * noise(-i - 1));   // in [1.5, 2.5)
+        engine.step();
+    });
+}
+
+bench::Row gradient(long cycles) { return sensitivityRow("gradient", cycles, Sweep::Reverse); }
+bench::Row tangent(long cycles)  { return sensitivityRow("tangent", cycles, Sweep::Forward); }
+
 }  // namespace
 
 int main(int argc, char** argv) try {
@@ -401,6 +470,8 @@ int main(int argc, char** argv) try {
         opsCompute(options.cycles),
         opsMoving(options.cycles),
         opsHeld(options.cycles),
+        gradient(options.cycles),
+        tangent(options.cycles),
     };
 
     const std::string out = options.invariants ? bench::invariants(options.cycles, rows)

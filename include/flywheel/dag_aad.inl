@@ -18,131 +18,183 @@ namespace dag::aad {
 // Tape
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Recording evaluates nothing, so checking each root as add() reaches it is
+// Recording evaluates nothing, so checking each root as record() reaches it is
 // checking all of them at once.
-inline Tape::Tape(const std::vector<NodePtr>& roots) {
-    roots_.reserve(roots.size());
-    for (const auto& root : roots) add(root);
+inline Tape::Tape(const std::vector<NodePtr>& roots) : roots_(roots) {
+    rootPosition_.reserve(roots_.size());
+    record();
+}
+
+inline Tape::Tape(std::vector<NodePtr> roots, Unrecorded) : roots_(std::move(roots)) {
+    rootPosition_.reserve(roots_.size());
 }
 
 inline std::size_t Tape::size() const noexcept { return entries_.size(); }
 
-namespace detail {
-
-/// A node's local partials, asked the way the node gives them: through
-/// NodeBase::partials() for a node that derives NodeBase, and through
-/// IDifferentiable for any other.
-inline bool askPartials(INode& node, EvalContext& ctx, Partials& out) {
-    if (auto* base = dynamic_cast<NodeBase*>(&node)) return base->partials(ctx, out);
-    if (auto* d = dynamic_cast<IDifferentiable*>(&node)) return d->partials(ctx, out);
-    return false;
+// Each root is checked clean before it is recorded, and a clean node's named
+// inputs are clean too: an input that moves invalidates its consumers, and a
+// node does not end an evaluation clean over an input that went dirty again.
+// So recordRoot()'s walk reads clean nodes alone.
+inline void Tape::record() {
+    restart();
+    for (std::size_t i = 0; i < roots_.size(); ++i) {
+        const NodePtr& root = roots_[i];
+        if (!root) throw std::invalid_argument("aad::Tape: a root is null");
+        if (root->dirty())
+            throw std::invalid_argument("aad::Tape: root " + root->name()
+                + " is dirty. A tape reads only evaluated values: evaluate it first");
+        recordRoot(i);
+    }
 }
 
-} // namespace detail
+// A new epoch takes every node off the tape at once: a node is on it only while
+// its stamp is the current one. The vectors keep their capacity. The stacks are
+// emptied too, because a record that threw part of the way left them as they
+// were.
+inline void Tape::restart() {
+    ++epoch_;
+    rootPosition_.clear();
+    entries_.clear();
+    edges_.clear();
+    stack_.clear();
+    named_.clear();
+}
 
-// add() checks the root clean, and a clean node's named inputs are clean too: an
-// input that moves invalidates its consumers, and a node does not end an
-// evaluation clean over an input that went dirty again. So record()'s walk reads
-// clean nodes alone.
-inline void Tape::add(const NodePtr& root) {
-    if (!root) throw std::invalid_argument("aad::Tape: a root is null");
-    if (root->dirty())
-        throw std::invalid_argument("aad::Tape: root " + root->name()
-            + " is dirty. A tape reads only evaluated values: evaluate it first");
-    record(root);
+inline std::size_t Tape::meet(const NodePtr& node) {
+    const auto found = index_.find(node.get());
+    if (found != index_.end()) return found->second;
+    Known k;
+    k.node = node;
+    // The two ways a node gives its partials: one that derives NodeBase through
+    // NodeBase::partials(), and any other through the IDifferentiable mixin.
+    k.base = std::dynamic_pointer_cast<NodeBase>(node);
+    if (!k.base) k.mixin = std::dynamic_pointer_cast<IDifferentiable>(node);
+    known_.push_back(std::move(k));
+    index_.emplace(node.get(), known_.size() - 1);
+    return known_.size() - 1;
+}
+
+// meet() can grow known_, so the node is reached by its place and not through a
+// reference held across the loop.
+inline void Tape::expand(std::size_t node) {
+    if (known_[node].expanded) return;
+    const std::vector<NodePtr> ins = known_[node].node->inputs();
+    const std::size_t first = inputs_.size();
+    for (const auto& in : ins) {
+        const std::size_t place = meet(in);
+        inputs_.push_back(place);
+    }
+    known_[node].firstInput = first;
+    known_[node].lastInput  = inputs_.size();
+    known_[node].expanded   = true;
+}
+
+// The walk reads each node twice when it first reaches it: eval() to learn what
+// the node holds, and partials(). Both read a clean node, so both return cached
+// values. The inputs its partials name go on named_, above those of every frame
+// below it.
+inline void Tape::visit(std::size_t node, EvalContext& ctx) {
+    if (known_[node].recorded == epoch_) return;   // on the tape, or on the stack
+    known_[node].recorded = epoch_;
+    known_[node].position = kWalking;
+
+    const ValuePtr v = known_[node].node->eval(ctx);
+    Frame f{node, named_.size(), named_.size(), named_.size(), false,
+            v && v->type() == std::type_index(typeid(double))};
+    expand(node);
+    const Known& k = known_[node];   // nothing below grows known_
+    const std::size_t inputs = k.lastInput - k.firstInput;
+    if (inputs != 0) {
+        partials_.clear();
+        const bool said = k.base ? k.base->partials(ctx, partials_)
+                                 : (k.mixin && k.mixin->partials(ctx, partials_));
+        if (said) {
+            for (const auto& e : partials_.entries()) {
+                if (e.input >= inputs)
+                    throw std::logic_error("aad::Tape: " + k.node->name() + " names input "
+                        + std::to_string(e.input) + " of its " + std::to_string(inputs));
+                named_.push_back({inputs_[k.firstInput + e.input], e.d});
+            }
+        } else {
+            f.barrier = true;
+        }
+    }
+    f.lastNamed = named_.size();
+    stack_.push_back(f);
 }
 
 // A depth-first walk up from the root, without recursion. It finishes a node
 // only after every input its partials name, so each node lands on the tape
 // after all of them. A node the tape already holds is not walked again: an
-// earlier add() recorded it, with everything it names.
+// earlier root recorded it, with everything it names.
 //
-// The walk reads each node twice when it first reaches it: eval() to learn what
-// the node holds, and partials(). Both read a clean node, so both return cached
-// values.
-//
-// No clean check: a sensitivity node records the root it has just pulled. A
-// root that an always-dirty node reaches by two paths stays dirty after its own
-// pull, and the walk's eval() and partials() then evaluate what went dirty
-// again, as they evaluate any always-dirty node they meet.
-inline void Tape::record(const NodePtr& root) {
+// No clean check: see the declaration.
+inline void Tape::recordRoot(std::size_t i) {
+    const NodePtr& root = roots_[i];
     EvalContext ctx;
     const ValuePtr rootValue = root->eval(ctx);
     if (!rootValue || rootValue->type() != std::type_index(typeid(double)))
         throw std::invalid_argument("aad::Tape: root " + root->name()
             + " does not hold a double");
 
-    Partials partials;
-
-    struct Frame {
-        NodePtr node;
-        std::vector<std::pair<NodePtr, double>> named;   ///< the inputs its partials name
-        std::size_t next = 0;                            ///< the next of them to walk
-        bool barrier = false;
-        bool holdsDouble = false;
-    };
-    std::vector<Frame> stack;
-    std::unordered_set<const INode*> walking;   ///< reached by this call, not yet on the tape
-
-    const auto visit = [&](const NodePtr& n) {
-        if (position_.count(n.get()) != 0 || !walking.insert(n.get()).second) return;
-        Frame f;
-        f.node = n;
-        const ValuePtr v = n->eval(ctx);
-        f.holdsDouble = v && v->type() == std::type_index(typeid(double));
-        const std::vector<NodePtr> ins = n->inputs();
-        if (!ins.empty()) {
-            partials.clear();
-            if (detail::askPartials(*n, ctx, partials)) {
-                for (const auto& e : partials.entries()) {
-                    if (e.input >= ins.size())
-                        throw std::logic_error("aad::Tape: " + n->name() + " names input "
-                            + std::to_string(e.input) + " of its "
-                            + std::to_string(ins.size()));
-                    f.named.emplace_back(ins[e.input], e.d);
-                }
-            } else {
-                f.barrier = true;
-            }
-        }
-        stack.push_back(std::move(f));
-    };
-
-    visit(root);
-    while (!stack.empty()) {
-        Frame& top = stack.back();
-        if (top.next < top.named.size()) {
-            // A copy, not a reference: visit() can grow the stack and move top.
-            const NodePtr in = top.named[top.next++].first;
-            visit(in);
+    const std::size_t rootPlace = meet(root);
+    visit(rootPlace, ctx);
+    while (!stack_.empty()) {
+        // A copy, not a reference: visit() can grow the stack and move the frame.
+        const Frame top = stack_.back();
+        if (top.next < top.lastNamed) {
+            ++stack_.back().next;
+            visit(named_[top.next].node, ctx);
             continue;
         }
         Entry e{top.node, edges_.size(), 0, top.barrier, top.holdsDouble};
-        for (const auto& [in, d] : top.named)
-            edges_.push_back({position_.at(in.get()), d});
+        for (std::size_t n = top.firstNamed; n < top.lastNamed; ++n) {
+            const Known& in = known_[named_[n].node];
+            // Every named input has been walked, so it is on the tape, unless
+            // it is still on the stack: a node that names itself, directly or
+            // through others.
+            if (in.position == kWalking)
+                throw std::logic_error("aad::Tape: " + known_[top.node].node->name()
+                    + " depends on itself, through " + in.node->name());
+            edges_.push_back({in.position, named_[n].d});
+        }
         e.lastEdge = edges_.size();
-        position_.emplace(top.node.get(), entries_.size());
-        entries_.push_back(std::move(e));
-        stack.pop_back();
+        known_[top.node].position = entries_.size();
+        entries_.push_back(e);
+        named_.resize(top.firstNamed);   // its named inputs were the last on named_
+        stack_.pop_back();
     }
-    roots_.push_back(root);
+    rootPosition_.push_back(known_[rootPlace].position);
+}
+
+inline void Tape::requireRecorded() const {
+    if (rootPosition_.size() != roots_.size())
+        throw std::logic_error("aad::Tape: the last record() did not finish, so the tape"
+                               " holds no recording: record() it again");
 }
 
 inline std::size_t Tape::rootPosition(const NodePtr& root) const {
-    for (const auto& r : roots_)
-        if (r == root) return position_.at(r.get());
+    for (std::size_t i = 0; i < roots_.size(); ++i)
+        if (roots_[i] == root) return rootPosition_[i];
     throw std::invalid_argument("aad::Tape: " + (root ? root->name() : std::string("null"))
                                 + " is not one of the tape's roots");
 }
 
-inline void Tape::checkWrt(const std::vector<NodePtr>& wrt) const {
-    for (const auto& w : wrt) {
-        if (!w) throw std::invalid_argument("aad::Tape: a wrt node is null");
-        const auto it = position_.find(w.get());
-        if (it != position_.end() && !entries_[it->second].holdsDouble)
-            throw std::invalid_argument("aad::Tape: wrt " + w->name()
-                                        + " does not hold a double");
-    }
+// A node is on the tape while its stamp is the current record's. A finished
+// record leaves none walking.
+inline std::size_t Tape::positionOf(const NodePtr& node) const {
+    const auto found = index_.find(node.get());
+    if (found == index_.end()) return kNone;
+    const Known& k = known_[found->second];
+    return k.recorded == epoch_ ? k.position : kNone;
+}
+
+inline void Tape::checkWrt(const NodePtr& wrt) const {
+    if (!wrt) throw std::invalid_argument("aad::Tape: a wrt node is null");
+    const std::size_t at = positionOf(wrt);
+    if (at != kNone && !entries_[at].holdsDouble)
+        throw std::invalid_argument("aad::Tape: wrt " + wrt->name()
+                                    + " does not hold a double");
 }
 
 // The root's adjoint is 1. Each node the root reaches, from the root down,
@@ -153,76 +205,145 @@ inline void Tape::checkWrt(const std::vector<NodePtr>& wrt) const {
 // Only the root's own positions are swept: every node it reaches is recorded
 // before it. A node after the root belongs to a later root, and a node before
 // it that the root does not reach keeps an adjoint of 0.
-inline std::vector<double> Tape::adjoints(const NodePtr& root,
-                                          const std::vector<NodePtr>& wrt) const {
-    const std::size_t top = rootPosition(root);
-    checkWrt(wrt);
-
-    std::vector<bool>   reached(top + 1, false);
-    std::vector<double> adj(top + 1, 0.0);
-    reached[top] = true;
-    adj[top]     = 1.0;
+inline void Tape::sweepReverse(std::size_t top, std::vector<std::uint32_t>& reached,
+                               std::vector<double>& adjoint) const {
+    reached.assign(top + 1, std::uint32_t{0});
+    adjoint.assign(top + 1, 0.0);
+    reached[top] = 1;
+    adjoint[top] = 1.0;
     for (std::size_t i = top + 1; i-- > 0;) {
-        if (!reached[i]) continue;
+        if (reached[i] == 0) continue;
         const Entry& e = entries_[i];
-        const double a = adj[i];
+        const double a = adjoint[i];
         for (std::size_t k = e.firstEdge; k < e.lastEdge; ++k) {
-            reached[edges_[k].input] = true;
+            reached[edges_[k].input] = 1;
             // A partial times an adjoint is 0 when either is 0, so neither 0·∞
             // nor 0·NaN makes a NaN. A NaN that is not multiplied by 0 does
             // propagate.
             const double d = edges_[k].d;
-            if (a != 0.0 && d != 0.0) adj[edges_[k].input] += d * a;
+            if (a != 0.0 && d != 0.0) adjoint[edges_[k].input] += d * a;
         }
     }
-    checkBarriers("root " + root->name(), reached, wrt);
+}
+
+// Each node, from the leaves up, adds each partial times the tangent of the
+// input it names to its own, which holds its seed on entry. Every input sits
+// earlier on the tape, so its tangent is complete first.
+inline void Tape::sweepForward(std::vector<double>& tangent) const {
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& e = entries_[i];
+        double sum = tangent[i];
+        for (std::size_t k = e.firstEdge; k < e.lastEdge; ++k) {
+            // As in sweepReverse(): a partial times a tangent is 0 when either is 0.
+            const double tin = tangent[edges_[k].input];
+            const double d   = edges_[k].d;
+            if (tin != 0.0 && d != 0.0) sum += d * tin;
+        }
+        tangent[i] = sum;
+    }
+}
+
+inline std::vector<double> Tape::adjoints(const NodePtr& root,
+                                          const std::vector<NodePtr>& wrt) const {
+    requireRecorded();
+    const std::size_t top = rootPosition(root);
+    for (const auto& w : wrt) checkWrt(w);
+
+    std::vector<std::uint32_t> reached;
+    std::vector<double>       adjoint;
+    sweepReverse(top, reached, adjoint);
+    checkBarriers("root " + root->name(), top + 1,
+                  [&reached](std::size_t i) { return reached[i] != 0; }, wrt);
 
     std::vector<double> out;
     out.reserve(wrt.size());
     for (const auto& w : wrt) {
-        const auto it = position_.find(w.get());
-        const bool reachable = it != position_.end() && it->second <= top;
-        out.push_back(reachable ? adj[it->second] : 0.0);
+        const std::size_t at = positionOf(w);
+        out.push_back(at != kNone && at <= top ? adjoint[at] : 0.0);
     }
     return out;
 }
 
-// Each seed adds its tangent to its node. Then each node, from the leaves up,
-// adds each partial times the tangent of the input it names to its own. Every
-// input sits earlier on the tape, so its tangent is complete first.
+// The sweep of the function above, in the tape's own storage. A wrt node the
+// tape has not met is given a place in known_, so that the barrier check can
+// tell it from the nodes it walks: that allocates once for such a node, and not
+// again.
+inline void Tape::adjoints(const NodePtr& root, std::span<const NodePtr> wrt,
+                           std::span<double> out) {
+    if (out.size() != wrt.size())
+        throw std::invalid_argument("aad::Tape: " + std::to_string(wrt.size())
+            + " wrt nodes, and room for " + std::to_string(out.size()) + " adjoints");
+    requireRecorded();
+    const std::size_t top = rootPosition(root);
+    for (const auto& w : wrt) checkWrt(w);
+
+    sweepReverse(top, reached_, adjoint_);
+    if (!wrt.empty()) {
+        ++sweep_;
+        for (const auto& w : wrt) {
+            const std::size_t place = meet(w);
+            known_[place].wanted = sweep_;
+        }
+        checkKeptBarriers(&root, top + 1, [this](std::size_t i) { return reached_[i] != 0; });
+    }
+
+    for (std::size_t k = 0; k < wrt.size(); ++k) {
+        const std::size_t at = positionOf(wrt[k]);
+        out[k] = at != kNone && at <= top ? adjoint_[at] : 0.0;
+    }
+}
+
+// Each seed adds its tangent to its node, and sweepForward() carries them up.
 //
 // A seed on an intermediate node adds to the tangent that reaches it, rather
 // than replacing it. That keeps this sweep the exact dual of adjoints(): a
 // root's tangent is Σ seed · adjoint.
 inline std::vector<double> Tape::tangents(const std::vector<Seed>& seeds) const {
+    requireRecorded();
     std::vector<NodePtr> seeded;
     seeded.reserve(seeds.size());
     for (const auto& s : seeds) seeded.push_back(s.node);
-    checkWrt(seeded);
+    for (const auto& w : seeded) checkWrt(w);
     // One forward sweep serves every root, so every barrier on the tape counts.
-    checkBarriers("a root", std::vector<bool>(entries_.size(), true), seeded);
+    checkBarriers("a root", entries_.size(), [](std::size_t) { return true; }, seeded);
 
     std::vector<double> t(entries_.size(), 0.0);
     for (const auto& s : seeds) {
-        const auto it = position_.find(s.node.get());
-        if (it != position_.end()) t[it->second] += s.tangent;
+        const std::size_t at = positionOf(s.node);
+        if (at != kNone) t[at] += s.tangent;
     }
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-        const Entry& e = entries_[i];
-        double sum = t[i];
-        for (std::size_t k = e.firstEdge; k < e.lastEdge; ++k) {
-            // As in adjoints(): a partial times a tangent is 0 when either is 0.
-            const double tin = t[edges_[k].input];
-            const double d   = edges_[k].d;
-            if (tin != 0.0 && d != 0.0) sum += d * tin;
-        }
-        t[i] = sum;
-    }
+    sweepForward(t);
 
     std::vector<double> out;
     out.reserve(roots_.size());
-    for (const auto& r : roots_) out.push_back(t[position_.at(r.get())]);
+    for (const std::size_t at : rootPosition_) out.push_back(t[at]);
     return out;
+}
+
+// The sweep of the function above, in the tape's own storage.
+inline void Tape::tangents(std::span<const Seed> seeds, std::span<double> out) {
+    if (out.size() != roots_.size())
+        throw std::invalid_argument("aad::Tape: " + std::to_string(roots_.size())
+            + " roots, and room for " + std::to_string(out.size()) + " tangents");
+    requireRecorded();
+    for (const auto& s : seeds) checkWrt(s.node);
+    if (!seeds.empty()) {
+        ++sweep_;
+        for (const auto& s : seeds) {
+            const std::size_t place = meet(s.node);
+            known_[place].wanted = sweep_;
+        }
+        // One forward sweep serves every root, so every barrier on the tape counts.
+        checkKeptBarriers(nullptr, entries_.size(), [](std::size_t) { return true; });
+    }
+
+    tangent_.assign(entries_.size(), 0.0);
+    for (const auto& s : seeds) {
+        const std::size_t at = positionOf(s.node);
+        if (at != kNone) tangent_[at] += s.tangent;
+    }
+    sweepForward(tangent_);
+    for (std::size_t i = 0; i < roots_.size(); ++i) out[i] = tangent_[rootPosition_[i]];
 }
 
 // A wrt node upstream of a barrier that the sweep reaches has a derivative
@@ -230,26 +351,56 @@ inline std::vector<double> Tape::tangents(const std::vector<Seed>& seeds) const 
 // incomplete. The walk follows inputs(), which reads no value. One visited set
 // serves every barrier: a node already walked from one barrier has no wrt node
 // above it, or the walk would have thrown there.
-inline void Tape::checkBarriers(const std::string& target, const std::vector<bool>& reached,
-                                const std::vector<NodePtr>& wrt) const {
+template<typename Reached>
+void Tape::checkBarriers(const std::string& target, std::size_t count, Reached&& reached,
+                         const std::vector<NodePtr>& wrt) const {
     if (wrt.empty()) return;
     std::unordered_set<const INode*> wanted;
     for (const auto& w : wrt) wanted.insert(w.get());
 
     std::unordered_set<const INode*> visited;
     std::vector<NodePtr> frontier;
-    for (std::size_t i = 0; i < reached.size(); ++i) {
+    for (std::size_t i = 0; i < count; ++i) {
         const Entry& e = entries_[i];
-        if (!reached[i] || !e.barrier) continue;
-        frontier = e.node->inputs();
+        if (!reached(i) || !e.barrier) continue;
+        const NodePtr& barrier = known_[e.node].node;
+        frontier = barrier->inputs();
         while (!frontier.empty()) {
             const NodePtr n = std::move(frontier.back());
             frontier.pop_back();
             if (!visited.insert(n.get()).second) continue;
             if (wanted.count(n.get()) != 0)
                 throw std::domain_error("aad::Tape: " + n->name() + " reaches " + target
-                    + " through " + e.node->name() + ", which has no partials");
+                    + " through " + barrier->name() + ", which has no partials");
             for (auto& m : n->inputs()) frontier.push_back(std::move(m));
+        }
+    }
+}
+
+// The walk of the function above, in the same order, over the inputs the tape
+// keeps: a node is expanded the first time a walk comes to it. The sweep's stamp
+// stands for the two sets: a node is wanted, or visited, when it carries it.
+template<typename Reached>
+void Tape::checkKeptBarriers(const NodePtr* root, std::size_t count, Reached&& reached) {
+    frontier_.clear();
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!reached(i) || !entries_[i].barrier) continue;
+        const std::size_t barrier = entries_[i].node;
+        // A barrier has inputs, so the record expanded it.
+        for (std::size_t k = known_[barrier].firstInput; k < known_[barrier].lastInput; ++k)
+            frontier_.push_back(inputs_[k]);
+        while (!frontier_.empty()) {
+            const std::size_t n = frontier_.back();
+            frontier_.pop_back();
+            if (known_[n].visited == sweep_) continue;
+            known_[n].visited = sweep_;
+            if (known_[n].wanted == sweep_)
+                throw std::domain_error("aad::Tape: " + known_[n].node->name() + " reaches "
+                    + (root ? "root " + (*root)->name() : std::string("a root"))
+                    + " through " + known_[barrier].node->name() + ", which has no partials");
+            expand(n);   // can grow known_ and inputs_: no reference is held across it
+            for (std::size_t k = known_[n].firstInput; k < known_[n].lastInput; ++k)
+                frontier_.push_back(inputs_[k]);
         }
     }
 }
@@ -602,24 +753,30 @@ inline GradientNodePtr GradientNode::make(std::string name, NodePtr root,
 inline GradientNode::GradientNode(std::string name, NodePtr root, std::vector<NodePtr> wrt,
                                   EqualityPolicyPtr eq)
     : NodeBase(InvalidationMode::Eager), name_(std::move(name)), root_(std::move(root))
-    , wrt_(std::move(wrt)), eq_(std::move(eq)) {}
+    , wrt_(std::move(wrt)), eq_(std::move(eq))
+    , tape_(std::vector<NodePtr>{root_}, Tape::Unrecorded{})
+    , gradient_(wrt_.size(), 0.0) {}
 
 // Pulling the root leaves it clean, so the tape reads it and evaluates nothing
 // more. A throw from the tape leaves this node dirty, and cached_ as it was.
 //
 // A node that is always dirty is the exception. Reaching the root by two paths,
-// it leaves the root dirty after its own pull, which record() allows. And the
-// tape's pull evaluates it again, which can mark the root dirty again. This node
-// then hears a "maybe", and endEval() keeps it dirty and tells its consumers:
-// marked clean, it would never see the next change, which stops at the root
-// because the root is already dirty.
+// it leaves the root dirty after its own pull, which recordRoot() allows. And
+// the tape's pull evaluates it again, which can mark the root dirty again. This
+// node then hears a "maybe", and endEval() keeps it dirty and tells its
+// consumers: marked clean, it would never see the next change, which stops at
+// the root because the root is already dirty.
+//
+// The gradient is emitted by copy: copy-assigning into the slot's buffer reuses
+// its storage, where a moved-in vector would replace it.
 inline ValuePtr GradientNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
     beginEval();
     root_->eval(ctx);
-    Tape tape;
-    tape.record(root_);
-    const ValuePtr newV = slot_.emit(tape.adjoints(root_, wrt_));
+    tape_.restart();
+    tape_.recordRoot(0);
+    tape_.adjoints(root_, wrt_, gradient_);
+    const ValuePtr newV = slot_.emit(std::as_const(gradient_));
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();
@@ -659,22 +816,27 @@ inline TangentNodePtr TangentNode::make(std::string name, std::vector<NodePtr> r
 inline TangentNode::TangentNode(std::string name, std::vector<NodePtr> roots,
                                 std::vector<Seed> seeds, EqualityPolicyPtr eq)
     : NodeBase(InvalidationMode::Eager), name_(std::move(name)), roots_(std::move(roots))
-    , seeds_(std::move(seeds)), eq_(std::move(eq)) {}
+    , seeds_(std::move(seeds)), eq_(std::move(eq))
+    , tape_(roots_, Tape::Unrecorded{})
+    , tangents_(roots_.size(), 0.0) {}
 
 // Each root is recorded right after its pull. A later root's pull evaluates
 // only nodes the tape does not hold yet, an always-dirty node apart, so it moves
 // nothing else the tape recorded. It can leave an earlier root dirty again,
 // through an always-dirty node that reaches both. The node then hears a
 // "maybe", and endEval() keeps it dirty, as for a GradientNode.
+//
+// The tangents are emitted by copy, for GradientNode's reason.
 inline ValuePtr TangentNode::eval(EvalContext& ctx) {
     if (!dirty() && !ctx.forceRecompute) return cached_;
     beginEval();
-    Tape tape;
-    for (const auto& root : roots_) {
-        root->eval(ctx);
-        tape.record(root);
+    tape_.restart();
+    for (std::size_t i = 0; i < roots_.size(); ++i) {
+        roots_[i]->eval(ctx);
+        tape_.recordRoot(i);
     }
-    const ValuePtr newV = slot_.emit(tape.tangents(seeds_));
+    tape_.tangents(seeds_, tangents_);
+    const ValuePtr newV = slot_.emit(std::as_const(tangents_));
     if (!eq_->equal(cached_, newV)) {
         cached_ = newV;
         notifyDownstream();

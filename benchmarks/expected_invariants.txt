@@ -6,3 +6,5 @@ solve allocs/cycle=0 callbacks=200000 checksum=1341290.0460180121
 ops-compute allocs/cycle=0 callbacks=200000 checksum=9333831.3161690123
 ops-moving allocs/cycle=0 callbacks=200000 checksum=9333831.3161690123
 ops-held allocs/cycle=0 callbacks=0 checksum=0
+gradient allocs/cycle=0 callbacks=200000 checksum=2422144.5540557634
+tangent allocs/cycle=0 callbacks=200000 checksum=785635.84108931082

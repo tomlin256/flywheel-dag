@@ -843,14 +843,28 @@ public:
         double      d;       ///< ∂value/∂inputs()[input]
     };
 
+    /// Two vectors a node may fill and read while it works its partials out,
+    /// for a node that needs every input's value at once, as a product does.
+    /// They are the node's to resize and overwrite for the length of one
+    /// partials() call, and hold nothing a caller may read afterwards.
+    struct Work {
+        std::vector<double> x;    ///< by convention, the inputs' values
+        std::vector<double> dx;   ///< and the partials worked out from them
+    };
+
     void add(std::size_t input, double d);
     const std::vector<Entry>& entries() const noexcept;
     /// Empties the list and keeps its capacity, so a pass reuses one Partials
     /// for every node it asks.
     void clear() noexcept;
+    /// The working storage. A pass keeps one Partials for every node it asks,
+    /// so the two vectors keep their capacity from one node to the next, and a
+    /// node that borrows them allocates nothing once they are large enough.
+    Work& work() noexcept;
 
 private:
     std::vector<Entry> entries_;
+    Work               work_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

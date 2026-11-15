@@ -237,17 +237,20 @@ template<typename T, typename Op>
 std::vector<NodePtr> NAryOpNode<T,Op>::inputs() const { return inputs_; }
 
 // The values are copied out, because a product's partials need all of them at
-// once. Allocating here is fine: a pass is not on the cycle path.
+// once. They go into the two vectors the pass lends (aad::Partials::work()),
+// which keep their capacity from one node to the next, so a pass that has met
+// an input list this long allocates nothing here. dx arrives sized like x, as
+// Derivative<Op>::d() is promised, and zeroed, as a new vector would be.
 template<typename T, typename Op>
 bool NAryOpNode<T,Op>::partials([[maybe_unused]] EvalContext& ctx,
                                 [[maybe_unused]] aad::Partials& out) {
     if constexpr (std::is_same_v<T, double> && Derivative<Op>::defined) {
-        std::vector<double> x;
-        x.reserve(inputs_.size());
-        for (auto& in : inputs_) x.push_back(get_value<double>(in->eval(ctx)));
-        std::vector<double> dx(x.size());
-        Derivative<Op>::d(x, dx);
-        for (std::size_t i = 0; i < dx.size(); ++i) out.add(i, dx[i]);
+        aad::Partials::Work& work = out.work();
+        work.x.clear();
+        for (auto& in : inputs_) work.x.push_back(get_value<double>(in->eval(ctx)));
+        work.dx.assign(work.x.size(), 0.0);
+        Derivative<Op>::d(work.x, work.dx);
+        for (std::size_t i = 0; i < work.dx.size(); ++i) out.add(i, work.dx[i]);
         return true;
     } else {
         return false;

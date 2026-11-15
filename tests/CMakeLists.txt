@@ -7,6 +7,7 @@ set(FLYWHEEL_DAG_TESTS
   test_aad_partials
   test_aad_reverse
   test_aad_tangent_node
+  test_aad_tape
   test_aad_timeseries
   test_allocation_counter
   test_clean_inputs
@@ -39,7 +40,10 @@ set(FLYWHEEL_DAG_TESTS
 # is the whole program's, so it is linked into these and no other suite. The
 # benchmark compiles it too (benchmarks/CMakeLists.txt).
 set(FLYWHEEL_DAG_COUNTING_TESTS
+  test_aad_gradient_node
   test_aad_node
+  test_aad_tangent_node
+  test_aad_tape
   test_allocation_counter
   test_dag_reduce
   test_value_slot

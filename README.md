@@ -188,8 +188,11 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
   });
   ```
 
-  It recomputes whenever anything upstream of `f` fires, and records a tape each time, which costs
-  about 20 evaluations of `f`. Its forward-mode counterpart, `aad::TangentNode`, holds several
+  It recomputes whenever anything upstream of `f` fires, and records its tape again each time. The
+  tape is kept, so once warm a recompute allocates nothing, and on the 17-node call of
+  `examples/aad.cpp` it costs about three evaluations of the graph. A pass of your own can keep one
+  too: `Tape::record()` records again, and `adjoints()` and `tangents()` take a span to write into.
+  Its forward-mode counterpart, `aad::TangentNode`, holds several
   roots' derivatives in one direction, from one tape and one sweep:
   `aad::TangentNode::make("along x", {f, g}, {{x, 1.0}})` holds ∂f/∂x and ∂g/∂x, for another
   root `g`.
@@ -426,7 +429,7 @@ supported on this platform"), so a run on a Mac leaves `detect_leaks` out.
 ## Benchmark
 
 [`benchmarks/bench_hot_path.cpp`](benchmarks/bench_hot_path.cpp) measures what one engine cycle
-costs on five generic workloads, the last of them as three rows:
+costs on six generic workloads, two of them as more than one row:
 
 | Row | Workload |
 |---|---|
@@ -435,6 +438,7 @@ costs on five generic workloads, the last of them as three rows:
 | `ingest` | A heap-owning value, with one `post()` and one `flush()` per cycle |
 | `solve` | A node that binds a reduction of x·x − a over x, and takes six Newton steps on it, each cycle |
 | `ops-compute`, `ops-moving`, `ops-held` | Eight capped multiples of a signal, a `SumNode` that folds them, its `SqrtNode`, and a `DiffNode` of the two. The first row folds with a `ComputeNode` instead, and in the last the signal is above the cap, so the multiples stand still |
+| `gradient`, `tangent` | A derivative pass on every cycle, through an `EWMANode`, a `DifferentiableNode` and an n-ary product: a `GradientNode` of the root over its two sources, and a `TangentNode` of two roots along one source |
 
 The three `ops` rows are one graph, so their differences mean something where a row alone does not.
 `ops-moving` less `ops-compute` is what the shape of an n-ary op node costs: it pulls every input to

@@ -481,6 +481,8 @@ inline const std::vector<aad::Partials::Entry>& aad::Partials::entries() const n
 
 inline void aad::Partials::clear() noexcept { entries_.clear(); }
 
+inline aad::Partials::Work& aad::Partials::work() noexcept { return work_; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TweakableComputeNode<Out, Ins...>
 // ─────────────────────────────────────────────────────────────────────────────

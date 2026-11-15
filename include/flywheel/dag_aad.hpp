@@ -89,8 +89,8 @@
 //     std::invalid_argument. A node off the tape has derivative 0, whatever it
 //     holds.
 //   • A tape holds partials, not values, so it describes the point it was
-//     recorded at. Once an input moves, record a new one. A sweep never reads
-//     a value from the graph.
+//     recorded at. Once an input moves, record it again (Tape::record()), or
+//     record a new one. A sweep never reads a value from the graph.
 //   • Eval thread only, like eval().
 //
 // Sensitivities as nodes
@@ -121,8 +121,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -150,6 +152,37 @@ struct Seed {
 //
 // Record once and sweep many times. A full Jacobian is one reverse sweep per
 // root, or one forward sweep per input, over the same tape.
+//
+// A pass on every cycle
+// ─────────────────────
+// A tape that is kept can be recorded again: record() walks the same roots at
+// the values the graph holds now. The walk is the constructor's, so it follows
+// what each node's partials name at the new point: a ConditionNode's other
+// branch after a switch, nothing above a node tweaked since. What a tape
+// keeps from one record to the next is storage and structure, never a partial:
+//
+//   • its entries, its edges and the walk's stacks, for their capacity;
+//   • for each node it has met, the node's inputs() and what the node is asked
+//     for its partials through. A graph is not rewired once it is built
+//     (INode::inputs()), so neither is read from the node again.
+//
+// So once a tape has met the nodes a point reaches, recording at that point
+// allocates nothing, and neither does a sweep into a span the caller keeps:
+//
+//   aad::Tape tape({price});                  // records, and allocates
+//   std::vector<NodePtr> wrt{spot, vol, rate};
+//   std::vector<double>  greeks(wrt.size());
+//   …                                         // each time the point moves:
+//   tape.record();                            // the same roots, read again
+//   tape.adjoints(price, wrt, greeks);        // into storage the caller keeps
+//
+// The first record after the graph reaches a node the tape has not met, such as
+// the other branch of a ConditionNode, allocates for it, and the one after does
+// not. The sweeps that return a vector allocate their result, as any function
+// that returns one does.
+//
+// A record() that throws leaves the tape without a recording, and a sweep then
+// throws std::logic_error until a record() succeeds.
 // ─────────────────────────────────────────────────────────────────────────────
 class Tape {
 public:
@@ -158,21 +191,37 @@ public:
     /// holds a double.
     explicit Tape(const std::vector<NodePtr>& roots);
 
+    /// Records again: the same roots, in their order, at the values the graph
+    /// holds now. Throws what the constructor throws. Once the tape has met the
+    /// nodes this point reaches, it allocates nothing.
+    void record();
+
     /// Reverse sweep: ∂root/∂w for each w in wrt, in wrt's order, in one sweep
     /// however many there are. root must be one of the tape's roots.
     std::vector<double> adjoints(const NodePtr& root, const std::vector<NodePtr>& wrt) const;
+
+    /// The same sweep, written to out, which has one slot per wrt node. It uses
+    /// the tape's own working storage, so it is not const and, once warm,
+    /// allocates nothing. Throws std::invalid_argument unless out has
+    /// wrt.size() slots.
+    void adjoints(const NodePtr& root, std::span<const NodePtr> wrt, std::span<double> out);
 
     /// Forward sweep: each root's derivative in the direction the seeds give,
     /// Σ ∂root/∂s.node · s.tangent, in the roots' order, in one sweep however
     /// many roots there are.
     std::vector<double> tangents(const std::vector<Seed>& seeds) const;
 
+    /// The same sweep, written to out, which has one slot per root. It uses the
+    /// tape's own working storage, so it is not const and, once warm, allocates
+    /// nothing. Throws std::invalid_argument unless out has one slot per root.
+    void tangents(std::span<const Seed> seeds, std::span<double> out);
+
     /// The number of nodes recorded.
     std::size_t size() const noexcept;
 
 private:
-    // GradientNode and TangentNode record each root right after they pull it,
-    // through record().
+    // GradientNode and TangentNode keep a tape and record each root right after
+    // they pull it, through restart() and recordRoot().
     friend class GradientNode;
     friend class TangentNode;
 
@@ -182,37 +231,129 @@ private:
     };
 
     struct Entry {
-        NodePtr     node;
+        std::size_t node;          ///< the node, as its place in known_
         std::size_t firstEdge;     ///< the node's edges are [firstEdge, lastEdge)
         std::size_t lastEdge;
         bool        barrier;       ///< it has inputs but no partials
         bool        holdsDouble;
     };
 
-    /// An empty tape, for add().
-    Tape() = default;
-    /// Records root, and each node it depends on that the tape does not hold
-    /// yet, at the values they hold now. Throws std::invalid_argument unless
-    /// root is non-null, clean and holds a double. Private because between two
-    /// calls nothing may move the graph but the pull of the next root: a caller
-    /// that moved an input between them would get a tape that mixes two points.
-    void add(const NodePtr& root);
-    /// add() without the clean check, for a root the caller has just pulled.
-    /// An always-dirty node that reaches the root by two paths leaves it dirty
-    /// after its pull, and the walk then evaluates what went dirty again, as it
-    /// evaluates any always-dirty node it meets. Throws std::invalid_argument
-    /// unless root holds a double.
-    void record(const NodePtr& root);
-    std::size_t rootPosition(const NodePtr& root) const;
-    void checkWrt(const std::vector<NodePtr>& wrt) const;
-    /// `target` names what the barriers were reached from, for the message.
-    void checkBarriers(const std::string& target, const std::vector<bool>& reached,
-                       const std::vector<NodePtr>& wrt) const;
+    /// What the tape keeps of a node it has met, from the first time it meets
+    /// it: on a tape, or above a barrier a sweep checked. The stamps say which
+    /// record or which sweep last marked the node, so nothing is cleared
+    /// between them.
+    struct Known {
+        NodePtr                          node;
+        std::shared_ptr<NodeBase>        base;     ///< the node as a NodeBase, or null
+        std::shared_ptr<IDifferentiable> mixin;    ///< for a node that is not one
+        std::size_t   firstInput = 0;   ///< its inputs() are inputs_[firstInput, lastInput),
+        std::size_t   lastInput  = 0;   ///<   once expanded
+        bool          expanded   = false;
+        std::uint64_t recorded   = 0;   ///< the record that reached it
+        std::size_t   position   = 0;   ///< its place on that record's tape, or kWalking
+        std::uint64_t wanted     = 0;   ///< the sweep it is a wrt or seed node of
+        std::uint64_t visited    = 0;   ///< the sweep whose barrier check walked it
+    };
 
-    std::vector<NodePtr>                          roots_;
-    std::vector<Entry>                            entries_;
-    std::vector<Edge>                             edges_;
-    std::unordered_map<const INode*, std::size_t> position_;
+    /// A node the walk has reached and not yet left.
+    struct Frame {
+        std::size_t node;         ///< its place in known_
+        std::size_t firstNamed;   ///< the inputs its partials name are
+        std::size_t lastNamed;    ///<   named_[firstNamed, lastNamed)
+        std::size_t next;         ///< the next of them to walk
+        bool        barrier;
+        bool        holdsDouble;
+    };
+
+    /// One input a node's partials name.
+    struct Named {
+        std::size_t node;   ///< the input, as its place in known_
+        double      d;      ///< ∂node/∂input
+    };
+
+    /// No position: a node the current record does not hold.
+    static constexpr std::size_t kNone    = static_cast<std::size_t>(-1);
+    /// Reached by the current record and not yet on its tape.
+    static constexpr std::size_t kWalking = kNone - 1;
+
+    /// Selects the constructor below.
+    struct Unrecorded {};
+    /// A tape of these roots with nothing recorded yet, for a sensitivity node,
+    /// whose roots are dirty when it is built. No root is null.
+    Tape(std::vector<NodePtr> roots, Unrecorded);
+
+    /// Forgets the recording and keeps the storage. recordRoot(0) follows.
+    void restart();
+    /// Records roots_[i], and each node it depends on that the tape does not
+    /// hold yet, at the values they hold now. The roots are recorded in order,
+    /// each once, after restart(). No clean check, for a root the caller has
+    /// just pulled: an always-dirty node that reaches the root by two paths
+    /// leaves it dirty after its pull, and the walk then evaluates what went
+    /// dirty again, as it evaluates any always-dirty node it meets. Throws
+    /// std::invalid_argument unless the root holds a double. Private because
+    /// between two calls nothing may move the graph but the pull of the next
+    /// root: a caller that moved an input between them would get a tape that
+    /// mixes two points.
+    void recordRoot(std::size_t i);
+    /// Reaches a node: reads what it holds and its partials, and puts it on the
+    /// walk's stack. Nothing happens for a node the record has reached already.
+    void visit(std::size_t node, EvalContext& ctx);
+
+    /// The node's place in known_, which it is given the first time it is met.
+    std::size_t meet(const NodePtr& node);
+    /// Reads the node's inputs() into inputs_, the first time it is asked.
+    void expand(std::size_t node);
+
+    /// Throws std::logic_error unless every root is recorded.
+    void requireRecorded() const;
+    std::size_t rootPosition(const NodePtr& root) const;
+    /// The node's position on the tape, or kNone.
+    std::size_t positionOf(const NodePtr& node) const;
+    void checkWrt(const NodePtr& wrt) const;
+
+    /// The reverse sweep from position top, into adjoint, with every position
+    /// the root reaches marked in reached. Both are sized here.
+    void sweepReverse(std::size_t top, std::vector<std::uint32_t>& reached,
+                      std::vector<double>& adjoint) const;
+    /// The forward sweep over tangent, which holds the seeds on entry.
+    void sweepForward(std::vector<double>& tangent) const;
+
+    /// `target` names what the barriers were reached from, for the message.
+    /// reached(i) says whether the sweep reached position i, for i < count.
+    template<typename Reached>
+    void checkBarriers(const std::string& target, std::size_t count, Reached&& reached,
+                       const std::vector<NodePtr>& wrt) const;
+    /// The same check for the sweeps that keep their storage: over the inputs
+    /// the tape has read already, against the nodes marked wanted for this
+    /// sweep. root is the root swept from, or null for a forward sweep, which
+    /// serves every root. The message is built only when it is thrown.
+    template<typename Reached>
+    void checkKeptBarriers(const NodePtr* root, std::size_t count, Reached&& reached);
+
+    std::vector<NodePtr>     roots_;
+    /// Each root's position on the tape, in the roots' order: as many as the
+    /// record has reached.
+    std::vector<std::size_t> rootPosition_;
+    std::vector<Entry>       entries_;
+    std::vector<Edge>        edges_;
+
+    // ── What is kept from one record to the next ─────────────────────────────
+    std::vector<Known>                            known_;
+    std::unordered_map<const INode*, std::size_t> index_;    ///< a node's place in known_
+    std::vector<std::size_t>                      inputs_;   ///< every expanded node's inputs()
+    std::uint64_t                                 epoch_ = 0;   ///< the current record
+    std::uint64_t                                 sweep_ = 0;   ///< the last sweep that marked nodes
+
+    // ── Working storage, kept for its capacity ───────────────────────────────
+    Partials                  partials_;   ///< the node being asked
+    std::vector<Frame>        stack_;      ///< the walk
+    std::vector<Named>        named_;      ///< the named inputs of the frames on stack_, in order
+    /// A reverse sweep's marks, as words: a store through a byte type may alias
+    /// anything, so the compiler would reload what the sweep holds after each.
+    std::vector<std::uint32_t> reached_;
+    std::vector<double>       adjoint_;
+    std::vector<double>       tangent_;
+    std::vector<std::size_t>  frontier_;   ///< a barrier check's walk
 };
 
 /// Records a tape for one root and sweeps it once in reverse: ∂root/∂w for
@@ -454,10 +595,16 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // GradientNode — a node whose value is a gradient: ∂root/∂w for each w in wrt,
 // in wrt's order, as a std::vector<double>.
 //
-// Each time it recomputes, it pulls its root, records a Tape on it and sweeps it
-// in reverse, as aad::adjoints() does. It publishes the result through its
+// Each time it recomputes, it pulls its root, records its tape on it and sweeps
+// it in reverse, as aad::adjoints() does. It publishes the result through its
 // equality policy like any other node, so an engine output fires only when the
 // gradient moves.
+//
+// It keeps the one tape, and records it again at each recompute (Tape, "A pass
+// on every cycle"). So once it has met the nodes its root reaches, a recompute
+// allocates nothing: the tape keeps its storage and the graph's structure, the
+// gradient is swept into a vector the node keeps, and the value is published
+// through a ValueSlot, by copy, so that the slot's buffer keeps its capacity.
 //
 // Its one input is its root. A wrt node the root depends on sits upstream of the
 // root, so the root carries its changes. One the root does not depend on has
@@ -488,17 +635,17 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // node would never see the next change, which stops at the root. It tells its
 // consumers too, so a node over it sees that change as well.
 //
-// It records the root it has just pulled, clean or not (Tape::record()). An
+// It records the root it has just pulled, clean or not (Tape::recordRoot()). An
 // always-dirty node that reaches the root by two paths leaves the root dirty
 // after its own pull, and requiring it clean would make this node throw on
 // every evaluation. Recorded anyway, the tape's walk evaluates what went dirty
 // again, which the caveat on always-dirty nodes already allows.
 //
-// COST. Every recompute records a new tape, which costs a multiple of evaluating
-// the root (about 20 on the Black–Scholes call in test_aad_node.cpp), and an
-// Eager node recomputes on every change upstream of its root, including a change
-// the gradient does not depend on. A graph that wants its sensitivities only now
-// and then should run a pass on demand instead.
+// COST. Every recompute records the tape again: one eval() and one partials()
+// call for each node the root depends on, and a sweep. An Eager node recomputes
+// on every change upstream of its root, including a change the gradient does
+// not depend on. A graph that wants its sensitivities only now and then should
+// run a pass on demand instead.
 //
 // Under the default policy, a gradient holding a NaN is unequal to itself, so
 // it is published on every recompute, as a double NaN is. It gives no
@@ -532,6 +679,11 @@ private:
     std::vector<NodePtr>           wrt_;
     EqualityPolicyPtr              eq_;
     ValuePtr                       cached_;
+    /// Recorded again at each recompute, and kept for its storage and for the
+    /// structure it has read.
+    Tape                           tape_;
+    /// The gradient of the recompute in hand: one slot per wrt node.
+    std::vector<double>            gradient_;
     ValueSlot<std::vector<double>> slot_;
 };
 
@@ -561,9 +713,11 @@ using GradientNodePtr = std::shared_ptr<GradientNode>;
 // the tape pulled left it so, and it tells its consumers. It records a root
 // that stayed dirty after its own pull, as GradientNode does.
 //
-// COST. A recompute records one tape over every root's nodes, which costs a
-// multiple of evaluating them, as for a GradientNode, and it happens on every
-// change upstream of any root.
+// It keeps the one tape and records it again at each recompute, so once warm a
+// recompute allocates nothing, as for a GradientNode.
+//
+// COST. A recompute records the tape again over every root's nodes, as for a
+// GradientNode, and it happens on every change upstream of any root.
 // ─────────────────────────────────────────────────────────────────────────────
 class TangentNode
     : public NodeBase
@@ -594,6 +748,11 @@ private:
     std::vector<Seed>              seeds_;
     EqualityPolicyPtr              eq_;
     ValuePtr                       cached_;
+    /// Recorded again at each recompute, and kept for its storage and for the
+    /// structure it has read.
+    Tape                           tape_;
+    /// The tangents of the recompute in hand: one slot per root.
+    std::vector<double>            tangents_;
     ValueSlot<std::vector<double>> slot_;
 };
 

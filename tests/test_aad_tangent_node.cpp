@@ -13,9 +13,11 @@
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
+#include "allocation_counter.hpp"
 #include "test_nodes.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
+#include "flywheel/dag_async.hpp"
 #include "flywheel/dag_engine.hpp"
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_timeseries.hpp"
@@ -390,6 +392,118 @@ TEST(AadTangentNode, ItsInputsAreItsRoots) {
     const std::vector<StatefulNodePtr> found = engine.discoverStatefulNodes();
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(std::dynamic_pointer_cast<ts::EWMANode>(found[0]), ewma);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The tape it keeps
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Two sources, and a graph over them with a stateful node, a differentiable
+/// node, an n-ary product and two ops:
+///   level = EWMA(a),  blend = level·b + √level/b,  root = blend·level·b − √blend
+struct Sourced {
+    std::shared_ptr<async::AsyncInput<double>> a = async::AsyncInput<double>::make("a", 1.0);
+    std::shared_ptr<async::AsyncInput<double>> b = async::AsyncInput<double>::make("b", 2.0);
+    NodePtr level = ts::EWMANode::make("level", a, 0.25);
+    NodePtr blend = aad::DifferentiableNode<2>::make("blend", {level, b},
+        [](const auto& x, const auto& y) {
+            using std::sqrt;
+            return x * y + sqrt(x) / y;
+        });
+    NodePtr root = ops::DiffNode<>::make("root",
+        ops::ProductNode<>::make("area", {blend, level, b}),
+        ops::SqrtNode<>::make("sqrt(blend)", blend));
+
+    void post(int i) const {
+        a->post(1.0 + 0.01 * (i % 37));
+        b->post(2.0 + 0.02 * (i % 41));
+    }
+};
+
+} // namespace
+
+// The tangents move on every cycle, so every cycle records the node's tape
+// again, sweeps it and delivers, and once warm none of it allocates.
+TEST(AadTangentNode, AllocatesNothingOnceWarm) {
+    async::Engine engine;
+    const Sourced g;
+    engine.addSource(g.a);
+    engine.addSource(g.b);
+    const std::vector<NodePtr> roots = {g.root, g.blend};
+    const std::vector<aad::Seed> seeds = {{g.a, 1.0}, {g.b, 0.5}};
+    auto along = aad::TangentNode::make("along", roots, seeds);
+    long delivered = 0;
+    double sum = 0.0;
+    bool compare = true;
+    engine.addOutput<Tangents>(along, [&](const Tangents& value) {
+        ++delivered;
+        sum += value[0] + value[1];
+        if (compare) { EXPECT_EQ(value, aad::tangents(roots, seeds)); }
+    });
+
+    for (int i = 0; i < 50; ++i) {
+        g.post(i);
+        engine.step();
+    }
+    EXPECT_EQ(delivered, 50);
+
+    compare = false;
+    delivered = 0;
+    const long allocations = allocation_counter::allocations_during([&] {
+        for (int i = 50; i < 250; ++i) {
+            g.post(i);
+            engine.step();
+        }
+    });
+    EXPECT_EQ(allocations, 0);
+    EXPECT_EQ(delivered, 200);
+    EXPECT_NE(sum, 0.0);
+}
+
+// Two roots over one always-dirty node. The second root's pull evaluates that
+// node again, which leaves the first root dirty. Recorded right after its own
+// pull, the first root is read clean, and the functor under it has run once.
+// Recorded after both pulls, it would be evaluated again by the record.
+TEST(AadTangentNode, RecordsEachRootRightAfterItsPull) {
+    auto clock = test_nodes::AlwaysFiring::make(2.0);
+    int runs = 0;
+    auto first = aad::DifferentiableNode<1>::make("first", {clock},
+        [&runs](const auto& c) {
+            if (!isDual<decltype(c)>()) ++runs;
+            return 3.0 * c;
+        });
+    auto k      = Input<double>::make("k", 5.0);
+    auto second = ops::ProductNode<>::make("second", {clock, k});
+    auto along  = aad::TangentNode::make("along the clock", {first, second}, {{clock, 1.0}});
+
+    EvalContext ctx;
+    const ValuePtr held = along->eval(ctx);
+    EXPECT_EQ(get_value<Tangents>(held), (Tangents{3.0, 5.0}));
+    EXPECT_EQ(runs, 1);
+
+    const ValuePtr again = along->eval(ctx);   // still dirty: the clock is
+    EXPECT_EQ(get_value<Tangents>(again), (Tangents{3.0, 5.0}));
+    EXPECT_EQ(runs, 2);
+}
+
+// k·x·x − (k + 1) twice over, where k is always dirty and reaches the root by
+// two paths. The node records both roots on the tape it keeps, at each
+// evaluation.
+TEST(AadTangentNode, KeepsItsTapeOverARootThatStaysDirty) {
+    auto k     = test_nodes::AlwaysFiring::make(2.0);
+    auto x     = Input<double>::make("x", 3.0);
+    auto root  = ops::DiffNode<>::make("root", ops::ProductNode<>::make("k.x.x", {k, x, x}),
+        ops::SumNode<>::make("k+1", {k, Input<double>::make("one", 1.0)}));
+    auto along = aad::TangentNode::make("along", {root, root}, {{x, 1.0}});
+    EvalContext ctx;
+    for (const double v : {3.0, 5.0, 7.0, 11.0}) {
+        x->set(v);
+        const ValuePtr t = along->eval(ctx);
+        EXPECT_EQ(get_value<Tangents>(t), (Tangents{4.0 * v, 4.0 * v}));
+        EXPECT_TRUE(along->dirty());
+    }
 }
 
 int main(int argc, char** argv) {

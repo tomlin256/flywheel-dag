@@ -12,9 +12,11 @@
 
 #include <gtest/gtest.h>
 #include "aad_test_graphs.hpp"
+#include "allocation_counter.hpp"
 #include "test_nodes.hpp"
 #include "flywheel/dag.hpp"
 #include "flywheel/dag_aad.hpp"
+#include "flywheel/dag_async.hpp"
 #include "flywheel/dag_engine.hpp"
 #include "flywheel/dag_ops.hpp"
 #include "flywheel/dag_timeseries.hpp"
@@ -22,6 +24,7 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -375,6 +378,127 @@ TEST(AadGradientNode, RegisteredBeforeItsRoot) {
 
     EXPECT_EQ(values, (std::vector<double>{4.0, 9.0, 25.0}));
     EXPECT_EQ(gradients, (std::vector<Gradient>{{4.0}, {6.0}, {10.0}}));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The tape it keeps
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Two sources, and a graph over them with a stateful node, a differentiable
+/// node, an n-ary product and two ops:
+///   level = EWMA(a),  blend = level·b + √level/b,  root = blend·level·b − √blend
+struct Sourced {
+    std::shared_ptr<async::AsyncInput<double>> a = async::AsyncInput<double>::make("a", 1.0);
+    std::shared_ptr<async::AsyncInput<double>> b = async::AsyncInput<double>::make("b", 2.0);
+    NodePtr level = ts::EWMANode::make("level", a, 0.25);
+    NodePtr blend = aad::DifferentiableNode<2>::make("blend", {level, b},
+        [](const auto& x, const auto& y) {
+            using std::sqrt;
+            return x * y + sqrt(x) / y;
+        });
+    NodePtr root = ops::DiffNode<>::make("root",
+        ops::ProductNode<>::make("area", {blend, level, b}),
+        ops::SqrtNode<>::make("sqrt(blend)", blend));
+
+    void post(int i) const {
+        a->post(1.0 + 0.01 * (i % 37));
+        b->post(2.0 + 0.02 * (i % 41));
+    }
+};
+
+} // namespace
+
+// The gradient moves on every cycle, so every cycle records the node's tape
+// again, sweeps it and delivers, and once warm none of it allocates.
+TEST(AadGradientNode, AllocatesNothingOnceWarm) {
+    async::Engine engine;
+    const Sourced g;
+    engine.addSource(g.a);
+    engine.addSource(g.b);
+    const std::vector<NodePtr> wrt = {g.a, g.b};
+    auto grad = aad::GradientNode::make("grad", g.root, wrt);
+    long delivered = 0;
+    double sum = 0.0;
+    bool compare = true;
+    engine.addOutput<Gradient>(grad, [&](const Gradient& value) {
+        ++delivered;
+        sum += value[0] + value[1];
+        // In the node's callback the root is clean, so a new tape reads the
+        // point the node recorded.
+        if (compare) { EXPECT_EQ(value, aad::adjoints(g.root, wrt)); }
+    });
+
+    for (int i = 0; i < 50; ++i) {
+        g.post(i);
+        engine.step();
+    }
+    EXPECT_EQ(delivered, 50);
+
+    compare = false;
+    delivered = 0;
+    const long allocations = allocation_counter::allocations_during([&] {
+        for (int i = 50; i < 250; ++i) {
+            g.post(i);
+            engine.step();
+        }
+    });
+    EXPECT_EQ(allocations, 0);
+    EXPECT_EQ(delivered, 200);
+    EXPECT_NE(sum, 0.0);
+}
+
+// A recompute whose tape throws publishes nothing: the node stays dirty, a
+// consumer still reads the gradient it last published, and the next evaluation
+// records the kept tape again from the start.
+TEST(AadGradientNode, AThrowLeavesItsValueAsItWas) {
+    auto x      = Input<double>::make("x", 2.0);
+    auto cond   = Input<bool>::make("cond", false);
+    auto opaque = ComputeNode<double, double>::make("opaque", {x},
+        [](const double& v) { return v * v; });
+    auto sq     = ops::ProductNode<>::make("x.x", {x, x});
+    auto sel    = ConditionNode::make("sel", cond, opaque, sq);
+    auto grad   = aad::GradientNode::make("grad", sel, {x});
+    EvalContext ctx;
+    const ValuePtr published = grad->eval(ctx);
+    ASSERT_EQ(get_value<Gradient>(published), (Gradient{4.0}));
+
+    for (int round = 1; round <= 3; ++round) {
+        SCOPED_TRACE("round " + std::to_string(round));
+        cond->set(true);
+        EXPECT_THROW(grad->eval(ctx), std::domain_error);
+        EXPECT_TRUE(grad->dirty());
+        EXPECT_THROW(grad->eval(ctx), std::domain_error);
+        EXPECT_EQ(get_value<Gradient>(published), (Gradient{4.0}));   // not written over
+
+        cond->set(false);
+        const ValuePtr again = grad->eval(ctx);
+        EXPECT_FALSE(grad->dirty());
+        EXPECT_EQ(again.get(), published.get());   // equal, so it keeps its identity
+    }
+    x->set(3.0);
+    const ValuePtr moved = grad->eval(ctx);
+    EXPECT_EQ(get_value<Gradient>(moved), (Gradient{6.0}));
+}
+
+// k·x·x − (k + 1), where k is always dirty and reaches the root by two paths,
+// so the root stays dirty after its own pull. The node records it on the tape
+// it keeps, at each evaluation.
+TEST(AadGradientNode, KeepsItsTapeOverARootThatStaysDirty) {
+    auto k    = test_nodes::AlwaysFiring::make(2.0);
+    auto x    = Input<double>::make("x", 3.0);
+    auto root = ops::DiffNode<>::make("root", ops::ProductNode<>::make("k.x.x", {k, x, x}),
+        ops::SumNode<>::make("k+1", {k, Input<double>::make("one", 1.0)}));
+    auto grad = aad::GradientNode::make("grad", root, {x});
+    EvalContext ctx;
+    for (const double v : {3.0, 5.0, 7.0, 11.0}) {
+        x->set(v);
+        const ValuePtr g = grad->eval(ctx);
+        EXPECT_EQ(get_value<Gradient>(g), (Gradient{4.0 * v}));
+        EXPECT_TRUE(root->dirty());
+        EXPECT_TRUE(grad->dirty());
+    }
 }
 
 int main(int argc, char** argv) {
