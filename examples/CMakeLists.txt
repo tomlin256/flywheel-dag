@@ -7,6 +7,9 @@ target_link_libraries(aad PRIVATE flywheel::dag)
 add_executable(reduce reduce.cpp)
 target_link_libraries(reduce PRIVATE flywheel::dag)
 
+add_executable(fit fit.cpp)
+target_link_libraries(fit PRIVATE flywheel::dag)
+
 if(FLYWHEEL_DAG_BUILD_TESTS)
   # The example doubles as a test: its signal has exactly eight spikes in 2000
   # cycles, so a correct graph reports exactly eight episodes, each resolved.
@@ -26,4 +29,11 @@ if(FLYWHEEL_DAG_BUILD_TESTS)
   add_test(NAME example_reduce COMMAND reduce)
   set_tests_properties(example_reduce PROPERTIES
     PASS_REGULAR_EXPRESSION "the function and the graph agree")
+
+  # And this one: its last line says whether every line its node fitted is the
+  # closed form's least-squares line through the points. It prints that line
+  # only when each is.
+  add_test(NAME example_fit COMMAND fit)
+  set_tests_properties(example_fit PROPERTIES
+    PASS_REGULAR_EXPRESSION "the fit and the closed form agree")
 endif()

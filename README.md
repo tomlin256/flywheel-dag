@@ -26,12 +26,14 @@ evaluates only the part of the graph they dirtied.
   closed-form partial derivatives.
 - **Algorithmic differentiation** (`dag::aad`) — an output's derivative with respect to every
   input in one reverse sweep, or every output's derivative in one direction in one forward sweep,
-  at the values the graph holds. A compute node written as a generic lambda is differentiated with
-  dual numbers, and gradient and tangent nodes deliver sensitivities through the engine like any
-  other output.
-- **A subgraph as a function** (`dag::reduce`) — the nodes between some arguments and an output, as a
-  function that a solver calls at any point, with a gradient, without moving the graph and without
-  allocating once warm.
+  at the values the graph holds, through the ops, the time-series nodes at their current state,
+  and compute nodes written as generic lambdas, which are differentiated with dual numbers. A tape
+  can be kept and recorded again without allocating, and gradient and tangent nodes keep one to
+  deliver sensitivities through the engine like any other output.
+- **A subgraph as a function** (`dag::reduce`) — the nodes between some arguments and one output or
+  several, as a function that a solver calls at any point, with a gradient or a Jacobian, without
+  moving the graph and without allocating once warm. A `ReductionNode` binds it at each evaluation
+  and runs the solver in the engine.
 - **Snapshot and restore** of stateful nodes, discovered by walking the graph; a JSON file store
   writes atomically.
 - **Deterministic replay** of recorded sessions through an unmodified graph, with no threads or
@@ -167,7 +169,8 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
   functor a pass can see into, use `aad::DifferentiableNode<N>`. Its functor is written once, as a
   generic lambda, and differentiated with dual numbers.
   [`examples/aad.cpp`](examples/aad.cpp) prices a call that way, and checks its sensitivities both
-  ways against bumps.
+  ways against bumps. A node of your own joins a pass by overriding `NodeBase::partials()`, and no
+  node is larger for it.
 - A pass evaluates nothing, advances no stateful node, and never reads the branch a `ConditionNode`
   did not take. Its root must already be evaluated, so run it in the root's output callback, or
   after evaluating the root.
@@ -190,12 +193,26 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
 
   It recomputes whenever anything upstream of `f` fires, and records its tape again each time. The
   tape is kept, so once warm a recompute allocates nothing, and on the 17-node call of
-  `examples/aad.cpp` it costs about three evaluations of the graph. A pass of your own can keep one
-  too: `Tape::record()` records again, and `adjoints()` and `tangents()` take a span to write into.
-  Its forward-mode counterpart, `aad::TangentNode`, holds several
-  roots' derivatives in one direction, from one tape and one sweep:
-  `aad::TangentNode::make("along x", {f, g}, {{x, 1.0}})` holds ∂f/∂x and ∂g/∂x, for another
+  `examples/aad.cpp` it costs about three evaluations of the graph. Its forward-mode counterpart,
+  `aad::TangentNode`, holds several roots' derivatives in one direction, from one tape and one
+  sweep: `aad::TangentNode::make("along x", {f, g}, {{x, 1.0}})` holds ∂f/∂x and ∂g/∂x, for another
   root `g`.
+- A pass of your own can keep its tape too. `Tape::record()` records the same roots again at the
+  values the graph holds now, and `adjoints()` and `tangents()` each have a form that writes into
+  a span. Once the tape has met the nodes a point reaches, a record and its sweeps allocate
+  nothing:
+
+  ```cpp
+  aad::Tape tape({f});                  // f is clean
+  const std::array<NodePtr, 2> wrt{x, y};
+  std::array<double, 2> g{};
+  tape.adjoints(f, wrt, g);             // {eʸ, x·eʸ}
+
+  y->set(4.0);
+  f->eval(ctx);
+  tape.record();                        // the same root, at the new point
+  tape.adjoints(f, wrt, g);
+  ```
 
 ### A subgraph as a function
 
@@ -241,25 +258,46 @@ f.bind();                                       // so read it again
 - `bind()` follows the branch a `ConditionNode` took, and takes a tweaked node as a constant. A condition that an
   argument moves is followed where the branch the graph did not take is clean, since something else evaluated it
   at this point: a call then runs both branches and selects by the trial condition. Where that branch is stale,
-  `bind()` throws `std::domain_error`, since a reduction evaluates nothing.
+  `bind()` throws `std::domain_error`, since a reduction evaluates nothing. A `ReductionNode` (below) that is given
+  both branches as inputs evaluates them itself, and always binds.
 - The gradient sweeps the ops' closed-form partials and a `DifferentiableNode`'s dual numbers in reverse, at the trial
-  point. A step with no partials, such as a `Lazy` `ComputeNode`, makes `gradient()` throw, and calls still work.
-- In an engine, a solver is an `Eager` compute node over the root, which binds in its functor:
+  point. It asks only the steps it passes through, so never the node that computes a condition, nor a branch the
+  call did not select. One of those with no partials, such as a `Lazy` `ComputeNode`, makes `gradient()` throw, and
+  calls still work.
+- A reduction of several roots is a function ℝⁿ → ℝᵐ, such as the residuals of a fit, and a node the roots share
+  runs once per call:
 
   ```cpp
-  auto f = std::make_shared<dag::Reduction>(price, std::vector<NodePtr>{vol});
-  auto implied = ComputeNode<double, double, double>::make("implied vol", {quote, price},
-      [f](const double& target, const double&) {
-          f->bind();            // price has just been pulled, so it is clean
-          double v = 0.2, vega = 0.0;
+  dag::Reduction r = dag::reduce(std::vector<NodePtr>{r0, r1, r2}, {a, b});
+  std::array<double, 3> y{};
+  std::array<double, 6> j{};                      // by rows: j[2i + k] = ∂rᵢ/∂argₖ
+  r({1.0, 2.0}, y);                               // every root's value, had (a, b) been (1, 2)
+  r.jacobian({1.0, 2.0}, y, j);                   // the same, and the Jacobian there
+  ```
+
+  `jacobian()` asks each step once, and sweeps in reverse once per root, or forward once per argument where there
+  are fewer arguments than roots. The one-root calls, `f(x)` and `gradient()`, throw `std::logic_error` on a
+  reduction of several roots.
+- In an engine, a solver is a `dag::ReductionNode`. Each time it recomputes, it pulls its roots and its other
+  inputs, binds its reduction to the point they hold, and hands it to a functor that returns the node's value:
+
+  ```cpp
+  auto implied = dag::ReductionNode<double, double>::make("implied vol", price, {vol}, {quote},
+      [](dag::Reduction& f, const double& target) {
+          double v = f.argument(0), vega = 0.0;   // from the vol the graph holds
           for (int i = 0; i < 20; ++i) {
-              const double miss = f->gradient({v}, {&vega, 1}) - target;
+              const double miss = f.gradient({v}, {&vega, 1}) - target;
               if (std::abs(miss) < 1e-12) break;
               v -= miss / vega;
           }
           return v;
-      });   // Eager, the default: the point can move while the price stands still
+      });
   ```
+
+  It is `Eager`, since the point can move while the roots stand still, and a throw from the bind or the functor
+  leaves it dirty with its value as it was. `makeInPlace()` takes a functor that writes into an `Out` that owns
+  heap, as `InPlaceComputeNode`'s does. [`examples/fit.cpp`](examples/fit.cpp) fits a line to three points that
+  move this way, by Gauss–Newton on the Jacobian of three residuals, and checks each line against the closed form.
 
 ## Concepts
 
@@ -296,7 +334,7 @@ include of a unit, so none needs another to come first (`test_headers_alone`).
 | `dag_timeseries.hpp` | `dag::ts` | `RollingStats`, `RollingSumNode`, `RollingMinMaxNode`, `EWMANode`, `EWMATickRateNode`, `DeltaNode`, `DelayNode`, `makeTimeDelayNode`, `ThresholdNode`, `ZScoreNode`, `OutlierGateNode`, `RateLimiterNode`, `DebounceCountNode`, `LatchedDebounceNode`, `WindowNode` |
 | `dag_ops.hpp` | `dag::ops` | `SumNode`, `ProductNode`, `DiffNode`, `DivideNode`, `NegateNode`, `ExpNode`, `LnNode`, `PowerNode`, `SqrtNode`, `SinNode`, `CosNode`, `TanNode`, `AsinNode`, `AcosNode`, `AtanNode`, `Atan2Node`, `Derivative` |
 | `dag_aad.hpp` | `dag::aad` | `Tape`, `adjoints`, `tangents`, `DifferentiableNode`, `Dual`, `GradientNode`, `TangentNode` |
-| `dag_reduce.hpp` | `dag` | `reduce`, `Reduction` — a subgraph as a function, with a gradient |
+| `dag_reduce.hpp` | `dag` | `reduce`, `Reduction`, `ReductionNode` — a subgraph as a function, with a gradient or a Jacobian, and a node that solves on it |
 | `dag_state_store.hpp` | `dag` | `IStatefulNode`, `IStateStore`, `InMemoryStateStore`, `JsonFileStateStore` |
 | `dag_memoize.hpp` | `dag` | `MemoizedComputeNode` |
 | `dag_replay.hpp` | `dag::async` | `ReplayCoordinator`, `ReplayClock`, `ReplayInput`, `ReplayQueue` |
