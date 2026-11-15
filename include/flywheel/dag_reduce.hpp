@@ -345,6 +345,11 @@ private:
     /// after its pull, and the pulls below then evaluate what went dirty
     /// again, as they evaluate any always-dirty node they meet.
     [[gnu::always_inline]] void rebind();
+    /// The body of bind() and of rebind(), in line in each: bind() is Check,
+    /// and checks each root clean where it reads it. A check ahead of the
+    /// body, on a way out of its own, costs a bind of one root 2 to 4 ns.
+    template<bool Check>
+    [[gnu::always_inline]] inline void bindAt();
     /// Throws std::domain_error unless every input the bound point follows
     /// although the graph did not read it (followed_) is an argument or one of
     /// `heard`, the inputs of the node `binder` that binds this reduction. The

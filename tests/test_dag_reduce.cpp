@@ -344,13 +344,16 @@ TEST(Reduction, RejectsADirtyRoot) {
     EXPECT_THROW(reduce(root, {x}), std::invalid_argument);
     EXPECT_TRUE(root->dirty());
 
-    // Evaluated, and then an input moved.
+    // Evaluated, and then an input moved. The refused bind lets go of the
+    // point the reduction was bound to.
     EvalContext ctx;
     root->eval(ctx);
     Reduction f = reduce(root, {x});
+    EXPECT_EQ(f({5.0}), -5.0);
     x->set(3.0);
     EXPECT_THROW(f.bind(), std::invalid_argument);
     EXPECT_TRUE(root->dirty());
+    EXPECT_TRUE(mentions(messageOf<std::logic_error>([&] { f({5.0}); }), "not bound"));
 }
 
 // An argument's value is handed to its steps as a double, so a step that reads

@@ -553,6 +553,12 @@ TEST(ReductionRoots, RejectsADirtyRootOrOneThatHoldsNoDouble) {
     Reduction g(std::vector<NodePtr>{clean, i}, {x});
     const std::string whyNot = messageOf<std::invalid_argument>([&] { g.bind(); });
     EXPECT_TRUE(mentions(whyNot, "root root.int does not hold a double")) << whyNot;
+
+    // Bound, and then a root goes dirty: the refused bind lets go of the point
+    // it was bound to.
+    x->set(3.0);
+    EXPECT_THROW(f.bind(), std::invalid_argument);
+    EXPECT_TRUE(mentions(messageOf<std::logic_error>([&] { f({1.0}, y); }), "not bound"));
 }
 
 TEST(ReductionRoots, RejectsRoomOfTheWrongSize) {

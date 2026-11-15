@@ -195,44 +195,34 @@ inline void Reduction::release() noexcept {
     live_.clear();
 }
 
-// The roots are checked clean first, and a clean node's inputs are clean too:
-// an input that moves invalidates its consumers, and a node does not end an
-// evaluation clean over an input that went dirty again. So every eval() that
-// rebind() makes returns a cached value, an always-dirty node's apart.
-//
-// A bind that throws here holds nothing of the last point.
-inline void Reduction::bind() {
-    if (single_) {
-        // One root: no loop over a list of one.
-        if (root0Node_->dirty()) {
-            release();
-            throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
-                + " is dirty. A reduction reads only evaluated values: evaluate it first");
-        }
-    } else {
-        for (const auto& root : roots_) {
-            if (!root->dirty()) continue;
-            release();
-            throw std::invalid_argument("dag::Reduction: root " + root->name()
-                + " is dirty. A reduction reads only evaluated values: evaluate it first");
-        }
-    }
-    rebind();
-}
+// A clean node's inputs are clean too: an input that moves invalidates its
+// consumers, and a node does not end an evaluation clean over an input that
+// went dirty again. So once bind() has checked the roots clean, every eval()
+// it makes returns a cached value, an always-dirty node's apart.
+inline void Reduction::bind() { bindAt<true>(); }
+
+inline void Reduction::rebind() { bindAt<false>(); }
 
 // The last point's values go first: a bind holds only what its own point
-// reads. Then the point is read, and read again for as long as a reading finds
-// a node that an argument makes choose: such a node reads every input it has,
-// so the reading that found it stopped short of the inputs the graph did not
-// read. Each reading marks at least one more node, and no mark is taken back,
-// so the readings end. With no such node there is one reading.
-inline void Reduction::rebind() {
+// reads, and one that throws holds nothing of the last point. Then the point
+// is read, and read again for as long as a reading finds a node that an
+// argument makes choose: such a node reads every input it has, so the reading
+// that found it stopped short of the inputs the graph did not read. Each
+// reading marks at least one more node, and no mark is taken back, so the
+// readings end. With no such node there is one reading.
+template<bool Check>
+inline void Reduction::bindAt() {
     release();
     EvalContext ctx;
 
     // One root, held in a local as its position is held in a member: a
     // reduction of one root takes no loop over a list of one.
     if (single_) {
+        if constexpr (Check) {
+            if (root0Node_->dirty())
+                throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
+                    + " is dirty. A reduction reads only evaluated values: evaluate it first");
+        }
         const ValuePtr rootValue = root0Node_->eval(ctx);
         if (!holdsDouble(rootValue))
             throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
@@ -250,6 +240,13 @@ inline void Reduction::rebind() {
         if (movedBy_[root0_] == kNone) values_[root0_] = rootValue;
         bound_ = true;
         return;
+    }
+
+    if constexpr (Check) {
+        for (const auto& root : roots_)
+            if (root->dirty())
+                throw std::invalid_argument("dag::Reduction: root " + root->name()
+                    + " is dirty. A reduction reads only evaluated values: evaluate it first");
     }
 
     // The roots' values are held while the point is read, and let go on every
