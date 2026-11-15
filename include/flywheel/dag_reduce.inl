@@ -127,11 +127,13 @@ inline Reduction::Reduction(std::vector<NodePtr> roots, std::vector<NodePtr> arg
     uses_.assign(inputs_.size(), ReduceReads::Use::Unread);
     reached_.assign(entries_.size(), 0);
     movedBy_.assign(entries_.size(), kNone);
+    choosing_.assign(entries_.size(), kNone);
     run_.reserve(candidates);
     live_.reserve(args_.size());
     rootValue_.resize(roots_.size());
     argValues_.resize(args_.size());
     adjoints_.assign(entries_.size(), 0.0);
+    wanted_.assign(entries_.size(), 0);
     edges_.reserve(inputs_.size());
     firstEdge_.assign(candidates, 0);
     lastEdge_.assign(candidates, 0);
@@ -166,10 +168,30 @@ inline std::string Reduction::barrierMessage(std::size_t barrier, std::size_t by
          + e.node->name() + ", which " + why;
 }
 
+inline std::string Reduction::staleMessage(std::size_t chooser, std::size_t stale) const {
+    const Entry& e = entries_[chooser];
+    std::string decider = "an input";
+    for (std::size_t k = e.firstInput; k < e.lastInput; ++k)
+        if (uses_[k] == ReduceReads::Use::Decides) decider = entries_[inputs_[k]].node->name();
+    const std::string& other = entries_[inputs_[stale]].node->name();
+    return "dag::Reduction: " + rootNames() + ": " + args_[choosing_[chooser]]->name() + " moves "
+         + decider + ", which decides what " + e.node->name() + " reads, and " + other
+         + ", which the graph did not read at this point, is dirty. A reduction evaluates"
+           " nothing, so it follows a choice that an argument moves only where every input of"
+           " the choosing node has been evaluated: evaluate " + other
+         + ", or give it as an input to the node that binds the reduction";
+}
+
 // The roots are checked clean first, and a clean node's inputs are clean too:
 // an input that moves invalidates its consumers, and a node does not end an
 // evaluation clean over an input that went dirty again. So every eval() that
 // bind() makes returns a cached value, an always-dirty node's apart.
+//
+// The point is read, and read again for as long as a reading finds a node that
+// an argument makes choose: such a node reads every input it has, so the
+// reading that found it stopped short of the inputs the graph did not read.
+// Each reading marks at least one more node, and no mark is taken back, so the
+// readings end. With no such node there is one reading.
 inline void Reduction::bind() {
     bound_ = false;
     // The last point's values go first: a bind holds only what its own point
@@ -189,7 +211,12 @@ inline void Reduction::bind() {
         if (!holdsDouble(rootValue))
             throw std::invalid_argument("dag::Reduction: root " + root0Node_->name()
                                         + " does not hold a double");
-        readPoint(ctx);
+        if (chose_) {
+            std::fill(choosing_.begin(), choosing_.end(), kNone);
+            chose_ = false;
+        }
+        if (readPoint<false>(ctx)) readFollowing(ctx);
+        precise_ = chose_;
         if (movedBy_[root0_] == kNone) values_[root0_] = rootValue;
         bound_ = true;
         return;
@@ -214,7 +241,12 @@ inline void Reduction::bind() {
                                         + " does not hold a double");
     }
 
-    readPoint(ctx);
+    if (chose_) {
+        std::fill(choosing_.begin(), choosing_.end(), kNone);
+        chose_ = false;
+    }
+    if (readPoint<false>(ctx)) readFollowing(ctx);
+    precise_ = chose_;
 
     // A root that no argument moves is its own value at every call.
     for (std::size_t r = 0; r < roots_.size(); ++r) {
@@ -228,14 +260,21 @@ inline void Reduction::bind() {
 //
 // From the roots up: what the roots depend on at this point, through the
 // inputs each node reads. Every consumer of an entry sits after it, so by the
-// time the loop comes to an entry, it is reached or it is not.
+// time the loop comes to an entry, it is reached or it is not. A node of
+// choosing_ reads every input. One that the graph did not read must be clean:
+// then something has evaluated it at this point, everything it read is clean
+// too, and reduceReads() can be asked of the nodes above it.
 //
 // From the leaves down: which of those an argument moves. An argument does. A
 // candidate does if an input it reads does, and it then runs as a step, reading
 // from the graph the value of each input that no argument moves. A candidate
 // that reads no moved input is a constant here, and nothing above it is read on
-// its account.
-inline void Reduction::readPoint(EvalContext& ctx) {
+// its account. A candidate whose deciding input an argument moves joins
+// choosing_, and the reading is then taken again: what this one goes on to
+// find is a subset of what the next one finds, so a throw from here is one the
+// next would make as well.
+template<bool Following>
+inline bool Reduction::readPoint(EvalContext& ctx) {
     std::fill(reached_.begin(), reached_.end(), std::uint8_t{0});
     std::fill(uses_.begin(), uses_.end(), ReduceReads::Use::Unread);
     if (single_) reached_[root0_] = 1;
@@ -252,10 +291,19 @@ inline void Reduction::readPoint(EvalContext& ctx) {
             // Nothing says what it reads, so it reads every input.
             std::fill(uses.begin(), uses.end(), ReduceReads::Use::Read);
         }
+        if (Following && choosing_[i] != kNone) {
+            for (std::size_t k = e.firstInput; k < e.lastInput; ++k) {
+                if (uses_[k] != ReduceReads::Use::Unread) continue;
+                if (entries_[inputs_[k]].node->dirty())
+                    throw std::domain_error(staleMessage(i, k));
+                uses_[k] = ReduceReads::Use::Read;
+            }
+        }
         for (std::size_t k = e.firstInput; k < e.lastInput; ++k)
             if (uses_[k] != ReduceReads::Use::Unread) reached_[inputs_[k]] = 1;
     }
 
+    bool found = false;
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         movedBy_[i] = kNone;
         const Entry& e = entries_[i];
@@ -278,12 +326,15 @@ inline void Reduction::readPoint(EvalContext& ctx) {
             if (uses_[k] == ReduceReads::Use::Unread) continue;
             const std::size_t mover = movedBy_[inputs_[k]];
             if (mover == kNone) continue;
-            if (uses_[k] == ReduceReads::Use::Decides)
-                throw std::domain_error("dag::Reduction: " + rootNames() + ": "
-                    + args_[mover]->name() + " moves " + entries_[inputs_[k]].node->name()
-                    + ", which decides what " + e.node->name() + " reads. A reduction is bound to"
-                      " the inputs the graph read, so it cannot follow a choice that an argument"
-                      " moves");
+            if (uses_[k] == ReduceReads::Use::Decides) {
+                // The first reading stops here: the readings that follow take
+                // the point again.
+                if (!Following) { chose_ = true; return true; }
+                if (choosing_[i] == kNone) {
+                    choosing_[i] = mover;
+                    found = true;
+                }
+            }
             if (by == kNone) by = mover;
         }
         if (by == kNone) continue;   // a constant at this point
@@ -297,6 +348,7 @@ inline void Reduction::readPoint(EvalContext& ctx) {
         }
         run_.push_back(i);
     }
+    return found;
 }
 
 // An argument's value is published through a slot of the reduction's, as a
@@ -347,20 +399,37 @@ inline void Reduction::operator()(std::initializer_list<double> x, std::span<dou
     (*this)(std::span<const double>(x.begin(), x.size()), y);
 }
 
-// The call leaves every step's inputs in values_. Every step that runs is
-// asked for its partials, the ones whose adjoint turns out to be 0 included:
-// whether a reduction has a derivative is then a matter of its steps, and not
-// of the point it is asked at. From the last run to the first, as a gradient
-// asks them.
+// A stamp that wraps would meet the stamps of 2³² passes ago, so the marks are
+// cleared then.
+inline void Reduction::nextPass() {
+    if (++pass_ == 0) {
+        std::fill(wanted_.begin(), wanted_.end(), std::uint32_t{0});
+        pass_ = 1;
+    }
+}
+
+// The call leaves every step's inputs in values_. A derivative passes through
+// the roots, and through each input that the partials of a step it passes
+// through name. A step runs after every step it reads, so from the last run to
+// the first, each step is known to be wanted, or not, before it is asked.
+//
+// A step the derivative does not pass through is not asked: the node that
+// computes a condition, and the steps of a branch that a choosing node did not
+// select at this call. A step that is asked must have partials, whatever its
+// adjoint turns out to be.
 inline void Reduction::gatherPartials() {
+    nextPass();
+    for (const std::size_t p : rootPosition_) wanted_[p] = pass_;
     edges_.clear();
     const std::span<const std::size_t> inputs(inputs_);
     for (std::size_t r = run_.size(); r-- > 0;) {
         const std::size_t i = run_[r];
+        firstEdge_[r] = edges_.size();
+        lastEdge_[r]  = edges_.size();
+        if (wanted_[i] != pass_) continue;
         const Entry& e = entries_[i];
         const std::span<const std::size_t> ins =
             inputs.subspan(e.firstInput, e.lastInput - e.firstInput);
-        firstEdge_[r] = edges_.size();
         partials_.clear();
         if (!e.step->partials(ReduceInputs(values_, ins), partials_))
             throw std::domain_error("dag::Reduction: " + args_[movedBy_[i]]->name()
@@ -371,6 +440,7 @@ inline void Reduction::gatherPartials() {
                 throw std::logic_error("dag::Reduction: the step of " + e.node->name()
                     + " names input " + std::to_string(p.input) + " of its "
                     + std::to_string(ins.size()));
+            wanted_[ins[p.input]] = pass_;
             edges_.push_back(Edge{ins[p.input], p.d});
         }
         lastEdge_[r] = edges_.size();
@@ -415,27 +485,19 @@ inline void Reduction::sweepForward(std::size_t seed) {
     }
 }
 
-// One pass, which asks each step and passes its adjoint on at once: a reverse
-// sweep needs a step's partials only when it comes to the step, so a gradient
-// keeps none. It asks what gatherPartials() asks, in the same order, and passes
-// adjoints on as sweepReverse() does.
-inline double Reduction::gradient(std::span<const double> x, std::span<double> g) {
-    if (g.size() != args_.size())
-        throw std::invalid_argument("dag::Reduction: " + rootNames() + " has "
-            + std::to_string(args_.size()) + " arguments, and its gradient was given room for "
-            + std::to_string(g.size()));
-    // The call, in line: a gradient is the hot call of a solver.
-    if (!single_)
-        throw std::logic_error("dag::Reduction: " + rootNames()
-            + " are several values: ask for their Jacobian");
-    run(x);
-    const double value = get_value<double>(values_[root0_]);
-
+// gatherPartials()'s marks and sweepReverse()'s adjoints in one pass, from the
+// root: a reverse sweep needs a step's partials only when it comes to the
+// step, so the marked sweep keeps none.
+inline void Reduction::sweepMarked() {
     std::fill(adjoints_.begin(), adjoints_.end(), 0.0);
-    adjoints_[root0_] = 1.0;
+    nextPass();
+    const std::size_t root = rootPosition_.front();
+    adjoints_[root] = 1.0;
+    wanted_[root]   = pass_;
     const std::span<const std::size_t> inputs(inputs_);
     for (std::size_t r = run_.size(); r-- > 0;) {
         const std::size_t i = run_[r];
+        if (wanted_[i] != pass_) continue;
         const Entry& e = entries_[i];
         const std::span<const std::size_t> ins =
             inputs.subspan(e.firstInput, e.lastInput - e.firstInput);
@@ -450,6 +512,50 @@ inline double Reduction::gradient(std::span<const double> x, std::span<double> g
                 throw std::logic_error("dag::Reduction: the step of " + e.node->name()
                     + " names input " + std::to_string(p.input) + " of its "
                     + std::to_string(ins.size()));
+            wanted_[ins[p.input]] = pass_;
+            // A partial times an adjoint is 0 when either is 0, so neither 0·∞
+            // nor 0·NaN makes a NaN. A NaN that is not multiplied by 0 does
+            // propagate.
+            if (adjoint != 0.0 && p.d != 0.0) adjoints_[ins[p.input]] += p.d * adjoint;
+        }
+    }
+}
+
+// One pass, which asks each step and passes its adjoint on at once, as
+// sweepMarked() does, and gives the gradient that gatherPartials()'s rule
+// gives.
+inline double Reduction::gradient(std::span<const double> x, std::span<double> g) {
+    if (g.size() != args_.size())
+        throw std::invalid_argument("dag::Reduction: " + rootNames() + " has "
+            + std::to_string(args_.size()) + " arguments, and its gradient was given room for "
+            + std::to_string(g.size()));
+    // The call, in line: a gradient is the hot call of a solver.
+    if (!single_)
+        throw std::logic_error("dag::Reduction: " + rootNames()
+            + " are several values: ask for their Jacobian");
+    run(x);
+    const double value = get_value<double>(values_[root0_]);
+    if (precise_) [[unlikely]] return gradientMarked(value, g);
+
+    // Every step is asked, in one pass, for as long as every step answers. A
+    // step with no partials, or one that names an input it does not have, may
+    // be one the derivative does not pass through, which only the marks can
+    // say: the marked sweep then starts again. A step the derivative does not
+    // pass through has an adjoint of 0, so asking it here passes nothing on.
+    std::fill(adjoints_.begin(), adjoints_.end(), 0.0);
+    adjoints_[root0_] = 1.0;
+    const std::span<const std::size_t> inputs(inputs_);
+    for (std::size_t r = run_.size(); r-- > 0;) {
+        const std::size_t i = run_[r];
+        const Entry& e = entries_[i];
+        const std::span<const std::size_t> ins =
+            inputs.subspan(e.firstInput, e.lastInput - e.firstInput);
+        partials_.clear();
+        if (!e.step->partials(ReduceInputs(values_, ins), partials_)) [[unlikely]]
+            return gradientMarked(value, g);
+        const double adjoint = adjoints_[i];
+        for (const auto& p : partials_.entries()) {
+            if (p.input >= ins.size()) [[unlikely]] return gradientMarked(value, g);
             if (adjoint != 0.0 && p.d != 0.0) adjoints_[ins[p.input]] += p.d * adjoint;
         }
     }

@@ -237,7 +237,9 @@ f.bind();                                       // so read it again
   A barrier that an argument moves makes `bind()` throw `std::domain_error`, naming the argument and the node. A node
   of your own joins by overriding `NodeBase::reduceStep()`, and no node is larger for it.
 - `bind()` follows the branch a `ConditionNode` took, and takes a tweaked node as a constant. A condition that an
-  argument moves is refused: a piecewise function of an argument belongs inside one functor.
+  argument moves is followed where the branch the graph did not take is clean, since something else evaluated it
+  at this point: a call then runs both branches and selects by the trial condition. Where that branch is stale,
+  `bind()` throws `std::domain_error`, since a reduction evaluates nothing.
 - The gradient sweeps the ops' closed-form partials and a `DifferentiableNode`'s dual numbers in reverse, at the trial
   point. A step with no partials, such as a `Lazy` `ComputeNode`, makes `gradient()` throw, and calls still work.
 - In an engine, a solver is an `Eager` compute node over the root, which binds in its functor:

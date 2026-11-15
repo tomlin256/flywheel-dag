@@ -122,11 +122,17 @@
 //     to read every input, so it is refused even when the input the argument
 //     moves contributes nothing.
 //   • A node whose deciding input an argument moves (ReduceReads::decides()),
-//     which is a ConditionNode whose condition an argument moves, throws
-//     std::domain_error too. Following the choice would need the values above
-//     the branch the graph did not take, which the graph does not hold. A
-//     piecewise function of an argument belongs inside one functor, where it
-//     can compare.
+//     which is a ConditionNode whose condition an argument moves, CHOOSES at
+//     each call, by the trial values. So it reads every input it has, and
+//     bind() follows the inputs the graph did not read as well. Each of those
+//     must be clean, or bind() throws std::domain_error, naming it: a
+//     reduction evaluates nothing, and the value above an input the graph did
+//     not read is the graph's only where something else has evaluated it at
+//     this point. Give such an input to the node that binds as an input of its
+//     own, or evaluate it. A call then runs the steps of every branch, as the
+//     graph evaluates every branch at its own point, and the choosing node's
+//     step selects. A barrier on a branch the graph did not take, with an
+//     argument above it, is a barrier here.
 //   • Any node can be an argument, not only a leaf. The function is then what
 //     the root would hold had that node's value been x, and the node's own
 //     inputs are not read. An argument the roots do not depend on at this
@@ -149,17 +155,23 @@
 //
 // The derivatives
 // ───────────────
-// gradient() and jacobian() run the call, ask each step for its local partials
-// at the values the call left (IReduceStep::partials()), and sweep them. The
-// partials are the ones a tape uses (dag_aad.hpp), at values a tape cannot
-// reach: an op's from ops::Derivative<Op>, a DifferentiableNode's from one run
-// of its functor on duals, and 1 for the branch a ConditionNode selects.
+// gradient() and jacobian() run the call, ask the steps for their local
+// partials at the values the call left (IReduceStep::partials()), and sweep
+// them. The partials are the ones a tape uses (dag_aad.hpp), at values a tape
+// cannot reach: an op's from ops::Derivative<Op>, a DifferentiableNode's from
+// one run of its functor on duals, and 1 for the branch a ConditionNode
+// selects.
 //
+//   • A step is asked only where the derivative passes: a root's step, and the
+//     step of each input that the partials of such a step name. That is the
+//     rule a tape records by. So the node that computes a condition is never
+//     asked, and neither are the steps of a branch that a choosing node did not
+//     select at this call.
 //   • A partial times an adjoint or a tangent counts as 0 when either one is
 //     0, as on a tape. So neither an infinite partial under an adjoint of 0
 //     nor a NaN that nothing depends on reaches the result: z·√x at z = 0 and
 //     x = 0 has ∂/∂x = 0. A NaN on a path the result depends on is kept.
-//   • A step with no partials makes gradient() and jacobian() throw
+//   • A step that is asked and has no partials makes the call throw
 //     std::domain_error, naming the argument, the root and the node. The step
 //     of a ComputeNode, an InPlaceComputeNode, a TweakableComputeNode or a
 //     MemoizedComputeNode has none, because its functor is opaque, and neither
@@ -225,8 +237,9 @@ public:
     /// Binds to the point the graph holds: reads every value that no argument
     /// moves. Throws std::invalid_argument unless every root is clean and
     /// holds a double and every argument a step reads holds one, and
-    /// std::domain_error for a barrier. A bind that throws leaves the
-    /// reduction unbound.
+    /// std::domain_error for a barrier, and for an input the graph did not
+    /// read, of a node that an argument makes choose, that is dirty. A bind
+    /// that throws leaves the reduction unbound.
     void bind();
 
     /// The root's value, had the arguments held x, one value per argument in
@@ -246,7 +259,7 @@ public:
     /// written to g[i]: 0 for an argument the root does not depend on at the
     /// bound point. Throws what the one-root call throws,
     /// std::invalid_argument unless g has arity() slots, and std::domain_error
-    /// when a step has no partials.
+    /// when a step the derivative passes through has no partials.
     double gradient(std::span<const double> x, std::span<double> g);
     double gradient(std::initializer_list<double> x, std::span<double> g);
 
@@ -254,8 +267,8 @@ public:
     /// row per root: j[i·arity() + k] is the derivative of root i with respect
     /// to argument k, and 0 where root i does not depend on argument k at the
     /// bound point. Throws what the call throws, std::invalid_argument unless
-    /// j has roots()·arity() slots, and std::domain_error when a step has no
-    /// partials.
+    /// j has roots()·arity() slots, and std::domain_error when a step a
+    /// derivative passes through has no partials.
     void jacobian(std::span<const double> x, std::span<double> y, std::span<double> j);
     void jacobian(std::initializer_list<double> x, std::span<double> y, std::span<double> j);
 
@@ -297,20 +310,52 @@ private:
     static bool holdsDouble(const ValuePtr& v) noexcept;
     /// Why bind() cannot call entries_[barrier], which argument `by` moves.
     std::string barrierMessage(std::size_t barrier, std::size_t by) const;
+    /// Why bind() cannot follow entries_[chooser], whose input inputs_[stale]
+    /// the graph did not read and nothing has evaluated.
+    std::string staleMessage(std::size_t chooser, std::size_t stale) const;
     /// "root r", or "roots r, s and t".
     std::string rootNames() const;
 
-    /// One reading of the point: what the roots depend on, and which of that
-    /// an argument moves.
-    [[gnu::always_inline]] void readPoint(EvalContext& ctx);
+    /// One reading of the point: what the roots depend on, with every node of
+    /// choosing_ reading all its inputs, and which of that an argument moves.
+    /// True when it found a node that an argument makes choose and choosing_
+    /// did not hold: the reading is then incomplete, and must be taken again.
+    /// Following is false for the first reading, which is the only one unless
+    /// it meets such a node: it then reads as a point with no choosing node is
+    /// read, and stops at the node.
+    template<bool Following>
+    [[gnu::always_inline]] bool readPoint(EvalContext& ctx);
+    /// The readings that follow a choice, kept out of line: a point with no
+    /// choosing node never comes here.
+    [[gnu::noinline, gnu::cold]] void readFollowing(EvalContext& ctx) {
+        do {
+            for (auto& v : values_) v.reset();
+            run_.clear();
+            live_.clear();
+        } while (readPoint<true>(ctx));
+    }
     /// The checks every call makes, and the steps.
     [[gnu::always_inline]] void run(std::span<const double> x);
-    /// Asks each step that runs for its partials, and keeps them in edges_.
+    /// Starts a derivative pass: nothing is wanted yet.
+    void nextPass();
+    /// Asks each step the derivative passes through for its partials, and
+    /// keeps them in edges_.
     void gatherPartials();
     /// One reverse sweep of edges_ from entries_[root]: adjoints_.
     void sweepReverse(std::size_t root);
     /// One forward sweep of edges_ from entries_[seed]: adjoints_, as tangents.
     void sweepForward(std::size_t seed);
+    /// gradient()'s sweep with the marks: it asks only the steps the
+    /// derivative passes through.
+    void sweepMarked();
+    /// gradient() by the marked sweep, from here on at this bound point.
+    [[gnu::noinline, gnu::cold]] double gradientMarked(double value, std::span<double> g) {
+        precise_ = true;
+        sweepMarked();
+        for (std::size_t k = 0; k < args_.size(); ++k)
+            g[k] = argPosition_[k] == kNone ? 0.0 : adjoints_[argPosition_[k]];
+        return value;
+    }
 
     std::vector<NodePtr> roots_;
     std::vector<NodePtr> args_;
@@ -334,6 +379,10 @@ private:
     std::vector<ReduceReads::Use> uses_;      ///< one per inputs_: what the candidate reads
     std::vector<std::uint8_t>     reached_;   ///< one per entry: a root depends on it here
     std::vector<std::size_t>      movedBy_;   ///< one per entry: an argument that moves it, or kNone
+    /// One per entry: the argument that moves its deciding input, which makes
+    /// it choose at each call, or kNone.
+    std::vector<std::size_t>      choosing_;
+    bool                          chose_ = false;   ///< choosing_ holds a mark
     std::vector<std::size_t>      run_;       ///< the candidates a call runs, in order
     std::vector<std::size_t>      live_;      ///< the arguments a call writes
     std::vector<ValuePtr>         rootValue_; ///< one per root, while bind() reads the point
@@ -348,6 +397,15 @@ private:
     // ── A derivative's working storage, kept for its capacity ────────────────
     std::vector<double>       adjoints_;   ///< one per entry: an adjoint, or a tangent
     aad::Partials             partials_;   ///< the step being asked
+    /// One per entry: the derivative pass that last passed through it. A stamp
+    /// and not a flag, so that nothing is cleared between passes, and not a
+    /// byte, a store through which would make the compiler reload everything
+    /// else it holds.
+    std::vector<std::uint32_t> wanted_;
+    std::uint32_t              pass_ = 0;   ///< the current derivative pass
+    /// The bound point has a step the derivative may not pass through, so a
+    /// gradient marks what it passes through and asks only that.
+    bool                       precise_ = false;
     std::vector<Edge>         edges_;      ///< the partials of the steps asked
     /// One per step of run_: its partials are edges_[firstEdge_[r], lastEdge_[r]).
     std::vector<std::size_t>  firstEdge_;

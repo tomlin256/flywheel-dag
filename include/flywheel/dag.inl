@@ -747,7 +747,8 @@ inline bool ConditionNode::partials(EvalContext& ctx, aad::Partials& out) {
 
 // Selection, at the values a reduction hands it. It returns the selected
 // branch's value itself, as eval() publishes it, so it needs no slot. The input
-// of the other branch is null here, because reduceReads() does not name it.
+// of the other branch is null here, because reduceReads() does not name it,
+// unless an argument moves the condition: the reduction then hands it both.
 class ConditionNode::Step final : public IReduceStep {
 public:
     ValuePtr apply(const ReduceInputs& in) override {
@@ -765,8 +766,9 @@ inline std::unique_ptr<IReduceStep> ConditionNode::reduceStep() { return std::ma
 
 // What eval() read. The condition is pulled only to learn which branch that
 // was. The node is clean when a reduction asks, so the pull returns the value
-// its last eval() chose by. The other branch is not named, so a reduction never
-// reads it: it may be stale, and reading it would evaluate it.
+// its last eval() chose by. The other branch is not named, so a reduction does
+// not read it, unless an argument moves the condition, and then only once
+// something has evaluated it: it may be stale, and reading it would evaluate it.
 inline void ConditionNode::reduceReads(EvalContext& ctx, ReduceReads& out) {
     const bool cond = get_value<bool>(condition_->eval(ctx));
     out.decides(0);

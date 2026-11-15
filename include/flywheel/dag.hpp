@@ -379,8 +379,10 @@ public:
     void reads(std::size_t input);
 
     /// The same, and the input's value chose which inputs the node reads, as a
-    /// ConditionNode's condition does. A Reduction is bound to the choice the
-    /// graph made, so it refuses a point where an argument moves such an input.
+    /// ConditionNode's condition does. Where an argument moves such an input,
+    /// a Reduction makes the choice at each call, so it takes the node to read
+    /// every input it has, and refuses the point while one the node did not
+    /// name is dirty (dag_reduce.hpp).
     void decides(std::size_t input);
 
 private:
@@ -502,8 +504,9 @@ public:
 
     /// The inputs this node's value depends on at the values the graph holds
     /// now. The default is every input. A node that reads fewer says so here:
-    /// a Reduction then never reads the others, which can be stale, and a
-    /// barrier among them is not one. It pulls what it must with eval(ctx), as
+    /// a Reduction then does not read the others, which can be stale, and a
+    /// barrier among them is not one, unless an argument moves an input named
+    /// with ReduceReads::decides(). It pulls what it must with eval(ctx), as
     /// eval() does. A Reduction asks only a clean node, at each bind(), so
     /// every pull returns a cached value.
     virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
@@ -1056,11 +1059,12 @@ private:
 //
 // AS A STEP. It always gives a Reduction a step, which selects as eval() does.
 // It tells a Reduction what eval() read: the condition, which decides,
-// and the branch the condition selects. So a reduction never reads the other
-// branch, and a barrier there is not one. A reduction is bound to the branch
-// the graph took, and refuses a condition that an argument moves: following
-// the other branch would need the values above it, which the graph does not
-// hold.
+// and the branch the condition selects. So a reduction does not read the other
+// branch, and a barrier there is not one, unless an argument moves the
+// condition. The reduction then selects at each call, by the trial values, and
+// reads the other branch too, which must be clean: a reduction evaluates
+// nothing, and the values above that branch are the graph's only where
+// something has evaluated it (dag_reduce.hpp).
 // ─────────────────────────────────────────────────────────────────────────────
 class ConditionNode
     : public NodeBase

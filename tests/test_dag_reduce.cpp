@@ -664,17 +664,26 @@ TEST(Reduction, ABarrierOnTheBranchNotTakenIsNotOne) {
 }
 
 // |x| as a selection: x > 0 chooses between x and −x, and the argument moves it.
-TEST(Reduction, AConditionAnArgumentMovesIsABarrier) {
+// The graph took x, so nothing has evaluated −x, and the bind is refused until
+// something does.
+TEST(Reduction, AConditionAnArgumentMovesIsRefusedWhileItsOtherBranchIsStale) {
     auto x        = Input<double>::make("arg.x", 2.0);
     auto positive = ComputeNode<bool, double>::make("node.positive", {x},
         [](const double& a) { return a > 0.0; }, InvalidationMode::Lazy);
-    auto root     = ConditionNode::make("root.out", positive, x, ops::NegateNode<>::make("-x", x));
+    auto minus    = ops::NegateNode<>::make("-x", x);
+    auto root     = ConditionNode::make("root.out", positive, x, minus);
     EvalContext ctx;
     root->eval(ctx);
 
     Reduction f(root, {x});
     const std::string why = messageOf<std::domain_error>([&] { f.bind(); });
     EXPECT_TRUE(mentions(why, "arg.x moves node.positive, which decides what root.out reads")) << why;
+
+    // With the other branch evaluated, the reduction follows the choice.
+    minus->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f({-5.0}), 5.0);
+    EXPECT_EQ(f({5.0}), 5.0);
 }
 
 // sel·x, where sel is k or −x. With k taken the selection reads nothing that
@@ -1272,13 +1281,16 @@ TEST(Reduction, FollowsOnlyTheInputsANodeReads) {
     EXPECT_FALSE(other->isInitialized());
 }
 
-// 0·x chooses, so the argument moves what decides which input is read.
-TEST(Reduction, ADecidingInputAnArgumentMovesIsABarrier) {
-    auto x     = Input<double>::make("arg.x", 2.0);
-    auto zero  = Input<double>::make("zero", 0.0);
-    auto which = ops::ProductNode<>::make("node.which", {zero, x});
-    auto first = Input<double>::make("first", 10.0);
-    auto root  = Chooser::make("root.out", which, first, Input<double>::make("second", 20.0));
+// 0·x chooses, so the argument moves what decides which input is read. The
+// Chooser took `first`, so nothing has evaluated `second`, and the bind is
+// refused until something does.
+TEST(Reduction, ADecidingInputAnArgumentMovesIsRefusedWhileItsOtherBranchIsStale) {
+    auto x      = Input<double>::make("arg.x", 2.0);
+    auto zero   = Input<double>::make("zero", 0.0);
+    auto which  = ops::ProductNode<>::make("node.which", {zero, x});
+    auto first  = Input<double>::make("first", 10.0);
+    auto second = Input<double>::make("second", 20.0);
+    auto root   = Chooser::make("root.out", which, first, second);
     EvalContext ctx;
     root->eval(ctx);
 
@@ -1290,6 +1302,13 @@ TEST(Reduction, ADecidingInputAnArgumentMovesIsABarrier) {
     Reduction ofFirst = reduce(root, {first});
     EXPECT_EQ(ofFirst.size(), 1u);
     EXPECT_EQ(ofFirst({11.0}), 11.0);
+
+    // With the other input evaluated, the reduction follows the choice: 0·x is
+    // 0 for every x, so the Chooser selects `first` at every call.
+    second->eval(ctx);
+    f.bind();
+    EXPECT_EQ(f.size(), 2u);   // the product and the Chooser
+    EXPECT_EQ(f({7.0}), 10.0);
 }
 
 // Held, the Chooser reads nothing, so it is a constant, although the argument
