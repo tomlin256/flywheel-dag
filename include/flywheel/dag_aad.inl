@@ -27,6 +27,19 @@ inline Tape::Tape(const std::vector<NodePtr>& roots) {
 
 inline std::size_t Tape::size() const noexcept { return entries_.size(); }
 
+namespace detail {
+
+/// A node's local partials, asked the way the node gives them: through
+/// NodeBase::partials() for a node that derives NodeBase, and through
+/// IDifferentiable for any other.
+inline bool askPartials(INode& node, EvalContext& ctx, Partials& out) {
+    if (auto* base = dynamic_cast<NodeBase*>(&node)) return base->partials(ctx, out);
+    if (auto* d = dynamic_cast<IDifferentiable*>(&node)) return d->partials(ctx, out);
+    return false;
+}
+
+} // namespace detail
+
 // add() checks the root clean, and a clean node's named inputs are clean too: an
 // input that moves invalidates its consumers, and a node does not end an
 // evaluation clean over an input that went dirty again. So record()'s walk reads
@@ -79,9 +92,8 @@ inline void Tape::record(const NodePtr& root) {
         f.holdsDouble = v && v->type() == std::type_index(typeid(double));
         const std::vector<NodePtr> ins = n->inputs();
         if (!ins.empty()) {
-            auto* d = dynamic_cast<IDifferentiable*>(n.get());
             partials.clear();
-            if (d != nullptr && d->partials(ctx, partials)) {
+            if (detail::askPartials(*n, ctx, partials)) {
                 for (const auto& e : partials.entries()) {
                     if (e.input >= ins.size())
                         throw std::logic_error("aad::Tape: " + n->name() + " names input "

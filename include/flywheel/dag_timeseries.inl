@@ -170,6 +170,11 @@ inline std::size_t RollingStats::count() const { return state_.count; }
 inline double RollingStats::prevMean()   const { return state_.prevMean; }
 inline double RollingStats::prevStddev() const { return state_.prevStddev; }
 
+inline bool RollingStats::partials(EvalContext&, aad::Partials& out) {
+    out.add(0, 1.0 / static_cast<double>(state_.count));
+    return true;
+}
+
 inline double RollingStats::doCompute(const double& x, State& s) {
     // Capture stats BEFORE including this sample — used by ZScoreNode for outlier detection
     s.prevMean   = s.count > 0 ? s.mean : 0.0;
@@ -251,6 +256,11 @@ inline RollingSumNode::RollingSumNode(std::string n, NodePtr up, std::size_t w,
     , window_(w)
 {
     state_.buf.setCapacity(w + 1);
+}
+
+inline bool RollingSumNode::partials(EvalContext&, aad::Partials& out) {
+    out.add(0, 1.0);
+    return true;
 }
 
 inline double RollingSumNode::doCompute(const double& x, State& s) {
@@ -397,9 +407,15 @@ inline EWMANode::EWMANode(std::string n, NodePtr up, double a,
 {}
 
 inline double EWMANode::doCompute(const double& x, State& s) {
+    s.blended = s.initialized;
     s.ewma = s.initialized ? (alpha_ * x + (1.0 - alpha_) * s.ewma) : x;
     s.initialized = true;
     return s.ewma;
+}
+
+inline bool EWMANode::partials(EvalContext&, aad::Partials& out) {
+    out.add(0, state_.blended ? alpha_ : 1.0);
+    return true;
 }
 
 inline void EWMANode::doSaveState(INodeState& s, const State& st) const {
@@ -442,6 +458,8 @@ inline double EWMATickRateNode::doCompute(const double& /*trigger*/, State& s) {
     return s.rate;
 }
 
+inline bool EWMATickRateNode::partials(EvalContext&, aad::Partials&) { return true; }
+
 inline void EWMATickRateNode::doSaveState(INodeState& s, const State& st) const {
     s["rate"] = st.rate;
 }
@@ -467,7 +485,18 @@ DeltaNode<T>::DeltaNode(std::string n, NodePtr up)
 {}
 
 template<typename T>
+bool DeltaNode<T>::partials(EvalContext&, [[maybe_unused]] aad::Partials& out) {
+    if constexpr (std::is_same_v<T, double>) {
+        if (this->state_.differenced) out.add(0, 1.0);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+template<typename T>
 T DeltaNode<T>::doCompute(const T& x, State& s) {
+    s.differenced = s.hasPrev;
     T delta  = s.hasPrev ? (x - s.prev) : T{};
     s.prev   = x;
     s.hasPrev = true;
@@ -574,13 +603,21 @@ inline ValuePtr ZScoreNode::eval(EvalContext& ctx) {
     stats_->eval(ctx);
     double mu = stats_->prevMean();
     double sd = stats_->prevStddev();
-    double z  = (sd < 1e-12) ? 0.0 : (x - mu) / sd;
+    double z  = (sd < kFlat) ? 0.0 : (x - mu) / sd;
     // notifyDownstream() owns cached_ — see StatefulNodeBase::eval.
     this->notifyDownstream(slot_.emit(z), eq_);
     return this->cached_;
 }
 
 inline RollingStats& ZScoreNode::stats() { return *stats_; }
+
+// The spread eval() divided by. With none to divide by, z is 0 whatever the
+// sample, and names no input.
+inline bool ZScoreNode::partials(EvalContext&, aad::Partials& out) {
+    const double sd = stats_->prevStddev();
+    if (!(sd < kFlat)) out.add(0, 1.0 / sd);
+    return true;
+}
 
 inline void ZScoreNode::doSaveState(INodeState& s, const State&) const {
     stats_->saveState(s.sub("stats"));
@@ -631,6 +668,13 @@ inline ValuePtr OutlierGateNode::eval(EvalContext& ctx) {
 
 inline bool OutlierGateNode::lastWasOutlier() const { return state_.lastWasOutlier; }
 
+inline bool OutlierGateNode::partials(EvalContext&, aad::Partials& out) {
+    out.add(0, state_.lastWasOutlier
+                   ? 1.0 / static_cast<double>(zNode_->stats().count())
+                   : 1.0);
+    return true;
+}
+
 inline void OutlierGateNode::doSaveState(INodeState& s, const State& st) const {
     s["lastWasOutlier"] = st.lastWasOutlier;
     zNode_->saveState(s.sub("zscore"));
@@ -662,8 +706,19 @@ RateLimiterNode<T>::RateLimiterNode(std::string n, NodePtr up, T d)
 {}
 
 template<typename T>
+bool RateLimiterNode<T>::partials(EvalContext&, [[maybe_unused]] aad::Partials& out) {
+    if constexpr (std::is_same_v<T, double>) {
+        if (this->state_.passed) out.add(0, 1.0);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+template<typename T>
 T RateLimiterNode<T>::doCompute(const T& x, State& s) {
     bool doEmit = !s.hasEmitted || (std::abs(x - s.lastEmitted) >= minDelta_);
+    s.passed = doEmit;
     if (doEmit) {
         s.lastEmitted = x;
         s.hasEmitted  = true;
@@ -800,6 +855,17 @@ std::size_t DelayNode<T>::bufferedCount() const { return this->state_.buf.size()
 
 template<typename T>
 bool DelayNode<T>::isWarm() const { return this->state_.warm; }
+
+template<typename T>
+bool DelayNode<T>::partials(EvalContext&, [[maybe_unused]] aad::Partials& out) {
+    if (delay_ > 0) return true;
+    if constexpr (std::is_same_v<T, double>) {
+        out.add(0, 1.0);
+        return true;
+    } else {
+        return false;
+    }
+}
 
 template<typename T>
 T DelayNode<T>::doCompute(const T& x, State& s) {

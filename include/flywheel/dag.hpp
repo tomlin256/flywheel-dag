@@ -434,7 +434,8 @@ public:
 // using it.
 //
 // It also carries the two hooks a dag::Reduction asks a node through,
-// reduceStep() and reduceReads(): the reduction contract is the block above.
+// reduceStep() and reduceReads() (the reduction contract is the block above),
+// and partials(), which a tape asks (dag_aad.hpp).
 // ─────────────────────────────────────────────────────────────────────────────
 class NodeBase : public INode {
 public:
@@ -506,6 +507,18 @@ public:
     /// eval() does. A Reduction asks only a clean node, at each bind(), so
     /// every pull returns a cached value.
     virtual void reduceReads(EvalContext& ctx, ReduceReads& out);
+
+    // ── The derivative hook ──────────────────────────────────────────────────
+    //
+    // A virtual of NodeBase for the reason the reduction hooks are. A tape asks
+    // a node that derives NodeBase through it, and any other node through
+    // aad::IDifferentiable, whose partials() has the same contract.
+
+    /// This node's local partial derivatives at the values the graph holds
+    /// now, written as aad::IDifferentiable::partials() writes them: an entry
+    /// for each input the value depends on here. False, the default, when the
+    /// node cannot say, which makes it a barrier to a tape.
+    virtual bool partials(EvalContext& ctx, aad::Partials& out);
 
 protected:
     /// Invalidate every downstream node — "my value changed". Expired weak_ptrs
@@ -843,24 +856,29 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // IDifferentiable — a node that can say how its value moves with its inputs.
 //
-// A mixin, like ITweakable and IStatefulNode. A pass finds it with
-// dynamic_cast, as Engine::discoverStatefulNodes() finds IStatefulNode, so
-// INode and NodeBase do not change, and neither does any node that does not
-// implement it. A node with inputs that does not implement it is a barrier: a
-// pass cannot follow its inputs.
+// A mixin, like ITweakable and IStatefulNode, for a node that does not derive
+// NodeBase. A pass asks a node that does through NodeBase::partials(), which
+// has this contract, so such a node joins with no second base. A pass finds the
+// mixin with dynamic_cast, as Engine::discoverStatefulNodes() finds
+// IStatefulNode. The engine's ops, ConditionNode, TweakableComputeNode and
+// aad::DifferentiableNode derive it as well, and override both virtuals with
+// one function. A node with inputs that gives no partials is a barrier: a pass
+// cannot follow its inputs.
 //
 // partials() writes the node's local partial derivatives at its inputs'
 // CURRENT values. It pulls its inputs with eval(ctx), as eval() does. A pass
 // calls it only on a clean node, whose inputs are then clean too, so every pull
 // returns a cached value and nothing is evaluated.
 //
-// The partials come from the inputs alone, never from the node's own published
-// value. Under a tolerance policy the two can differ, because the published
-// value is the last one the policy let through.
+// The partials come from the inputs, and a stateful node's from the state its
+// last update left, never from the node's own published value. Under a
+// tolerance policy the two can differ, because the published value is the last
+// one the policy let through.
 //
 // Returns false when the node cannot say, which makes it a barrier. An op over
-// a type other than double returns false, and so does an untweaked
-// TweakableComputeNode, whose functor is opaque.
+// a type other than double returns false, and so do an untweaked
+// TweakableComputeNode, whose functor is opaque, and a dag::ts node that does
+// not take and give a double.
 // ─────────────────────────────────────────────────────────────────────────────
 class IDifferentiable {
 public:

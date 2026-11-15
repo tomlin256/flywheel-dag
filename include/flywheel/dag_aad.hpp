@@ -17,7 +17,8 @@
 // program is already a graph, and inputs() already names every edge. So a Tape
 // records one entry per node instead of one per operation: the node's local
 // partial derivatives at the values the graph holds now, which it reports
-// through aad::IDifferentiable (dag.hpp). Nothing is recorded while the graph
+// through NodeBase::partials(), or aad::IDifferentiable for a node that does
+// not derive NodeBase (dag.hpp). Nothing is recorded while the graph
 // evaluates, so a graph that never asks for a derivative pays nothing.
 //
 // A tape is swept in either direction:
@@ -45,11 +46,15 @@
 //   • A node with no inputs, such as Input, AsyncInput or ReplayInput, is a
 //     LEAF.
 //   • A node with inputs but no partials is a BARRIER, and its inputs are not
-//     followed. Every dag::ts node is one. So is a ComputeNode,
-//     InPlaceComputeNode or MemoizedComputeNode, because its functor is opaque.
-//     A DifferentiableNode (below) is the compute node a tape can see into.
-//   • The branch a ConditionNode did not take, and the inputs of a tweaked
-//     node, are never named, so the walk never reaches them.
+//     followed. A ComputeNode, InPlaceComputeNode or MemoizedComputeNode is
+//     one, because its functor is opaque. A DifferentiableNode (below) is the
+//     compute node a tape can see into.
+//   • A dag::ts node that takes and gives a double names its sample with the
+//     partial of its last update, at the state it holds (dag_timeseries.hpp).
+//     One that does not is a barrier.
+//   • The branch a ConditionNode did not take, the inputs of a tweaked node,
+//     and the sample of a dag::ts node whose value does not depend on it, are
+//     never named, so the walk never reaches them.
 //
 // The rules
 // ─────────
@@ -496,9 +501,9 @@ using DifferentiableNodePtr = std::shared_ptr<DifferentiableNode<N>>;
 // and then should run a pass on demand instead.
 //
 // Under the default policy, a gradient holding a NaN is unequal to itself, so
-// it is published on every recompute, as a double NaN is. It is not an
-// IDifferentiable: its value is a vector, so no tape can take it as a root or a
-// wrt node, and a node that reads one of its entries is a barrier.
+// it is published on every recompute, as a double NaN is. It gives no
+// partials: its value is a vector, so no tape can take it as a root or a wrt
+// node, and a node that reads one of its entries is a barrier.
 // ─────────────────────────────────────────────────────────────────────────────
 class GradientNode
     : public NodeBase
@@ -540,7 +545,7 @@ using GradientNodePtr = std::shared_ptr<GradientNode>;
 // GradientNode's forward-mode counterpart, and what GradientNode says about
 // itself holds here too. It is Eager, fixed here. Its inputs are its roots, and
 // a seed's node is not one. It evaluates what its roots' eval() evaluates, it
-// throws what the tape throws, and it is not an IDifferentiable. The seeds are
+// throws what the tape throws, and it gives no partials. The seeds are
 // constants, given at make().
 //
 // ONE TAPE. Each recompute pulls the roots in turn, and records each root right

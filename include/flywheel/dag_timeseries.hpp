@@ -36,6 +36,25 @@
 //  RateLimiterNode<T>  — holds its last emitted value while |Δ| < minDelta
 //  DebounceCountNode       — bool: only true after N consecutive true ticks
 //  LatchedDebounceNode     — std::optional<bool>: edge-triggered onset/resolved with debounce
+//
+// Derivatives
+// ───────────
+// A node that takes a double and gives one says how its value moves with the
+// sample it took (NodeBase::partials()): the derivative of its last update
+// with respect to that sample, with the state the update started from held
+// fixed. So a tape (dag_aad.hpp) differentiates through the node at the state
+// it holds, and an EWMA's partial is its α. That answers "had the latest
+// sample been higher, how much would the value move?". It does not count what
+// an input's earlier samples put into the state, so for an input that fed
+// them too it is the latest sample's share (flywheel-dag#81).
+//
+// A node whose value does not depend on its latest sample names no input, and
+// is a constant to a pass: a delay of a tick or more, a tick rate, a z-score
+// with no spread to measure against, a first difference's first update, and a
+// rate limiter that held its sample back. A node that does not take and give
+// a double gives no partials, and is a barrier: WindowNode, RollingMinMaxNode,
+// ThresholdNode, the two debounce nodes, and the templates at any type but
+// double. makeTimeDelayNode builds an Eager ComputeNode, a barrier too.
 
 #include "dag.hpp"
 #include "dag_ring_buffer.hpp"
@@ -125,6 +144,11 @@ private:
 struct EWMANodeState {
     double ewma        = 0.0;
     bool   initialized = false;
+    /// The last update blended its sample into an average the node held, and
+    /// did not take it whole as the first does. partials() reads it. It is not
+    /// persisted: restoreState() leaves the node dirty, and so it updates
+    /// before a pass can ask.
+    bool   blended     = false;
 };
 
 struct EWMATickRateNodeState {
@@ -135,6 +159,9 @@ template<typename T>
 struct DeltaNodeState {
     T    prev{};
     bool hasPrev = false;
+    /// The last update had a previous sample to subtract. partials() reads it,
+    /// and it is not persisted, as EWMANodeState::blended is not.
+    bool differenced = false;
 };
 
 template<typename T>
@@ -155,6 +182,9 @@ template<typename T>
 struct RateLimiterNodeState {
     T    lastEmitted{};
     bool hasEmitted = false;
+    /// The last update passed its sample on. partials() reads it, and it is not
+    /// persisted, as EWMANodeState::blended is not.
+    bool passed = false;
 };
 
 template<typename T>
@@ -195,6 +225,14 @@ struct ZScoreNodeState {};
 struct OutlierGateNodeState {
     bool lastWasOutlier = false;
 };
+
+// The flags that partials() reads sit in the padding after each state's
+// double, so no node is larger for them.
+static_assert(sizeof(EWMANodeState) == sizeof(double) + alignof(EWMANodeState));
+static_assert(sizeof(DeltaNodeState<double>)
+              == sizeof(double) + alignof(DeltaNodeState<double>));
+static_assert(sizeof(RateLimiterNodeState<double>)
+              == sizeof(double) + alignof(RateLimiterNodeState<double>));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WindowNode<T>
@@ -257,6 +295,9 @@ public:
     std::size_t filled()   const noexcept override { return state_.count; }
     NodePtr windowStatusNode() const override;
 
+    /// 1/count: the mean of count samples moves by 1/count of a move in one.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
+
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
@@ -301,6 +342,9 @@ public:
     std::size_t capacity() const noexcept override { return window_; }
     std::size_t filled()   const noexcept override { return state_.buf.size(); }
     NodePtr windowStatusNode() const override;
+
+    /// 1: the latest sample is one term of the sum.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
@@ -369,6 +413,10 @@ public:
 
     bool isInitialized() const { return state_.initialized; }
 
+    /// α once the node holds an average to blend into, and 1 for the first
+    /// sample, which it takes whole.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
+
     double doCompute(const double& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
@@ -394,6 +442,9 @@ public:
         std::string name, NodePtr trigger, double alpha,
         EqualityPolicyPtr eq = nullptr);
 
+    /// No input: the rate counts evaluations and never reads the sample.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
+
     double doCompute(const double& /*trigger*/, State& s);
     void doSaveState(INodeState& s, const State& st) const;
     void doRestoreState(const INodeState& s, State& st);
@@ -415,6 +466,11 @@ public:
     using State = DeltaNodeState<T>;
 
     static std::shared_ptr<DeltaNode<T>> make(std::string name, NodePtr upstream);
+
+    /// 1 once there is a previous sample to subtract. No input for the first
+    /// update, whose value is T{} whatever the sample. None at a T other than
+    /// double.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
     T    doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
@@ -479,6 +535,12 @@ public:
     ValuePtr eval(EvalContext& ctx) override;
     RollingStats& stats();
 
+    /// 1/σ, with σ the spread before the sample joined the window, as eval()
+    /// takes it. No input where σ is too small to divide by, and z is 0. It
+    /// reads σ from the stats node, so it holds for a stats node over the same
+    /// upstream, as the make() that builds one gives.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
+
     // Trivial stub — eval() is overridden; doCompute is not called via the base scaffold.
     double doCompute(const double&, State&) { return 0.0; }
     void doSaveState(INodeState& s, const State&) const;
@@ -488,6 +550,9 @@ private:
     ZScoreNode(std::string n, NodePtr up,
                RollingStatsPtr stats,
                EqualityPolicyPtr eq);
+
+    /// Below this spread the z-score is 0: there is nothing to measure against.
+    static constexpr double kFlat = 1e-12;
 
     RollingStatsPtr stats_;
 };
@@ -510,6 +575,10 @@ public:
 
     ValuePtr eval(EvalContext& ctx) override;
     bool lastWasOutlier() const;
+
+    /// 1 for a sample that passes, which is the value, and 1/count for one
+    /// that is gated, which the rolling mean holds as one sample of count.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
     // Trivial stub — eval() is overridden; doCompute is not called via the base scaffold.
     double doCompute(const double&, State&) { return 0.0; }
@@ -549,6 +618,10 @@ public:
     // by declaring the consumer Lazy. A limiter wired mid-graph propagates its
     // release: see
     // ValueSlot.RateLimiterWiredMidGraphPropagatesItsReleaseThroughTheEngine.
+
+    /// 1 when the last update passed its sample on. No input when it held the
+    /// sample back. None at a T other than double.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
     T    doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;
@@ -642,6 +715,11 @@ public:
     std::size_t capacity() const noexcept override { return delay_; }
     std::size_t filled()   const noexcept override { return this->state_.buf.size(); }
     NodePtr windowStatusNode() const override;
+
+    /// No input for a delay of a tick or more, whose value is an older sample
+    /// or the initial value. 1 for a delay of 0, which passes the sample on,
+    /// and none for one at a T other than double.
+    bool partials(EvalContext& ctx, aad::Partials& out) override;
 
     T    doCompute(const T& x, State& s);
     void doSaveState(INodeState& s, const State& st) const;

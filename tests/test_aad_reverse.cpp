@@ -101,6 +101,58 @@ private:
     ValuePtr cached_;
 };
 
+/// 3·a, as a node that derives INode and aad::IDifferentiable alone and keeps
+/// the dirty protocol by hand. A tape asks a node that derives NodeBase through
+/// NodeBase::partials(), and this one through the mixin.
+class Tripled
+    : public INode
+    , public aad::IDifferentiable
+    , public std::enable_shared_from_this<Tripled>
+{
+public:
+    static std::shared_ptr<Tripled> make(std::string name, NodePtr in) {
+        auto self = std::shared_ptr<Tripled>(new Tripled(std::move(name), std::move(in)));
+        self->in_->addDownstream(self);
+        return self;
+    }
+
+    ValuePtr eval(EvalContext& ctx) override {
+        if (!dirty_ && !ctx.forceRecompute) return cached_;
+        const ValuePtr v = in_->eval(ctx);
+        cached_ = make_value(3.0 * get_value<double>(v));
+        dirty_  = false;
+        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidate();
+        return cached_;
+    }
+    std::string name() const override { return name_; }
+    std::vector<NodePtr> inputs() const override { return {in_}; }
+    void invalidate() override { mark(); }
+    void invalidateMaybe() override { mark(); }
+    bool dirty() const override { return dirty_; }
+    void addDownstream(std::weak_ptr<INode> n) override { downstream_.push_back(std::move(n)); }
+    NodeKind kind() const override { return NodeKind::Compute; }
+
+    bool partials(EvalContext&, aad::Partials& out) override {
+        out.add(0, 3.0);
+        return true;
+    }
+
+private:
+    Tripled(std::string name, NodePtr in) : name_(std::move(name)), in_(std::move(in)) {}
+
+    void mark() {
+        if (dirty_) return;
+        dirty_ = true;
+        for (auto& w : downstream_) if (auto n = w.lock()) n->invalidateMaybe();
+    }
+
+    std::string                       name_;
+    NodePtr                           in_;
+    ValuePtr                          cached_;
+    bool                              dirty_ = true;
+    std::vector<std::weak_ptr<INode>> downstream_;
+};
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +303,18 @@ TEST(AadReverse, ABarrierIsAConstantOrAWrt) {
     EXPECT_EQ(g[1], 5.0);
 }
 
+// A node that does not derive NodeBase gives a tape its partials through
+// aad::IDifferentiable, and is no barrier.
+TEST(AadReverse, ANodeThatIsNotANodeBaseIsAskedThroughTheMixin) {
+    auto x       = Input<double>::make("x", 2.0);
+    auto tripled = Tripled::make("3x", x);
+    auto root    = ops::SumNode<>::make("root", {tripled, x});
+    EvalContext ctx;
+    root->eval(ctx);
+    EXPECT_EQ(aad::adjoints(root, {x})[0], 4.0);
+    EXPECT_EQ(aad::tangents({root}, {{x, 1.0}})[0], 4.0);
+}
+
 TEST(AadReverse, OnlyBarriersUpstreamOfTheRootCount) {
     auto x      = Input<double>::make("x", 2.0);
     auto y      = Input<double>::make("y", 5.0);
@@ -343,7 +407,8 @@ TEST(AadReverse, APassEvaluatesNothing) {
 }
 
 // An EWMANode ticks each time it evaluates, so a pass that evaluated one would
-// move it. As a wrt node it is a barrier with nothing asked for above it.
+// move it. As a wrt node it gets its adjoint, and the input above it gets k·α
+// through it: the derivative of the EWMA's last update.
 TEST(AadReverse, APassDoesNotAdvanceAStatefulNode) {
     auto x       = Input<double>::make("x", 1.0);
     auto ewma    = ts::EWMANode::make("ewma", x, 0.5);
@@ -364,7 +429,7 @@ TEST(AadReverse, APassDoesNotAdvanceAStatefulNode) {
         EXPECT_EQ(g[1], e);
         EXPECT_EQ(get_value<double>(ewma->eval(ctx)), get_value<double>(control->eval(ctx)));
     }
-    EXPECT_THROW(aad::adjoints(root, {x}), std::domain_error);
+    EXPECT_EQ(aad::adjoints(root, {x})[0], 3.0 * 0.5);
 }
 
 TEST(AadReverse, InsideAnEngineCallback) {

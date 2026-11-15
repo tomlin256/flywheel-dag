@@ -171,8 +171,12 @@ aad::tangents({f}, {{x, 1.0}});     // forward, one sweep: {eʸ}, the derivative
 - A pass evaluates nothing, advances no stateful node, and never reads the branch a `ConditionNode`
   did not take. Its root must already be evaluated, so run it in the root's output callback, or
   after evaluating the root.
-- A node with inputs but no partials is a barrier: every `dag::ts` node, and every opaque
-  `ComputeNode`. A derivative through one throws `std::domain_error` rather than answer 0.
+- A node with inputs but no partials is a barrier: every opaque `ComputeNode`, and a `dag::ts` node
+  that does not take and give a double. A derivative through one throws `std::domain_error` rather
+  than answer 0.
+- The other `dag::ts` nodes give the derivative of their last update with respect to the sample it
+  took, the state it started from held fixed: an EWMA's is its α. That is the latest sample's
+  share, and does not count what earlier samples put into the state.
 - An output callback fires only when the output's value changes, and a gradient can change while
   the value does not: x·y is 6 at (2, 3) and at (3, 2). For an engine to deliver sensitivities,
   register an `aad::GradientNode`, whose value is the gradient:

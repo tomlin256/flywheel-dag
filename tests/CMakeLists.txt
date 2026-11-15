@@ -7,6 +7,7 @@ set(FLYWHEEL_DAG_TESTS
   test_aad_partials
   test_aad_reverse
   test_aad_tangent_node
+  test_aad_timeseries
   test_allocation_counter
   test_clean_inputs
   test_compute_module
@@ -591,7 +592,7 @@ if(_flywheel_dag_top_level)
 
   add_test(NAME test_comment_refs
     COMMAND ${CMAKE_COMMAND}
-      -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOPEN_ISSUES=31
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOPEN_ISSUES=31,81
       -P ${_comment_refs_script})
 
   add_test(NAME test_comment_refs_accepts

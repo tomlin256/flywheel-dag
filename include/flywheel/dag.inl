@@ -129,7 +129,7 @@ inline ReduceReads::Use& ReduceReads::at(std::size_t input) {
 inline bool IReduceStep::partials(const ReduceInputs&, aad::Partials&) { return false; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NodeBase: the reduction hooks
+// NodeBase: the reduction hooks and the derivative hook
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline std::unique_ptr<IReduceStep> NodeBase::reduceStep() { return nullptr; }
@@ -137,6 +137,8 @@ inline std::unique_ptr<IReduceStep> NodeBase::reduceStep() { return nullptr; }
 inline void NodeBase::reduceReads(EvalContext&, ReduceReads& out) {
     for (std::size_t i = 0; i < out.size(); ++i) out.reads(i);
 }
+
+inline bool NodeBase::partials(EvalContext&, aad::Partials&) { return false; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input<T>
