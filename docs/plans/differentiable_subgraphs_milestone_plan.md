@@ -967,9 +967,9 @@ milestone`.
 | Step | Status | Notes |
 |---|---|---|
 | 1 The plan | Done | Approved 2026-11-15 as written, so D1 to D15 stand at their defaults. Pushed, and each of the five issues names this file. The two issues of D13 are flywheel-dag#81 (derivatives through the state, over time) and flywheel-dag#82 (the `IDifferentiable` base off the engine's nodes), each `enhancement` and `aad` with no milestone. |
-| 2 flywheel-dag#11: a tape through the stateful nodes | Not started | |
-| 3 flywheel-dag#13: a tape that is kept | Not started | |
-| 4 flywheel-dag#75: several roots | Not started | |
+| 2 flywheel-dag#11: a tape through the stateful nodes | Done | `ae5ce40`, 2026-11-15. 14 tests in `test_aad_timeseries` and one in `test_aad_reverse`; the checkpoint at 92 (138 with the gate) on the Mac and in `ubuntu-dev`, and under GCC 15.2; ten hand-made changes caught. No class grew; the cycle's code differs in two stores. |
+| 3 flywheel-dag#13: a tape that is kept | Done | `3bd9102`, 2026-11-15. 18 tests in `test_aad_tape` and seven in the two sensitivity-node suites; the checkpoint at 93 (140); twelve hand-made changes caught; the two rows' lines from three compilers and a plain loop. A `GradientNode`'s recompute: 582 to 584 ns, from 2,738 to 2,815. |
+| 4 flywheel-dag#75: several roots | Done | 2026-11-15. 17 tests in `test_dag_reduce_roots`, and the reduce suite's nodes and helpers in `tests/reduce_test_nodes.hpp`; the checkpoint at 94 (142) on the Mac and in `ubuntu-dev`, and under GCC 15.2; seven hand-made changes caught. |
 | 5 flywheel-dag#76: a condition an argument moves | Not started | |
 | 6 flywheel-dag#11: a reduction through the stateful nodes | Not started | |
 | 7 flywheel-dag#74: `ReductionNode` | Not started | |

@@ -18,6 +18,7 @@ set(FLYWHEEL_DAG_TESTS
   test_dag_memoize
   test_dag_ops
   test_dag_reduce
+  test_dag_reduce_roots
   test_dag_replay
   test_dag_state_store
   test_dag_thread_fence
@@ -46,6 +47,7 @@ set(FLYWHEEL_DAG_COUNTING_TESTS
   test_aad_tape
   test_allocation_counter
   test_dag_reduce
+  test_dag_reduce_roots
   test_value_slot
 )
 

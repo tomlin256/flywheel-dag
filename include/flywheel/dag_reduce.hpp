@@ -39,21 +39,36 @@
 //
 // Three phases, each done as rarely as it can be
 // ──────────────────────────────────────────────
-//   1. Construct, once. One walk up from the root finds every node an argument
-//      reaches, in topological order, and asks each for a step
+//   1. Construct, once. One walk up from each root finds every node an
+//      argument reaches, in topological order, and asks each for a step
 //      (NodeBase::reduceStep(), dag.hpp). A graph is not rewired once it is
 //      built, so the walk is never repeated. It reads no value, so a reduction
 //      can be built while a graph is being wired, before anything is evaluated.
-//   2. bind(), once per point. It follows what the root depends on at the
+//   2. bind(), once per point. It follows what the roots depend on at the
 //      values the graph holds now, decides which of those nodes an argument
 //      moves here, and reads the value of every node they read that no
 //      argument moves.
 //   3. Call, many times. The arguments' values go into the reduction's own
-//      buffers, each step runs in order, and the root's value comes out.
+//      buffers, each step runs in order, and the roots' values come out.
 //      Nothing in the graph is read or written.
 //
 // A bound reduction describes one point. Once a value it read at bind() moves,
 // it still answers for the old point, and cannot tell: bind it again.
+//
+// Several roots
+// ─────────────
+// A reduction of several roots is a function ℝⁿ → ℝᵐ: the residuals of a fit,
+// say, which share most of their nodes. A node that several roots depend on
+// has one step, which a call runs once.
+//
+//   dag::Reduction r = dag::reduce(std::vector<NodePtr>{r0, r1, r2}, {a, b});
+//   std::array<double, 3> y{};
+//   std::array<double, 6> j{};              // one row per root: j[i·2 + k] = ∂rᵢ/∂argₖ
+//   r({1.0, 2.0}, y);
+//   r.jacobian({1.0, 2.0}, y, j);
+//
+// The one-root calls, operator()(x) and gradient(), are for a reduction of one
+// root, and throw std::logic_error on any other.
 //
 // Which nodes can be called
 // ─────────────────────────
@@ -82,7 +97,7 @@
 //
 // The rules
 // ─────────
-//   • The root must be clean and hold a double, or bind() throws
+//   • Every root must be clean and hold a double, or bind() throws
 //     std::invalid_argument. A reduction reads what the graph holds and
 //     evaluates nothing. Evaluating a dirty root for the caller would break an
 //     engine: Engine::cycle() snapshots its outputs' dirty flags before it
@@ -114,11 +129,11 @@
 //     can compare.
 //   • Any node can be an argument, not only a leaf. The function is then what
 //     the root would hold had that node's value been x, and the node's own
-//     inputs are not read. An argument the root does not depend on at this
+//     inputs are not read. An argument the roots do not depend on at this
 //     point is one the function ignores: a node of another graph, or one above
 //     an input that is not read.
 //   • An argument that a step reads must hold a double, or bind() throws
-//     std::invalid_argument. The arguments and the root are doubles. The nodes
+//     std::invalid_argument. The arguments and the roots are doubles. The nodes
 //     between them hold any type.
 //   • A bind() that throws leaves the reduction unbound, and a call on an
 //     unbound reduction throws std::logic_error.
@@ -132,31 +147,35 @@
 //     once or twice and then has two buffers again.
 //   • Eval thread only, like eval().
 //
-// The gradient
-// ────────────
-// gradient() runs the call, asks each step for its local partials at the values
-// the call left (IReduceStep::partials()), and sweeps them once in reverse. The
+// The derivatives
+// ───────────────
+// gradient() and jacobian() run the call, ask each step for its local partials
+// at the values the call left (IReduceStep::partials()), and sweep them. The
 // partials are the ones a tape uses (dag_aad.hpp), at values a tape cannot
 // reach: an op's from ops::Derivative<Op>, a DifferentiableNode's from one run
 // of its functor on duals, and 1 for the branch a ConditionNode selects.
 //
-//   • A partial times an adjoint counts as 0 when either one is 0, as on a
-//     tape. So neither an infinite partial under an adjoint of 0 nor a NaN
-//     that nothing depends on reaches the result: z·√x at z = 0 and x = 0 has
-//     ∂/∂x = 0. A NaN on a path the result depends on is kept.
-//   • A step with no partials makes gradient() throw std::domain_error, naming
-//     the argument, the root and the node. The step of a ComputeNode, an
-//     InPlaceComputeNode, a TweakableComputeNode or a MemoizedComputeNode has
-//     none, because its functor is opaque, and neither has an op over a type
-//     other than double. Calls still work, so such a reduction serves a solver
-//     that needs no derivative.
+//   • A partial times an adjoint or a tangent counts as 0 when either one is
+//     0, as on a tape. So neither an infinite partial under an adjoint of 0
+//     nor a NaN that nothing depends on reaches the result: z·√x at z = 0 and
+//     x = 0 has ∂/∂x = 0. A NaN on a path the result depends on is kept.
+//   • A step with no partials makes gradient() and jacobian() throw
+//     std::domain_error, naming the argument, the root and the node. The step
+//     of a ComputeNode, an InPlaceComputeNode, a TweakableComputeNode or a
+//     MemoizedComputeNode has none, because its functor is opaque, and neither
+//     has an op over a type other than double. Calls still work, so such a
+//     reduction serves a solver that needs no derivative.
 //   • The derivative is with respect to the arguments' own values. An argument
-//     the root does not depend on at the bound point has derivative 0, and so
+//     a root does not depend on at the bound point has derivative 0, and so
 //     has one above a tweaked node, through that node.
+//   • jacobian() asks each step once, keeps the partials, and sweeps them once
+//     per root in reverse, or once per argument forward when there are fewer
+//     arguments than roots. The two agree, except where a product of partials
+//     overflows or underflows taken from one end and not from the other.
 //   • Under the default equality policy the gradient at the arguments' own
 //     values is a tape's, to a few units in the last place: the two take their
 //     partials from the same code, inlined at two sites.
-//   • Once warm, a gradient allocates nothing.
+//   • Once warm, a gradient and a Jacobian allocate nothing.
 //
 // Never include dag_reduce.inl directly — always include this file.
 
@@ -179,8 +198,8 @@
 namespace dag {
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Reduction — root as a function of args, at the point the graph held when it
-// was last bound. The rules are at the top of this file.
+// Reduction — some roots as a function of args, at the point the graph held
+// when it was last bound. The rules are at the top of this file.
 //
 // Move-only: it owns its steps and their buffers. A Reduction that has been
 // moved from is good only for assignment and destruction.
@@ -192,6 +211,11 @@ public:
     /// repeated argument. The reduction is unbound until bind().
     Reduction(NodePtr root, std::vector<NodePtr> args);
 
+    /// The same, for several roots: a function ℝⁿ → ℝᵐ. Throws
+    /// std::invalid_argument for no roots or a null one as well. A root may be
+    /// named twice, and is then two equal values.
+    Reduction(std::vector<NodePtr> roots, std::vector<NodePtr> args);
+
     Reduction(Reduction&&) noexcept = default;
     Reduction& operator=(Reduction&&) noexcept = default;
     Reduction(const Reduction&) = delete;
@@ -199,26 +223,47 @@ public:
     ~Reduction() = default;
 
     /// Binds to the point the graph holds: reads every value that no argument
-    /// moves. Throws std::invalid_argument unless the root is clean and holds a
-    /// double and every argument a step reads holds one, and std::domain_error
-    /// for a barrier. A bind that throws leaves the reduction unbound.
+    /// moves. Throws std::invalid_argument unless every root is clean and
+    /// holds a double and every argument a step reads holds one, and
+    /// std::domain_error for a barrier. A bind that throws leaves the
+    /// reduction unbound.
     void bind();
 
     /// The root's value, had the arguments held x, one value per argument in
-    /// their order. Throws std::logic_error on an unbound reduction, and
-    /// std::invalid_argument unless x has arity() values.
+    /// their order. Throws std::logic_error on an unbound reduction and on a
+    /// reduction of several roots, and std::invalid_argument unless x has
+    /// arity() values.
     double operator()(std::span<const double> x);
     double operator()(std::initializer_list<double> x);
 
-    /// The same value, with its derivative with respect to argument i written
-    /// to g[i]: 0 for an argument the root does not depend on at the bound
-    /// point. Throws what a call throws, std::invalid_argument unless g has
-    /// arity() slots, and std::domain_error when a step has no partials.
+    /// Every root's value, had the arguments held x, written to y in the
+    /// roots' order. Throws std::logic_error on an unbound reduction, and
+    /// std::invalid_argument unless x has arity() values and y roots() slots.
+    void operator()(std::span<const double> x, std::span<double> y);
+    void operator()(std::initializer_list<double> x, std::span<double> y);
+
+    /// The root's value, with its derivative with respect to argument i
+    /// written to g[i]: 0 for an argument the root does not depend on at the
+    /// bound point. Throws what the one-root call throws,
+    /// std::invalid_argument unless g has arity() slots, and std::domain_error
+    /// when a step has no partials.
     double gradient(std::span<const double> x, std::span<double> g);
     double gradient(std::initializer_list<double> x, std::span<double> g);
 
+    /// Every root's value, written to y, and the Jacobian, written to j one
+    /// row per root: j[i·arity() + k] is the derivative of root i with respect
+    /// to argument k, and 0 where root i does not depend on argument k at the
+    /// bound point. Throws what the call throws, std::invalid_argument unless
+    /// j has roots()·arity() slots, and std::domain_error when a step has no
+    /// partials.
+    void jacobian(std::span<const double> x, std::span<double> y, std::span<double> j);
+    void jacobian(std::initializer_list<double> x, std::span<double> y, std::span<double> j);
+
     /// The number of arguments.
     std::size_t arity() const noexcept;
+
+    /// The number of roots.
+    std::size_t roots() const noexcept;
 
     /// The steps a call runs at the bound point. 0 while unbound.
     std::size_t size() const noexcept;
@@ -227,7 +272,7 @@ private:
     /// What a node is to the function. An Argument's value comes from the
     /// caller. A Candidate has an argument above it, so at some point it may be
     /// a step. A Constant has none: it is read from the graph, and only as an
-    /// input of a candidate or as the root.
+    /// input of a candidate or as a root.
     enum class Role : std::uint8_t { Argument, Candidate, Constant };
 
     struct Entry {
@@ -240,23 +285,44 @@ private:
         std::unique_ptr<IReduceStep> step;         ///< a Candidate's step, or null
     };
 
-    /// No position: an argument the root does not reach, a node no argument moves.
+    /// One partial of one step, as a sweep reads it.
+    struct Edge {
+        std::size_t input;   ///< the named input's position in entries_
+        double      d;       ///< ∂step/∂input
+    };
+
+    /// No position: an argument the roots do not reach, a node no argument moves.
     static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
 
     static bool holdsDouble(const ValuePtr& v) noexcept;
     /// Why bind() cannot call entries_[barrier], which argument `by` moves.
     std::string barrierMessage(std::size_t barrier, std::size_t by) const;
+    /// "root r", or "roots r, s and t".
+    std::string rootNames() const;
 
-    NodePtr              root_;
+    /// One reading of the point: what the roots depend on, and which of that
+    /// an argument moves.
+    [[gnu::always_inline]] void readPoint(EvalContext& ctx);
+    /// The checks every call makes, and the steps.
+    [[gnu::always_inline]] void run(std::span<const double> x);
+    /// Asks each step that runs for its partials, and keeps them in edges_.
+    void gatherPartials();
+    /// One reverse sweep of edges_ from entries_[root]: adjoints_.
+    void sweepReverse(std::size_t root);
+    /// One forward sweep of edges_ from entries_[seed]: adjoints_, as tangents.
+    void sweepForward(std::size_t seed);
+
+    std::vector<NodePtr> roots_;
     std::vector<NodePtr> args_;
 
     // ── The structure, fixed at construction ─────────────────────────────────
-    /// The arguments the root reaches, the candidates, and the constants a
+    /// The arguments the roots reach, the candidates, and the constants a
     /// candidate names, each after every input it names.
     std::vector<Entry>       entries_;
     /// Every candidate's inputs, in inputs() order, as positions in entries_.
     std::vector<std::size_t> inputs_;
-    std::size_t              rootPosition_ = kNone;
+    /// Each root's position in entries_.
+    std::vector<std::size_t> rootPosition_;
     /// Each argument's position in entries_, or kNone.
     std::vector<std::size_t> argPosition_;
 
@@ -266,23 +332,34 @@ private:
     /// read at bind(). The rest stay null.
     std::vector<ValuePtr>         values_;
     std::vector<ReduceReads::Use> uses_;      ///< one per inputs_: what the candidate reads
-    std::vector<std::uint8_t>     reached_;   ///< one per entry: the root depends on it here
+    std::vector<std::uint8_t>     reached_;   ///< one per entry: a root depends on it here
     std::vector<std::size_t>      movedBy_;   ///< one per entry: an argument that moves it, or kNone
     std::vector<std::size_t>      run_;       ///< the candidates a call runs, in order
     std::vector<std::size_t>      live_;      ///< the arguments a call writes
+    std::vector<ValuePtr>         rootValue_; ///< one per root, while bind() reads the point
     bool                          bound_ = false;
+    bool                          single_ = true;    ///< one root
+    std::size_t                   root0_ = kNone;    ///< the first root's position in entries_
+    NodePtr                       root0Node_;         ///< the first root
 
     /// One per argument: where a call publishes its value.
     std::vector<ValueSlot<double>> argValues_;
 
-    // ── A gradient's working storage, kept for its capacity ──────────────────
-    std::vector<double> adjoints_;   ///< one per entry: ∂root/∂(its value)
-    aad::Partials       partials_;   ///< the step being swept
+    // ── A derivative's working storage, kept for its capacity ────────────────
+    std::vector<double>       adjoints_;   ///< one per entry: an adjoint, or a tangent
+    aad::Partials             partials_;   ///< the step being asked
+    std::vector<Edge>         edges_;      ///< the partials of the steps asked
+    /// One per step of run_: its partials are edges_[firstEdge_[r], lastEdge_[r]).
+    std::vector<std::size_t>  firstEdge_;
+    std::vector<std::size_t>  lastEdge_;
 };
 
 /// A Reduction of root over args, bound to the point the graph holds. Throws
 /// what the constructor and bind() throw.
 Reduction reduce(NodePtr root, std::vector<NodePtr> args);
+
+/// The same, for several roots.
+Reduction reduce(std::vector<NodePtr> roots, std::vector<NodePtr> args);
 
 } // namespace dag
 
