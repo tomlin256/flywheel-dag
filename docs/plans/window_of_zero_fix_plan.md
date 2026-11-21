@@ -54,7 +54,8 @@ My defaults, each one a place to edit before approving.
   its own step and can be left out without touching the check. The measure is the machine code (a timing cannot
   show a removed branch from layout noise of about 1%): the function that holds `doCompute()` in
   `bench_hot_path`, disassembled before and after, is expected to lose one compare and branch and nothing else,
-  and `--invariants` is expected to match `benchmarks/expected_invariants.txt` unchanged.
+  and `--invariants` is expected to match `benchmarks/expected_invariants.txt` unchanged. **Resolved at Step 3 as
+  (a): the guard stays, with a comment.**
 
 ## Steps
 
@@ -113,12 +114,10 @@ Commit: `docs: state the window rule where each node is declared`.
 
 ### Step 3 — The dead guard (D3)
 
-Remove `&& window_ > 0` from `RollingSumNode::doCompute()`.
+As planned: remove `&& window_ > 0` from `RollingSumNode::doCompute()`.
 
-**Done when:** the disassembly before and after differs by what D3 expects, the invariants match, and the
-`RollingSumNode` tests (`test_timeseries`, `test_aad_timeseries`, `test_dag_reduce_timeseries`) pass.
-
-Commit: `refactor: RollingSumNode's eviction no longer guards a window of 0`.
+**Done when (D3 as written):** the disassembly before and after differs by what D3 expects, the invariants match,
+and the `RollingSumNode` tests (`test_timeseries`, `test_aad_timeseries`, `test_dag_reduce_timeseries`) pass.
 
 **Stopped here, for a decision.** The disassembly does not differ by what D3 expects. `doCompute()` is inlined
 into `StatefulNodeBase<RollingSumNode, …>::eval`, which was disassembled in `bench_hot_path` (Apple clang 21,
@@ -144,12 +143,21 @@ The choices are **(a)** keep the guard, with a comment that says why a check tha
 it changes nothing on the hot path and adds no assumption for the optimiser to hold the code to, and (b) saves
 one instruction.
 
+**Decided: (a).** The question went unanswered, so my recommendation was taken: it changes nothing on the hot
+path, and it is the easiest of the three to reverse. A comment over the guard says why a check that always passes
+is there. The disassembly of `eval` is identical to the one before the comment, with each branch target reduced
+to the index of its instruction: the same 204 instructions and no difference. `--invariants` matches, the build
+has no warning, and ctest passes 150 of 150. If (b) is wanted, it is one line and a new measurement, and the table
+above is its baseline.
+
+Commit: `docs: say why RollingSumNode keeps its window_ > 0 test`.
+
 ### Step 4 — Close
 
 The plan gets its Outcome (the red-first result, the disassembly, what differed from this plan) and its Status.
-Push, with `git fetch` first. CI is looked at in passing and not waited for. flywheel-dag#80 is closed by hand
-after a closing comment. The GCC leg, the sanitizers and `ubuntu-dev` are left for later, as optional, and the
-Outcome says so.
+Push, with `git fetch` first, once for the last two commits: Rob is out of CI compute, and each push starts runs.
+CI is not consulted. flywheel-dag#80 is closed by hand after a closing comment. The GCC leg, the sanitizers and
+`ubuntu-dev` are left for later, as optional, and the Outcome says so.
 
 Commit: `docs: record the outcome`.
 

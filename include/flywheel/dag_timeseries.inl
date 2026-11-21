@@ -354,6 +354,11 @@ inline std::unique_ptr<IReduceStep> RollingSumNode::reduceStep() {
 }
 
 inline double RollingSumNode::doCompute(const double& x, State& s) {
+    // window_ is at least 1, because make() refuses 0, so `window_ > 0` always
+    // holds. It stays for the optimiser: it shows that front() is never called on
+    // an empty buffer, and without it the compiler keeps front()'s emptiness check
+    // on the path every warm tick takes (a branch and a cold throw block, measured
+    // on Apple clang 21).
     if (s.buf.size() == window_ && window_ > 0) {
         s.sum -= s.buf.front();
         s.buf.pop_front();
