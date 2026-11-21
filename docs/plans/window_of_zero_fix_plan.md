@@ -59,9 +59,9 @@ My defaults, each one a place to edit before approving.
 
 ## Steps
 
-Every commit subject is scoped to flywheel-dag#80 in the repo's `type(#N): …` form. Every step after Step 0 ends
-with a full build and a full `ctest` run, both green, with `-Werror` (the default) and the CI flags
-`-Werror=author -Werror=deprecated`.
+Every commit subject is scoped to flywheel-dag#80 in the repo's `type(#N): …` form. The subjects below omit the
+scope. Every step after Step 0 ends with a full build and a full `ctest` run, both green, with `-Werror` (the
+default) and the CI flags `-Werror=author -Werror=deprecated`.
 
 ### Step 0 — Approval
 
@@ -69,7 +69,7 @@ The plan is committed as Proposed. Nothing else lands until it is approved. A co
 
 **Done when:** `git status` is clean on that commit and flywheel-dag#80 carries the link.
 
-Commit: `docs(#80): add plan for rejecting a window of 0`.
+Commit: `docs: add plan for rejecting a window of 0`.
 
 ### Step 1 — The checks, tests first
 
@@ -89,7 +89,7 @@ They are run first against the headers as they are, then the four checks go in `
 because `make()` returns a node, and the other two pass; with the checks all four pass, and no other test
 changes result.
 
-Commit: `fix(#80): make() rejects a window of 0 for the four nodes that cannot hold one`.
+Commit: `fix: make() rejects a window of 0 for the four nodes that cannot hold one`.
 
 ### Step 2 — The comments
 
@@ -101,7 +101,7 @@ change: the header carries it.
 **Done when:** each comment states what is true after Step 1, and `test_comment_refs` passes (it holds a comment
 to citing no closed issue).
 
-Commit: `docs(#80): state the window rule where each node is declared`.
+Commit: `docs: state the window rule where each node is declared`.
 
 ### Step 3 — The dead guard (D3)
 
@@ -110,7 +110,7 @@ Remove `&& window_ > 0` from `RollingSumNode::doCompute()`.
 **Done when:** the disassembly before and after differs by what D3 expects, the invariants match, and the
 `RollingSumNode` tests (`test_timeseries`, `test_aad_timeseries`, `test_dag_reduce_timeseries`) pass.
 
-Commit: `refactor(#80): RollingSumNode's eviction no longer guards a window of 0`.
+Commit: `refactor: RollingSumNode's eviction no longer guards a window of 0`.
 
 ### Step 4 — Close
 
@@ -119,7 +119,7 @@ Push, with `git fetch` first. CI is looked at in passing and not waited for. fly
 after a closing comment. The GCC leg, the sanitizers and `ubuntu-dev` are left for later, as optional, and the
 Outcome says so.
 
-Commit: `docs(#80): record the outcome`.
+Commit: `docs: record the outcome`.
 
 ## Not in this plan
 
