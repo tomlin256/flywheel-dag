@@ -1,7 +1,7 @@
 # Four Windowed Nodes Reject a Window of 0 in `make()`
 
-**Status: Approved (2026-11-21), as written, so D1 to D3 stand at their defaults.** The Progress table at the end
-says where each step stands.
+**Status: Done (2026-11-21), not released.** Approved as written, so D1 and D2 stood at their defaults. D3 was
+resolved as (a), the guard stays, after Step 3's measurement; the Outcome at the end records what the steps found.
 
 Closes [flywheel-dag#80](https://github.com/tomlin256/flywheel-dag/issues/80).
 
@@ -192,5 +192,81 @@ Commit: `docs: record the outcome`.
 | 0 — Approval | Done | Approved 2026-11-21 as written. flywheel-dag#80 links this file, and flywheel-dag#83 is the `SIZE_MAX` edge. |
 | 1 — The checks, tests first | Done | `c6dd416`. The four rejection tests red on the unfixed headers, fifteen hand-made changes each failing exactly the tests predicted, ctest 150 of 150, no warnings. |
 | 2 — The comments | Done | `039ef5a`. ctest 150 of 150. |
-| 3 — The dead guard | Stopped | The disassembly is not what D3 expected: see Step 3. Waiting for a decision. |
-| 4 — Close | Not started | |
+| 3 — The dead guard | Done | `1e69ea8` records the measurement, which was not what D3 expected, and `0a1b287` is the comment: D3 resolved as (a), the guard stays. |
+| 4 — Close | Done | This commit, pushed together with the one before it. flywheel-dag#80 is closed by hand after the push, with a comment that links this file. |
+
+## Outcome
+
+Fixed on `main`, not released. flywheel-dag#80 is closed by hand after the push, with a comment that links this file.
+
+| Commit | Step | What |
+|---|---|---|
+| `86c51a1`, `3552cd2`, `23f1ddd` | 0 | the plan, the approval, and the plan's commit subjects without a scope (below) |
+| `c6dd416` | 1 | the four checks and their six tests |
+| `039ef5a` | 2 | the comments at the declarations |
+| `1e69ea8` | 3 | what the disassembly showed |
+| `0a1b287` | 3 | the comment over the guard |
+| this commit | 4 | this Outcome |
+
+**The reproduction.** At `5ce4042`, built with Apple clang 21, a throwaway harness in the scratchpad gave the
+table in "Problem" exactly: the first evaluation of `RollingStats`, `ZScoreNode` and `OutlierGateNode` throws, the
+second of `RollingSumNode` throws, and the other three evaluate.
+
+**Step 1, red first.** Against the unfixed headers the four `WindowOfZero.…IsRejected` tests failed with
+"`<Kind>::make() accepted a window of 0`", and `RollingMinMaxNodeWindowNodeAndDelayNodeEvaluate` and
+`WindowOfOne.EachOfTheFourEvaluatesAtTheLatestSample` passed. With the checks all six pass.
+
+**The hand-made changes.** Each was made on a scratch copy of `include/`, with the repo's own `test_timeseries.cpp`
+compiled against it and each of the six tests run alone under a 10 s watchdog. 16 objects were compiled, the
+control and 15 changes, and every result was the one predicted:
+
+| Change | Failed |
+|---|---|
+| none (the control) | none |
+| the check removed from `RollingStats`, `RollingSumNode`, `ZScoreNode` or `OutlierGateNode` (four changes) | that node's `…IsRejected`, and no other test |
+| a check that refuses a window of 1 too, in each of the four (four) | `EachOfTheFourEvaluatesAtTheLatestSample` |
+| the message without "window must be at least 1", in each of the four (four) | that node's `…IsRejected` |
+| a check for 0 added to `RollingMinMaxNode`, `WindowNode` or `DelayNode` (three) | `RollingMinMaxNodeWindowNodeAndDelayNodeEvaluate` |
+
+With the check removed from `ZScoreNode` or `OutlierGateNode`, `make()` still throws, from the `RollingStats` it
+builds, as `RollingStats 'rejected.stats': window must be at least 1`. Only the message check can fail there, and a
+bare `EXPECT_THROW` would have passed.
+
+**The gates, on Apple clang 21 and CMake 4.4.5 here.** Configure with `-Werror=author -Werror=deprecated` reported
+no diagnostic, each build printed no warning, and ctest passed 150 of 150 after each of Steps 1, 2 and 3, with the
+clang-tidy tests among them. `--invariants` matches `benchmarks/expected_invariants.txt`. CMake 4.5.0 is not among
+them: it fails at Configure in CI (flywheel-dag#84).
+
+**Step 3, D3.** Removing `&& window_ > 0` was not free: with it gone the compiler keeps `buf.front()`'s emptiness
+check, so `eval` gains a `cbz` and a cold block (the table under Step 3). The plan's own stop condition held, and
+the choice was put to Rob. It went unanswered, so (a) was taken, the option that changes nothing on the hot path.
+The comment is the only change, and the disassembly of `eval` is identical to the one before it, branch targets
+reduced to instruction indices.
+
+**Where the work differs from the approved plan.** `c6dd416` brought the plan's Step 1 up to what was built.
+
+- Six tests and not four. The approved plan had `RejectsAWindowOfZero` for all four nodes, a separate
+  `MessageNamesTheNodeTheCallerBuilt`, `AWindowOfOneIsAccepted` and `AWindowOfZeroStillBuildsWhereItDid`. As built,
+  each of the four nodes has its own rejection test that asserts both the throw and the message, and the other two
+  are the window of 0 that stays accepted and the window of 1.
+- The hand-made changes were added to Step 1 while it was built. The approved plan named tests only.
+- The plan's sentence that a rejected call wires nothing to `upstream` was dropped. It holds, because each check is
+  the first statement of its `make()`, ahead of anything built or wired, but none of the six tests looks at it.
+- Step 3 stopped, and D3 was resolved by default as (a). Its commit is a comment and not the removal.
+- The first push was refused by the pre-push hook, which rejects a bare issue reference in the tree, and the plan's
+  commit subjects had them. They omit the scope now, as other plans in `docs/plans/` do (`23f1ddd`).
+
+**Found outside the plan.**
+[flywheel-dag#83](https://github.com/tomlin256/flywheel-dag/issues/83) (`bug`, `nodes`, Hardening): a window of
+`SIZE_MAX` wraps the ring buffer's `window + 1` to 0 in six nodes.
+[flywheel-dag#84](https://github.com/tomlin256/flywheel-dag/issues/84) (`bug`, `build`, Hardening): a CI job whose
+runner has CMake 4.5.0 fails at Configure, on `non-target-directive`, under `-Werror=author`.
+
+**CI.** Looked at in passing up to `1e69ea8`, then not at all, on Rob's instruction: he is out of CI compute. The
+macOS leg of the run on `1e69ea8` finished green (Configure, Build, 98 of 98 tests, Benchmark) on a runner with
+CMake 4.4.5. Every ubuntu job in the runs measured, and each macOS job that got CMake 4.5.0, failed at Configure
+(flywheel-dag#84), so no GCC build has seen these changes. The two commits after `1e69ea8` are pushed together, and
+their runs are not looked at.
+
+**Left for later.** The new tests under GCC in `ubuntu-dev`, and the sanitizers: both optional, and neither run.
+Each of flywheel-dag#83 and flywheel-dag#84 needs a plan of its own.
