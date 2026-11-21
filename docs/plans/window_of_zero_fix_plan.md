@@ -37,8 +37,7 @@ RollingStats 'signal.stats': window must be at least 1
 It is a throw and not an `assert()`, because the default build type defines `NDEBUG`.
 
 - `ZScoreNode::make(name, upstream, window)` and `OutlierGateNode::make()` check before they build the
-  `RollingStats` they own. The message then names the node the caller built and not `<name>.stats`, and a rejected
-  call wires nothing to `upstream`.
+  `RollingStats` they own. The message then names the node the caller built and not `<name>.stats`.
 - `ZScoreNode::make(name, upstream, stats)` takes a `RollingStats` that `RollingStats::make()` has already checked.
 - No cost on a cycle: the check runs once, in `make()`.
 
@@ -73,21 +72,30 @@ Commit: `docs: add plan for rejecting a window of 0`.
 
 ### Step 1 — The checks, tests first
 
-New tests in `tests/test_timeseries.cpp`, in a `WindowValidation` section after the alpha tests. They drive the
+New tests in `tests/test_timeseries.cpp`, in a window-validation section after the alpha tests. They drive the
 nodes with `Input<double>::set()` and `eval()`, so nothing waits.
 
 | Test | Asserts |
 |---|---|
-| `RejectsAWindowOfZero` | `make()` throws `std::invalid_argument` for each of the four |
-| `MessageNamesTheNodeTheCallerBuilt` | the message has the kind, the name and "window", and for `ZScoreNode` and `OutlierGateNode` it names that node and not `<name>.stats` |
-| `AWindowOfOneIsAccepted` | each of the four built with 1 and evaluated three times: the mean and the sum are the latest sample, the z-score is 0, and the gate passes the sample |
-| `AWindowOfZeroStillBuildsWhereItDid` | `RollingMinMaxNode`, `WindowNode<double>` and `DelayNode<double>` built with 0 and evaluated three times, with no throw (D2) |
+| `WindowOfZero.RollingStatsIsRejected`, `RollingSumNodeIsRejected`, `ZScoreNodeIsRejected`, `OutlierGateNodeIsRejected` | `make()` throws `std::invalid_argument` for a window of 0, and the message starts with the node's kind and name (`ZScoreNode 'rejected': `, and not `RollingStats 'rejected.stats': `) and says "window must be at least 1" |
+| `WindowOfZero.RollingMinMaxNodeWindowNodeAndDelayNodeEvaluate` | the three that keep accepting 0 build with it and evaluate three times with no throw, and the delay passes each sample through (D2) |
+| `WindowOfOne.EachOfTheFourEvaluatesAtTheLatestSample` | each of the four built with 1 and evaluated three times: the mean and the sum are the latest sample, the z-score is 0, and the gate passes the sample |
 
 They are run first against the headers as they are, then the four checks go in `dag_timeseries.inl`.
 
-**Done when:** against the unfixed headers `RejectsAWindowOfZero` and `MessageNamesTheNodeTheCallerBuilt` fail,
-because `make()` returns a node, and the other two pass; with the checks all four pass, and no other test
-changes result.
+Each hand-made change below is made on a scratch copy of `include/`, with the repo's own `test_timeseries.cpp`
+compiled against it and each new test run alone under a watchdog. A control with no change is run the same way.
+
+| Change | Fails |
+|---|---|
+| the check removed from one of the four `make()` functions | that node's `…IsRejected` and no other. For `ZScoreNode` and `OutlierGateNode` it is the message that fails: `RollingStats` still throws, as `rejected.stats`, and a bare `EXPECT_THROW` would pass |
+| a check that refuses a window of 1 too, in one of the four | `EachOfTheFourEvaluatesAtTheLatestSample` |
+| a message without "window must be at least 1", in one of the four | that node's `…IsRejected` |
+| a check for 0 added to `RollingMinMaxNode`, `WindowNode` or `DelayNode` | `RollingMinMaxNodeWindowNodeAndDelayNodeEvaluate` |
+
+**Done when:** against the unfixed headers the four `…IsRejected` tests fail, because `make()` returns a node, and
+the other two pass; with the checks all six pass and no other test changes result; each hand-made change fails
+exactly the tests in the table, and the control none.
 
 Commit: `fix: make() rejects a window of 0 for the four nodes that cannot hold one`.
 

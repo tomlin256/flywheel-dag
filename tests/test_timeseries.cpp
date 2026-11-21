@@ -701,6 +701,111 @@ TEST(EWMATickRateNodeAlpha, RejectsOutOfRangeAlpha) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Window validation — RollingStats, RollingSumNode, ZScoreNode, OutlierGateNode
+//
+// A window of 0 leaves these four nothing to take a mean, a sum or a spread of.
+// make() throws std::invalid_argument for it, naming the node and the window. It
+// is a throw and not an assert(), so it holds in the default build, which defines
+// NDEBUG.
+//
+// ZScoreNode and OutlierGateNode build the RollingStats they own from the window.
+// They check before they build it, so the message names the node the caller built
+// and not that RollingStats.
+//
+// RollingMinMaxNode, WindowNode and DelayNode build and evaluate with a window of
+// 0. A delay of 0 passes each sample through.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+constexpr std::size_t kNoWindow = 0;
+
+/// `make(name, upstream, window)` builds the node under test, and `kind` is its
+/// class name as its message spells it.
+template <typename Make>
+void expectRejectsAWindowOfZero(const std::string& kind, const Make& make) {
+    auto in = Input<double>::make("in", 0.0);
+    try {
+        static_cast<void>(make("rejected", in, kNoWindow));
+        FAIL() << kind << "::make() accepted a window of 0";
+    } catch (const std::invalid_argument& e) {
+        const std::string msg = e.what();
+        EXPECT_TRUE(msg.starts_with(kind + " 'rejected': ")) << "actual: " << msg;
+        EXPECT_NE(msg.find("window must be at least 1"), std::string::npos)
+            << "actual: " << msg;
+    }
+}
+
+}  // namespace
+
+TEST(WindowOfZero, RollingStatsIsRejected) {
+    expectRejectsAWindowOfZero(
+        "RollingStats",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return RollingStats::make(name, in, window);
+        });
+}
+
+TEST(WindowOfZero, RollingSumNodeIsRejected) {
+    expectRejectsAWindowOfZero(
+        "RollingSumNode",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return RollingSumNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfZero, ZScoreNodeIsRejected) {
+    expectRejectsAWindowOfZero(
+        "ZScoreNode",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return ZScoreNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfZero, OutlierGateNodeIsRejected) {
+    expectRejectsAWindowOfZero(
+        "OutlierGateNode",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return OutlierGateNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfZero, RollingMinMaxNodeWindowNodeAndDelayNodeEvaluate) {
+    auto in      = Input<double>::make("in", 0.0);
+    auto minmax  = RollingMinMaxNode::make("minmax", in, kNoWindow);
+    auto window  = WindowNode<double>::make("window", in, kNoWindow);
+    auto through = DelayNode<double>::make("through", in, kNoWindow);
+
+    EvalContext ctx;
+    for (const double x : {1.0, 2.0, 3.0}) {
+        in->set(x);
+        EXPECT_NO_THROW(minmax->eval(ctx));
+        EXPECT_NO_THROW(window->eval(ctx));
+        EXPECT_DOUBLE_EQ(get_value<double>(through->eval(ctx)), x);
+    }
+}
+
+// A window of 1 is the smallest the four take. Each holds the latest sample alone:
+// the mean and the sum are that sample, there is no spread to score it against, and
+// the gate passes it.
+TEST(WindowOfOne, EachOfTheFourEvaluatesAtTheLatestSample) {
+    auto in    = Input<double>::make("in", 0.0);
+    auto stats = RollingStats::make("stats", in, 1);
+    auto sum   = RollingSumNode::make("sum", in, 1);
+    auto score = ZScoreNode::make("score", in, 1);
+    auto gate  = OutlierGateNode::make("gate", in, 1);
+
+    EvalContext ctx;
+    for (const double x : {1.0, 2.0, 3.0}) {
+        in->set(x);
+        EXPECT_DOUBLE_EQ(get_value<double>(stats->eval(ctx)), x);
+        EXPECT_DOUBLE_EQ(get_value<double>(sum->eval(ctx)), x);
+        EXPECT_DOUBLE_EQ(get_value<double>(score->eval(ctx)), 0.0);
+        EXPECT_DOUBLE_EQ(get_value<double>(gate->eval(ctx)), x);
+        EXPECT_FALSE(gate->lastWasOutlier());
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Every IWindowed::windowStatusNode() must be InvalidationMode::Eager: its
 // functor reads filled() off the captured node, and filled() advances while that
 // node's value, the declared input, sits still. The note above the

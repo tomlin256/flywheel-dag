@@ -143,6 +143,12 @@ inline std::shared_ptr<RollingStats> RollingStats::make(
     std::string name, NodePtr upstream, std::size_t window,
     EqualityPolicyPtr eq)
 {
+    // Throw, not assert: the default build type defines NDEBUG. A window of 0
+    // holds nothing to take a mean or a spread of, and is refused here, by name,
+    // and not left to the ring buffer's error at an evaluation.
+    if (window == 0)
+        throw std::invalid_argument(
+            "RollingStats '" + name + "': window must be at least 1");
     auto self = std::shared_ptr<RollingStats>(
         new RollingStats(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
@@ -285,6 +291,10 @@ inline std::shared_ptr<RollingSumNode> RollingSumNode::make(
     std::string name, NodePtr upstream, std::size_t window,
     EqualityPolicyPtr eq)
 {
+    // See RollingStats::make — throws rather than asserts for the same reason.
+    if (window == 0)
+        throw std::invalid_argument(
+            "RollingSumNode '" + name + "': window must be at least 1");
     auto self = std::shared_ptr<RollingSumNode>(
         new RollingSumNode(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
@@ -714,6 +724,11 @@ inline std::shared_ptr<ZScoreNode> ZScoreNode::make(
     std::string name, const NodePtr& upstream, std::size_t window,
     EqualityPolicyPtr eq)
 {
+    // Checked before the RollingStats is built, so the message names this node
+    // and not "<name>.stats". See RollingStats::make.
+    if (window == 0)
+        throw std::invalid_argument(
+            "ZScoreNode '" + name + "': window must be at least 1");
     auto stats = RollingStats::make(name + ".stats", upstream, window);
     auto self = std::shared_ptr<ZScoreNode>(
         new ZScoreNode(std::move(name), upstream, std::move(stats), std::move(eq)));
@@ -815,6 +830,10 @@ inline std::shared_ptr<OutlierGateNode> OutlierGateNode::make(
     std::string name, const NodePtr& upstream, std::size_t window, double zThreshold,
     EqualityPolicyPtr eq)
 {
+    // Checked before the RollingStats is built: see ZScoreNode::make.
+    if (window == 0)
+        throw std::invalid_argument(
+            "OutlierGateNode '" + name + "': window must be at least 1");
     // One shared RollingStats feeds both ZScore and mean access
     auto stats  = RollingStats::make(name + ".stats", upstream, window);
     auto zscore = ZScoreNode::make(name + ".z", upstream, stats);
