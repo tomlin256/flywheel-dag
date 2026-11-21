@@ -455,6 +455,23 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
 endif()
 
+# Options go to targets, never to a directory. cmake/flywheel_dag_target_options.cmake holds the one function that gives them, and this
+# holds it to a stub project that the check writes and configures once: the options reach the targets asked about at every depth and
+# no others, compile options go to every executable and library and link options only to what links, an INTERFACE library, a custom
+# target and an imported target are left alone, a target made after the call has none, two calls add up, and a wrong call is refused
+# by name. On CMake 4.5 or later it also configures the stub with the strict flags, which proves that the function calls no
+# non-target directive. It compiles nothing and needs no network. Registered at the top level, where the checkout it reads is the
+# engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_target_options
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/target_options
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_target_options.cmake)
+endif()
+
 # The clang-tidy workflow cannot be run here, so this holds what a run would find out late
 # or not at all: that it names the LLVM major the gate registers (cmake/flywheel_dag_clang_tidy.cmake), in one place; that
 # it turns the gate on, with the strict configure flags; that it runs only the clang_tidy_

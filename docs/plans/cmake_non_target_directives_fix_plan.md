@@ -297,8 +297,8 @@ stays open and the Outcome says what I saw and did not see. The nightly Sanitize
 | Step | Status | Notes |
 |---|---|---|
 | 0 Approval | Done | Proposed in `0aaa610` and linked from flywheel-dag#84. Approved as written; D1 to D3 at their defaults (one push after Step 6). |
-| 1 Measure on CMake 4.5.0 | Not started | blocked on a "try again" |
-| 2 The module and its test | Not started | |
+| 1 Measure on CMake 4.5.0 | 1b done; 1a and 1c owed | Blocked on a "try again". 1b: three offline trees on the unchanged root, CMake 4.4.5, CI's flags: 68, 70 and 69 compile units and 48, 50 and 49 link files for the default, `asan` and `tsan` trees; the configure takes 0.7 s in each. Earlier, on 4.4.5 only: the probe of the walk gave the options to the targets of one directory tree and to no other, nested directories included, and 4.4.5 rejects 4.5's category name in a file and on the command line (the Problem section). |
+| 2 The module and its test | Done | T1 was red before the module existed, with "cmake/flywheel_dag_target_options.cmake does not exist". It passes on 4.4.5 with 110 cases (the strict case is skipped there). It grew two cases the plan did not list: a target's interface options stay empty (the options are PRIVATE), and `IN` naming a directory and one below it gives a target its options once. Hand-made changes on a scratch copy of the module, each failing the case it pins: `IN` ignored (M1), `LINK` on static libraries (M2), INTERFACE libraries not skipped (M3), no descent (M4), an unadded directory not skipped (M5), `PUBLIC` for `PRIVATE` (M7), no de-duplication (M8), a mistyped directory accepted (M9), an unknown word accepted (M10), no option at all accepted (M11), an empty keyword accepted (M12), and an `add_compile_options` call in the function (M13: on 4.4.5 the `late` case sees the option reach a target made after the call, and on 4.5.0 the strict configure will too, which is the plan's M6, still to be run there). Full build and `ctest` on the Mac: 151 of 151. |
 | 3 The root uses it | Not started | |
 | 4 googletest, the strict-configure test, the gate probe | Not started | |
 | 5 Docs | Not started | |
