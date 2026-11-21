@@ -16,6 +16,11 @@
 //  • Evaluation is pull-based: a node nothing pulls never computes.
 //  • Each node takes an IEqualityPolicy for its output; see IEqualityPolicy
 //    (dag.hpp) for what that gates.
+//  • make() throws std::invalid_argument, naming the node, for an argument that
+//    cannot work: an alpha outside (0, 1], and a window of 0 for RollingStats,
+//    RollingSumNode, ZScoreNode and OutlierGateNode. RollingMinMaxNode,
+//    WindowNode and DelayNode accept a window of 0, and a delay of 0 passes each
+//    sample through.
 //
 // Node catalogue
 // ──────────────
@@ -291,6 +296,7 @@ private:
 // RollingStats  —  single node: incremental mean + variance (Welford online).
 // Output: double (the mean — use stddev()/variance() for the rest).
 // Sharing one node avoids duplicating its state for ZScore etc.
+// `window` is at least 1: make() throws std::invalid_argument for 0.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingStats
     : public StatefulNodeBase<RollingStats, double, double, RollingStatsState>,
@@ -352,6 +358,8 @@ using RollingStatsPtr = std::shared_ptr<RollingStats>;
 // without bound, and this node can run indefinitely. Every `window` pushes it
 // re-sums the buffer exactly, which caps the error at `window` incremental steps
 // and costs O(1) amortised — the re-sum is a contiguous scan, not a deque walk.
+//
+// `window` is at least 1: make() throws std::invalid_argument for 0.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingSumNode
     : public StatefulNodeBase<RollingSumNode, double, double, RollingSumNodeState>,
@@ -570,7 +578,9 @@ public:
         RollingStatsPtr stats,
         EqualityPolicyPtr eq = nullptr);
 
-    /// Convenience: creates its own RollingStats internally.
+    /// Convenience: creates its own RollingStats internally. `window` is at least
+    /// 1: make() throws std::invalid_argument for 0, naming this node and not
+    /// that RollingStats.
     static std::shared_ptr<ZScoreNode> make(
         std::string name, const NodePtr& upstream, std::size_t window,
         EqualityPolicyPtr eq = nullptr);
@@ -620,6 +630,8 @@ private:
 // Shares one RollingStats between the z-score and mean lookups.
 // Output: double
 // Overrides eval() to also drive the inner ZScoreNode each cycle.
+// `window` is at least 1: make() throws std::invalid_argument for 0, naming this
+// node and not the RollingStats it builds.
 // ─────────────────────────────────────────────────────────────────────────────
 class OutlierGateNode
     : public StatefulNodeBase<OutlierGateNode, double, double, OutlierGateNodeState> {
