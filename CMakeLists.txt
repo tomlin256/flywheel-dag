@@ -132,12 +132,11 @@ endif()
 # The default, OFF, changes nothing. Any other value is a configure error that lists the modes (cmake/flywheel_dag_sanitize.cmake
 # has the options and the reasons). The options reach every target of the tree, so a tree is one mode or none.
 #
-# This sits BEFORE the first FetchContent_MakeAvailable on purpose. A directory's compile and link options are copied into each
-# target as it is created, so they reach the fetched dependencies only if they are set first, and ThreadSanitizer needs the
-# dependencies instrumented too. The warning flags further down sit after every dependency for the opposite reason. A subproject
-# ignores the option: the engine is header-only, a consumer instruments its own targets, and an option that instrumented the
-# engine's fetched spdlog alone would be partial instrumentation. Nothing goes on flywheel_dag's INTERFACE or in CMAKE_CXX_FLAGS.
-# test_sanitize_option holds all of this.
+# The mode is read and checked here, before anything is fetched, so a mistyped value stops the configure at once. The options are
+# given to the targets after the last add_subdirectory ("Options for targets" below), the fetched dependencies' included, because
+# ThreadSanitizer needs the dependencies instrumented too. A subproject ignores the option: the engine is header-only, a consumer
+# instruments its own targets, and an option that instrumented the engine's fetched spdlog alone would be partial instrumentation.
+# Nothing goes on flywheel_dag's INTERFACE or in CMAKE_CXX_FLAGS. test_sanitize_option holds all of this.
 # ─────────────────────────────────────────────────────────────────────────────
 if(_flywheel_dag_top_level)
     include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_sanitize.cmake)
@@ -145,8 +144,6 @@ if(_flywheel_dag_top_level)
     set_property(CACHE FLYWHEEL_DAG_SANITIZE PROPERTY STRINGS OFF asan tsan)
     flywheel_dag_sanitizer_flags("${FLYWHEEL_DAG_SANITIZE}" _flywheel_dag_sanitize_compile _flywheel_dag_sanitize_link)
     if(_flywheel_dag_sanitize_compile)
-        add_compile_options(${_flywheel_dag_sanitize_compile})
-        add_link_options(${_flywheel_dag_sanitize_link})
         message(STATUS "flywheel-dag: sanitizer '${FLYWHEEL_DAG_SANITIZE}' (${_flywheel_dag_sanitize_link})")
     endif()
 endif()
@@ -273,10 +270,10 @@ if(_flywheel_dag_top_level)
     # This project's own targets build with -Wall -Wextra -Wpedantic, and any
     # use of a [[deprecated]] API is an error. Those targets are the tests, the
     # example and the benchmark: they are what compile the engine's headers.
-    # add_compile_options reaches only the targets created after it, here and
-    # below, so placing it after every FetchContent dependency leaves
-    # third-party sources unaffected. Nothing goes on flywheel_dag's INTERFACE,
-    # and a subproject sets none of this, so a consumer's flags stay its own.
+    # The flags are given to the targets of tests/, examples/ and benchmarks/
+    # alone ("Options for targets" below), so third-party sources are
+    # unaffected. Nothing goes on flywheel_dag's INTERFACE, and a subproject
+    # sets none of this, so a consumer's flags stay its own.
     # test_warning_flags and test_consumer_subproject hold both halves.
     #
     # FLYWHEEL_DAG_WARNINGS_AS_ERRORS makes every warning an error, and it is on
@@ -289,10 +286,11 @@ if(_flywheel_dag_top_level)
     # option reaches neither a dependency, a consumer nor a workflow.
     option(FLYWHEEL_DAG_WARNINGS_AS_ERRORS
            "Make every compiler warning an error in this project's own targets" ON)
+    set(_flywheel_dag_warning_flags "")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        add_compile_options(-Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
+        set(_flywheel_dag_warning_flags -Wall -Wextra -Wpedantic -Werror=deprecated-declarations)
         if(FLYWHEEL_DAG_WARNINGS_AS_ERRORS)
-            add_compile_options(-Werror)
+            list(APPEND _flywheel_dag_warning_flags -Werror)
         else()
             message(STATUS "flywheel-dag: warnings are not errors in this tree (FLYWHEEL_DAG_WARNINGS_AS_ERRORS is OFF)")
         endif()
@@ -314,6 +312,26 @@ endif()
 
 if(FLYWHEEL_DAG_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Options for targets (top level only).
+#
+# The sanitizer options and the warning flags are given to targets, not to the directory: add_compile_options() and
+# add_link_options() are non-target directives, which CMake 4.5 reports and a strict configure refuses. One function visits the
+# finished tree (cmake/flywheel_dag_target_options.cmake), so this sits after the last add_subdirectory, and a target made below it
+# has none of the options: test_warning_flags and test_sanitizer_coverage fail on its units. The sanitizer options go to every
+# target of the tree, the fetched dependencies' included, and the warning flags to the targets of tests/, examples/ and
+# benchmarks/ alone. test_target_options holds the function, and test_sanitize_option and test_warning_option the two uses.
+# ─────────────────────────────────────────────────────────────────────────────
+if(_flywheel_dag_top_level)
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/flywheel_dag_target_options.cmake)
+    if(_flywheel_dag_sanitize_compile)
+        flywheel_dag_add_target_options(COMPILE ${_flywheel_dag_sanitize_compile} LINK ${_flywheel_dag_sanitize_link})
+    endif()
+    if(_flywheel_dag_warning_flags)
+        flywheel_dag_add_target_options(IN tests examples benchmarks COMPILE ${_flywheel_dag_warning_flags})
+    endif()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────

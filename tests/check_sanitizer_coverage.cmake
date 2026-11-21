@@ -8,11 +8,11 @@
 # and registered only where a mode is on and the generator writes link.txt (Makefiles).
 #
 # Why it exists. The canaries prove the sanitizer is live in the executables they are. They say nothing about the other test
-# executables, or about the translation units behind them, some of which are in fetched dependencies. The root CMakeLists.txt sets
-# the options as directory options before the first FetchContent_MakeAvailable, and a directory's options reach only the targets
-# created after that line, so a subdirectory or a dependency added above it would be quietly built without them. Its tests would
-# pass, uninstrumented, in a tree named for the sanitizer. For ThreadSanitizer an uninstrumented static library linked into
-# instrumented executables is the worst case: what it synchronises with is invisible, so a clean run proves nothing about it.
+# executables, or about the translation units behind them, some of which are in fetched dependencies. The root CMakeLists.txt gives
+# the options to the targets of the tree after its last add_subdirectory, and a target made after that call gets none, so a
+# subdirectory or a dependency added below it would be quietly built without them. Its tests would pass, uninstrumented, in a tree
+# named for the sanitizer. For ThreadSanitizer an uninstrumented static library linked into instrumented executables is the worst
+# case: what it synchronises with is invisible, so a clean run proves nothing about it.
 #
 # Two halves, because each sees what the other cannot:
 #
