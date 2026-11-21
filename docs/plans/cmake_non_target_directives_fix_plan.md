@@ -1,6 +1,8 @@
 # Options Go to Targets: CMake 4.5 Makes Each Directory-Wide Option an Error Under `-Werror=author`
 
-**Status: Proposed (2026-11-21).**
+**Status: Approved (2026-11-21) as written; D1 to D3 stand at their defaults.** Step 1's CMake 4.5.0 readings (1a and 1c)
+still wait for a "try again", so the steps that need no 4.5.0 binary run first: 1b, then 2 and 3. The Progress table says
+which readings are still owed.
 
 Closes [flywheel-dag#84](https://github.com/tomlin256/flywheel-dag/issues/84).
 
@@ -294,7 +296,7 @@ stays open and the Outcome says what I saw and did not see. The nightly Sanitize
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 Approval | Proposed | |
+| 0 Approval | Done | Proposed in `0aaa610` and linked from flywheel-dag#84. Approved as written; D1 to D3 at their defaults (one push after Step 6). |
 | 1 Measure on CMake 4.5.0 | Not started | blocked on a "try again" |
 | 2 The module and its test | Not started | |
 | 3 The root uses it | Not started | |
