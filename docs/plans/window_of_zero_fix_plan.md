@@ -1,6 +1,7 @@
 # Four Windowed Nodes Reject a Window of 0 in `make()`
 
-**Status: Proposed.**
+**Status: Approved (2026-11-21), as written, so D1 to D3 stand at their defaults.** The Progress table at the end
+says where each step stands.
 
 Closes [flywheel-dag#80](https://github.com/tomlin256/flywheel-dag/issues/80).
 
@@ -148,7 +149,7 @@ Commit: `docs(#80): record the outcome`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | Proposed | |
+| 0 — Approval | Done | Approved 2026-11-21 as written. flywheel-dag#80 links this file, and flywheel-dag#83 is the `SIZE_MAX` edge. |
 | 1 — The checks, tests first | Not started | |
 | 2 — The comments | Not started | |
 | 3 — The dead guard | Not started | |
