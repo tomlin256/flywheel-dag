@@ -397,6 +397,14 @@ cmake --preset relwithdebinfo-macos-arm64 -Werror=author -Werror=deprecated
 and a CMake before 4.4 ignores it without a word, so a strict configure wants CMake 4.4 or later.
 `-Werror=deprecated` makes deprecations errors on any CMake.
 
+CMake 4.5 adds `non-target-directive`, a diagnostic that is off by default and sits in the new `strict` group under
+`author`, so `-Werror=author` makes it an error. It reports `add_compile_definitions`, `add_compile_options`,
+`add_definitions`, `add_link_options`, `include_directories`, `link_directories` and `link_libraries`. The project's own
+options therefore go to targets: `flywheel_dag_add_target_options` (`cmake/flywheel_dag_target_options.cmake`) gives the
+warning flags and the sanitizer options to the targets of a finished tree, and `test_non_target_directives` fails on a
+call of any of the seven commands in a CMake file of the checkout, on every CMake. A new CMake file uses a target
+command, or that function.
+
 `FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES`, `FLYWHEEL_DAG_BUILD_BENCHMARKS` and
 `FLYWHEEL_DAG_INSTALL` are on when flywheel-dag is the top-level project and off when it is a
 subproject. A project that pulls the engine in as a subproject, and wants it in its own install,
