@@ -439,6 +439,27 @@ if(_flywheel_dag_top_level)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_fetch_declarations.cmake)
 endif()
 
+# No CMake file of the checkout calls a non-target directive. CMake 4.5 reports add_compile_options() and six like it, and the strict
+# configure that CI runs makes each report an error, but a CMake before 4.5 reports nothing, so a configure on such a host cannot show
+# one. check_non_target_directives.cmake reads the code of every CMakeLists.txt, *.cmake and *.cmake.in of the checkout instead, and a
+# hit names file:line and the command. It asks for at least three files, so that a moved layout cannot pass by reading nothing.
+# test_non_target_directives_fixtures holds the script's own behaviour over trees that it writes at run time: every one of the seven
+# commands in the spellings a call has is found, and the report is exactly those calls, with none for a comment, a string or a target
+# command; a build tree and .git are not read; and the floor and the usage are refused. Both are plain cmake -P scripts, so they run
+# in every tree. Registered at the top level, where the checkout they read is the engine's.
+if(_flywheel_dag_top_level)
+  add_test(NAME test_non_target_directives
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DMIN_FILES=3
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_non_target_directives.cmake)
+  add_test(NAME test_non_target_directives_fixtures
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/non_target_directives
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_non_target_directives_fixtures.cmake)
+endif()
+
 # The strict configure flags. CI's three workflows, the README and CLAUDE.md spell them
 # -Werror=author -Werror=deprecated, and the check holds the five to that spelling. On
 # CMake 4.4 or later it also configures a probe project to see that the flags make an
