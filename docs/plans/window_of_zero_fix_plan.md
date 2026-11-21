@@ -120,6 +120,30 @@ Remove `&& window_ > 0` from `RollingSumNode::doCompute()`.
 
 Commit: `refactor: RollingSumNode's eviction no longer guards a window of 0`.
 
+**Stopped here, for a decision.** The disassembly does not differ by what D3 expects. `doCompute()` is inlined
+into `StatefulNodeBase<RollingSumNode, …>::eval`, which was disassembled in `bench_hot_path` (Apple clang 21,
+arm64) with the guard and without it, and the two listings compared with each branch target reduced to the index
+of its instruction, so that a shifted address is not a difference. With `window_ > 0` gone the compiler can no
+longer see that `buf.front()` is never called on an empty buffer, so it keeps `front()`'s emptiness check: a `cbz`
+on the path every warm tick takes, and a cold block that calls `RingBuffer::throwEmpty`.
+
+| Variant | Instructions in `eval` | The eviction test | Cold code | `--invariants` |
+|---|---|---|---|---|
+| the guard kept (the code as it is) | 204 | `cmp`, `ccmp`, `b.eq` | none | matches |
+| the guard removed (D3 as written) | 209 | `cmp`, `b.ne`, `cbz` | a block that calls `RingBuffer::throwEmpty` | matches |
+| `[[assume(window_ > 0)]];` in its place | 203 | `cmp`, `b.ne` | none | matches |
+
+The third is D3's expected result, one compare fewer and nothing else (the only other difference is which of two
+loads comes first). It tells the optimiser what `make()` now guarantees, and nothing outside the class can break
+that, because the constructor is private. The second adds a branch to the hot path, and a measured cost there
+counts however small. No timing is offered for any of them: the difference is one instruction, below the layout
+noise of about 1% that `bench_hot_path` carries.
+
+The choices are **(a)** keep the guard, with a comment that says why a check that always passes is there;
+**(b)** replace it with `[[assume(window_ > 0)]];`; **(c)** remove it, as D3 was written. My recommendation is (a):
+it changes nothing on the hot path and adds no assumption for the optimiser to hold the code to, and (b) saves
+one instruction.
+
 ### Step 4 — Close
 
 The plan gets its Outcome (the red-first result, the disassembly, what differed from this plan) and its Status.
@@ -144,7 +168,7 @@ Commit: `docs: record the outcome`.
   ran before and throws now. One that evaluated it already threw (the second evaluation, for `RollingSumNode`).
   The full test run is the proof that nothing in the repo does this.
 - **The overloads.** `ZScoreNode::make(name, upstream, window)` and `make(name, upstream, stats)` differ in the
-  third argument, so the tests spell the window `std::size_t{0}`.
+  third argument, and a bare `0` can name either, so the tests pass the window as a `std::size_t`.
 - **Two checks on the same window.** A `RollingStats` that `ZScoreNode` shares is already checked, and the one a
   `ZScoreNode` or an `OutlierGateNode` builds is never reached with 0. The checks are not redundant, because the
   first is what names the node the caller built.
@@ -158,7 +182,7 @@ Commit: `docs: record the outcome`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved 2026-11-21 as written. flywheel-dag#80 links this file, and flywheel-dag#83 is the `SIZE_MAX` edge. |
-| 1 — The checks, tests first | Not started | |
-| 2 — The comments | Not started | |
-| 3 — The dead guard | Not started | |
+| 1 — The checks, tests first | Done | `c6dd416`. The four rejection tests red on the unfixed headers, fifteen hand-made changes each failing exactly the tests predicted, ctest 150 of 150, no warnings. |
+| 2 — The comments | Done | `039ef5a`. ctest 150 of 150. |
+| 3 — The dead guard | Stopped | The disassembly is not what D3 expected: see Step 3. Waiting for a decision. |
 | 4 — Close | Not started | |
