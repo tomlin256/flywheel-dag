@@ -17,10 +17,16 @@
 //  • Each node takes an IEqualityPolicy for its output; see IEqualityPolicy
 //    (dag.hpp) for what that gates.
 //  • make() throws std::invalid_argument, naming the node, for an argument that
-//    cannot work: an alpha outside (0, 1], and a window of 0 for RollingStats,
-//    RollingSumNode, ZScoreNode and OutlierGateNode. RollingMinMaxNode,
-//    WindowNode and DelayNode accept a window of 0, and a delay of 0 passes each
-//    sample through.
+//    cannot work: an alpha outside (0, 1]; a window of 0 for RollingStats,
+//    RollingSumNode, ZScoreNode and OutlierGateNode; and a window of SIZE_MAX
+//    for those four and RollingMinMaxNode, and a delay of SIZE_MAX for
+//    DelayNode. Each of those six sizes a ring buffer, its own or its
+//    RollingStats', at one more than the window, a size that wraps to 0 for
+//    SIZE_MAX. A smaller window too large to hold throws from make() what the
+//    buffer's allocation throws, std::length_error or std::bad_alloc.
+//  • RollingMinMaxNode, WindowNode and DelayNode accept a window of 0, and a
+//    delay of 0 passes each sample through. WindowNode accepts SIZE_MAX as
+//    well: its std::deque keeps no spare slot, and the window never fills.
 //
 // Node catalogue
 // ──────────────
@@ -297,7 +303,8 @@ private:
 // RollingStats  —  single node: incremental mean + variance (Welford online).
 // Output: double (the mean — use stddev()/variance() for the rest).
 // Sharing one node avoids duplicating its state for ZScore etc.
-// `window` is at least 1: make() throws std::invalid_argument for 0.
+// `window` is at least 1 and less than SIZE_MAX: make() throws
+// std::invalid_argument for 0 and for SIZE_MAX.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingStats
     : public StatefulNodeBase<RollingStats, double, double, RollingStatsState>,
@@ -360,7 +367,8 @@ using RollingStatsPtr = std::shared_ptr<RollingStats>;
 // re-sums the buffer exactly, which caps the error at `window` incremental steps
 // and costs O(1) amortised — the re-sum is a contiguous scan, not a deque walk.
 //
-// `window` is at least 1: make() throws std::invalid_argument for 0.
+// `window` is at least 1 and less than SIZE_MAX: make() throws
+// std::invalid_argument for 0 and for SIZE_MAX.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingSumNode
     : public StatefulNodeBase<RollingSumNode, double, double, RollingSumNodeState>,
@@ -407,6 +415,8 @@ using RollingSumNodePtr = std::shared_ptr<RollingSumNode>;
 // RollingMinMaxNode
 // Sliding min and max via two monotonic deques, O(1) amortized.
 // Output: std::pair<double,double>  {min, max}
+// `window` is less than SIZE_MAX: make() throws std::invalid_argument for
+// SIZE_MAX.
 // ─────────────────────────────────────────────────────────────────────────────
 class RollingMinMaxNode
     : public StatefulNodeBase<RollingMinMaxNode,
@@ -580,8 +590,8 @@ public:
         EqualityPolicyPtr eq = nullptr);
 
     /// Convenience: creates its own RollingStats internally. `window` is at least
-    /// 1: make() throws std::invalid_argument for 0, naming this node and not
-    /// that RollingStats.
+    /// 1 and less than SIZE_MAX: make() throws std::invalid_argument for 0 and
+    /// for SIZE_MAX, naming this node and not that RollingStats.
     static std::shared_ptr<ZScoreNode> make(
         std::string name, const NodePtr& upstream, std::size_t window,
         EqualityPolicyPtr eq = nullptr);
@@ -631,8 +641,9 @@ private:
 // Shares one RollingStats between the z-score and mean lookups.
 // Output: double
 // Overrides eval() to also drive the inner ZScoreNode each cycle.
-// `window` is at least 1: make() throws std::invalid_argument for 0, naming this
-// node and not the RollingStats it builds.
+// `window` is at least 1 and less than SIZE_MAX: make() throws
+// std::invalid_argument for 0 and for SIZE_MAX, naming this node and not the
+// RollingStats it builds.
 // ─────────────────────────────────────────────────────────────────────────────
 class OutlierGateNode
     : public StatefulNodeBase<OutlierGateNode, double, double, OutlierGateNodeState> {
@@ -770,6 +781,8 @@ private:
 // N-tick ring buffer.  Returns the value from exactly N ticks ago.
 // On the first N ticks the output is `initialValue` (default T{}).
 // Output: T
+// `delay` is less than SIZE_MAX: make() throws std::invalid_argument for
+// SIZE_MAX.
 // ─────────────────────────────────────────────────────────────────────────────
 template<typename T>
 class DelayNode

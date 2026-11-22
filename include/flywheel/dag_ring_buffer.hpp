@@ -39,7 +39,9 @@
 // DelayNode pops once it exceeds the delay), and silently dropping the oldest
 // element on overflow is exactly the kind of quiet data loss this project
 // rejects. Size the buffer for the transient peak — a node that pushes before
-// popping needs capacity N+1, not N.
+// popping needs capacity N+1, not N. N+1 wraps to 0 for an N of SIZE_MAX, a
+// buffer every push finds full, so a node that sizes one at N+1 refuses an N of
+// SIZE_MAX where it takes N, as RollingStats::make() does.
 //
 // Not thread-safe: eval-thread only, like the nodes that hold it.
 

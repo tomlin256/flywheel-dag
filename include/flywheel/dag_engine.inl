@@ -425,9 +425,10 @@ inline void Engine::cycle() {
         const std::chrono::steady_clock::time_point started;
         // record() cannot throw. It evicts only when the window is full, so the buffer is not empty and front() does
         // not throw, and the buffer holds a slot more than the window, so the push that follows never finds it full
-        // (RollingCycleWindow.RecordNeverThrowsHoweverManyAreRecorded holds both). clang-tidy follows the call into
-        // RingBuffer's checked front() and push_back(), which throw on an empty and on a full buffer, and cannot see
-        // that. A destructor that threw would terminate, so the finding is worth a comment, not a rewrite.
+        // (RollingCycleWindow.RecordNeverThrowsHoweverManyAreRecorded holds both). The slot is there for every window
+        // the constructor accepts: it refuses SIZE_MAX, for which the count wraps to 0. clang-tidy follows the call
+        // into RingBuffer's checked front() and push_back(), which throw on an empty and on a full buffer, and cannot
+        // see that. A destructor that threw would terminate, so the finding is worth a comment, not a rewrite.
         // NOLINTNEXTLINE(bugprone-exception-escape)
         ~TimeOnExit() {
             const auto ns = static_cast<uint64_t>(

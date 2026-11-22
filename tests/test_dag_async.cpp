@@ -1367,9 +1367,10 @@ TEST(RollingCycleWindow, WindowOneBelowSizeMaxIsRefusedByItsBuffer) {
 
 // Engine::cycle() calls record() from a destructor, where a throw would terminate, and the NOLINT over that
 // destructor says record() cannot throw: it evicts only when the window is full, so the buffer is not empty, and the
-// buffer holds a slot more than the window, so the push that follows never finds it full. RingBuffer throws on an
-// empty and on a full buffer; this records well past a full window, for the smallest windows and a larger one, and
-// reads the mean of the window it ends with.
+// buffer holds a slot more than the window, so the push that follows never finds it full. The constructor refuses
+// SIZE_MAX, for which that count wraps to 0 (SizeMaxWindowThrows). RingBuffer throws on an empty and on a full
+// buffer; this records well past a full window, for the smallest windows and a larger one, and reads the mean of the
+// window it ends with.
 TEST(RollingCycleWindow, RecordNeverThrowsHoweverManyAreRecorded) {
     for (const std::size_t window : {std::size_t{1}, std::size_t{2}, std::size_t{5}}) {
         RollingCycleWindow w(window);

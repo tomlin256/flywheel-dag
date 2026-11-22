@@ -106,6 +106,9 @@ inline constexpr std::size_t kDefaultRollingCycleWindow = 1000;
 // (dag_timeseries.hpp). Engine bookkeeping, not a DAG node, so it lives in
 // dag::async. ns is integral, so unlike RollingSumNode's double sum the running
 // total needs no periodic re-sum to bound drift.
+//
+// `window` is at least 1 and less than SIZE_MAX: the constructor throws
+// std::invalid_argument for 0 and for SIZE_MAX.
 class RollingCycleWindow {
 public:
     explicit RollingCycleWindow(std::size_t window);
@@ -225,6 +228,8 @@ public:
     // ── Construction ──────────────────────────────────────────────────────────
 
     /// rollingWindow sizes the sample count backing rollingMeanCycleUs() (below).
+    /// It is at least 1 and less than SIZE_MAX: the constructor throws
+    /// std::invalid_argument for 0 and for SIZE_MAX, from RollingCycleWindow's.
     /// A bare `Engine engine;` takes the default.
     explicit Engine(std::size_t rollingWindow = kDefaultRollingCycleWindow);
 

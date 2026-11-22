@@ -142,6 +142,9 @@ Commit: `fix: refuse a window of SIZE_MAX, whose buffer size wraps to 0`.
   `RollingCycleWindow.RecordNeverThrowsHoweverManyAreRecorded`, say that the constructor's refusal of `SIZE_MAX` is
   what makes "a slot more than the window" hold.
 - `CLAUDE.md` and `docs/engine_rules.md` do not change: the headers carry it.
+- Added while building the step: the Semantics block of `dag_ring_buffer.hpp`, which tells a node that pushes before
+  popping to size the buffer at N+1, says that N+1 wraps to 0 for an N of `SIZE_MAX`, so such a node refuses that N
+  where it takes it. It is the trap all seven sites fell into, at the place a new caller reads.
 
 **Done when:** each comment states what is true after Step 1, and `test_comment_refs` passes.
 
@@ -187,5 +190,5 @@ Commit: `docs: record the outcome`.
 |---|---|---|
 | 0 — Approval | Done | Approved 2026-11-22 as written. flywheel-dag#83 links this file. |
 | 1 — The checks, tests first | Done | Eight of the eleven new tests red on the unfixed headers, all eleven green with the checks. Twelve hand-made changes each failed exactly the tests predicted, and the control none; the change first planned for one row was equivalent and was replaced. ctest 154 of 154, no warnings, invariants match. |
-| 2 — The comments | Not started | |
+| 2 — The comments | Done | The comments the step lists, and one sentence in `dag_ring_buffer.hpp`'s Semantics block (below). ctest 154 of 154, no warnings. |
 | 3 — Close | Not started | |
