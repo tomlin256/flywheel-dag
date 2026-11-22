@@ -1,6 +1,7 @@
 # Windowed Nodes and the Engine's Cycle Window Reject a Window of `SIZE_MAX`
 
-**Status: Approved (2026-11-22) as written,** so D1, D2 and D3 stand at their defaults.
+**Status: Done (2026-11-22), not released.** Approved as written, so D1, D2 and D3 stood at their defaults. The
+Outcome at the end records what the steps found.
 
 Closes [flywheel-dag#83](https://github.com/tomlin256/flywheel-dag/issues/83).
 
@@ -189,6 +190,63 @@ Commit: `docs: record the outcome`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved 2026-11-22 as written. flywheel-dag#83 links this file. |
-| 1 — The checks, tests first | Done | Eight of the eleven new tests red on the unfixed headers, all eleven green with the checks. Twelve hand-made changes each failed exactly the tests predicted, and the control none; the change first planned for one row was equivalent and was replaced. ctest 154 of 154, no warnings, invariants match. |
-| 2 — The comments | Done | The comments the step lists, and one sentence in `dag_ring_buffer.hpp`'s Semantics block (below). ctest 154 of 154, no warnings. |
-| 3 — Close | Not started | |
+| 1 — The checks, tests first | Done | `c6f53bd`. Eight of the eleven new tests red on the unfixed headers, all eleven green with the checks. Twelve hand-made changes each failed exactly the tests predicted, and the control none; the change first planned for one row was equivalent and was replaced. ctest 154 of 154, no warnings, invariants match. |
+| 2 — The comments | Done | `5293fbd`. The comments the step lists, and one sentence in `dag_ring_buffer.hpp`'s Semantics block (Step 2 says what). ctest 154 of 154, no warnings. |
+| 3 — Close | Done | This commit, pushed with the four before it. flywheel-dag#83 is closed by hand after the push. |
+
+## Outcome
+
+Fixed on `main`, not released. flywheel-dag#83 is closed by hand after the push, with a comment that links this file.
+
+| Commit | Step | What |
+|---|---|---|
+| `480f9c5`, `a04779a` | 0 | the plan, and its approval |
+| `c6f53bd` | 1 | the seven checks and the eleven tests |
+| `5293fbd` | 2 | the comments at the declarations |
+| this commit | 3 | this Outcome |
+
+**The reproduction.** At `bec45b2` a throwaway harness in the scratchpad gave the table in "Problem" exactly, with
+Apple clang 21 and with GCC 13.3 in `ubuntu-dev`: the six nodes accept `SIZE_MAX` and throw at their first evaluation,
+`WindowNode` evaluates, and `Engine(SIZE_MAX)` builds and ends the process with `SIGABRT` at its first `step()`.
+
+**Step 1, red first.** Against the unfixed headers the six `WindowOfSizeMax.…IsRejected` tests failed with
+"`<Kind>::make() accepted a window of SIZE_MAX`" ("a delay", for `DelayNode`), `RollingCycleWindow.SizeMaxWindowThrows`
+with "RollingCycleWindow accepted a window of SIZE_MAX", and `SizeMaxRollingWindowIsRefusedAtConstruction` because
+`Engine{SIZE_MAX}` threw nothing. The other three passed. With the checks all eleven pass.
+
+**The hand-made changes.** Each was made on a scratch copy of `include/`, with the repo's own test files compiled
+against it and each of the eleven tests run alone under a 10 s watchdog. A change to `dag_timeseries.inl` rebuilt
+`test_timeseries` alone: `test_dag_async.cpp` does not include that header (its `-MM` dependency list names it
+nowhere), so its three tests ran on the control's binary. 18 objects were compiled for 14 runs, the control and 13
+changes:
+
+| Change | Failed |
+|---|---|
+| none (the control) | none |
+| the `SIZE_MAX` check removed from one of the six `make()` functions (six changes) | that node's `…IsRejected`, and no other test |
+| the `SIZE_MAX` check removed from `RollingCycleWindow` | `SizeMaxWindowThrows` and `SizeMaxRollingWindowIsRefusedAtConstruction` |
+| `RollingSumNode`'s message without "less than SIZE_MAX" | `RollingSumNodeIsRejected` |
+| a check that refuses `SIZE_MAX − 1` by name too, in `RollingStats` | `EachOfTheSixIsRefusedByItsBuffer` |
+| a check for `SIZE_MAX` in `WindowNode::make()` | `WindowNodeHoldsEverySample` |
+| `RollingStats`' buffer sized at `window + 2` | `EachOfTheSixIsRefusedByItsBuffer` |
+| a check that refuses `SIZE_MAX − 1` by name too, in `RollingCycleWindow` | none: the change is equivalent |
+| `RollingCycleWindow`'s buffer sized at `window + 2` | `WindowOneBelowSizeMaxIsRefusedByItsBuffer` |
+
+Every result but one was the one predicted. The check in `RollingCycleWindow` runs in the constructor's body, after
+`buf_(window + 1)` has already thrown `std::length_error` for `SIZE_MAX − 1`, so a check there that refuses
+`SIZE_MAX − 1` changes nothing a test can see. The change that sizes the buffer at `window + 2`, which accepts
+`SIZE_MAX − 1`, took its row in Step 1, and failed the test predicted.
+
+**The gates, on Apple clang 21 and CMake 4.4.5 here.** Configure with `-Werror=author -Werror=deprecated` reported no
+diagnostic, each build printed no warning, and ctest passed 154 of 154 after Steps 1 and 2, with the clang-tidy tests
+among them (`clang_tidy_test_timeseries` and `clang_tidy_test_dag_async` included). `bench_hot_path --invariants`
+matches `benchmarks/expected_invariants.txt`.
+
+**Where the work differs from the approved plan.**
+
+- Step 1's last mutation row, as above: the change first planned for it was equivalent.
+- Step 2 added one sentence the plan did not list, in `dag_ring_buffer.hpp` (Step 2 says what and why).
+
+**CI and the rest.** Pushed once, at this commit, with `git fetch` first and not forced, and the runs are not waited
+for. Left for later: the GCC 13.3 build and ctest in `ubuntu-dev`, run after the push, whose result goes in the closing
+comment on flywheel-dag#83; GCC 15 and the sanitizers, which CI runs.
