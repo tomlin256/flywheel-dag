@@ -1,6 +1,6 @@
 # Windowed Nodes and the Engine's Cycle Window Reject a Window of `SIZE_MAX`
 
-**Status: Proposed (2026-11-22).** Nothing past Step 0 lands until it is approved.
+**Status: Approved (2026-11-22) as written,** so D1, D2 and D3 stand at their defaults.
 
 Closes [flywheel-dag#83](https://github.com/tomlin256/flywheel-dag/issues/83).
 
@@ -181,7 +181,7 @@ Commit: `docs: record the outcome`.
 
 | Step | Status | Notes |
 |---|---|---|
-| 0 — Approval | In review | |
+| 0 — Approval | Done | Approved 2026-11-22 as written. flywheel-dag#83 links this file. |
 | 1 — The checks, tests first | Not started | |
 | 2 — The comments | Not started | |
 | 3 — Close | Not started | |
