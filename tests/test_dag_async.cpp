@@ -1348,6 +1348,23 @@ TEST(RollingCycleWindow, ZeroWindowThrows) {
     EXPECT_THROW(RollingCycleWindow{0}, std::invalid_argument);
 }
 
+// The buffer holds a slot more than the window, and for SIZE_MAX that count wraps to 0, so the constructor refuses it as
+// it refuses 0. One below, the buffer asked for is SIZE_MAX, more than a std::vector holds, and the vector throws
+// std::length_error before it allocates.
+TEST(RollingCycleWindow, SizeMaxWindowThrows) {
+    try {
+        static_cast<void>(RollingCycleWindow{std::numeric_limits<std::size_t>::max()});
+        FAIL() << "RollingCycleWindow accepted a window of SIZE_MAX";
+    } catch (const std::invalid_argument& e) {
+        const std::string msg = e.what();
+        EXPECT_NE(msg.find("window must be < SIZE_MAX"), std::string::npos) << "actual: " << msg;
+    }
+}
+
+TEST(RollingCycleWindow, WindowOneBelowSizeMaxIsRefusedByItsBuffer) {
+    EXPECT_THROW(RollingCycleWindow{std::numeric_limits<std::size_t>::max() - 1}, std::length_error);
+}
+
 // Engine::cycle() calls record() from a destructor, where a throw would terminate, and the NOLINT over that
 // destructor says record() cannot throw: it evicts only when the window is full, so the buffer is not empty, and the
 // buffer holds a slot more than the window, so the push that follows never finds it full. RingBuffer throws on an
@@ -1511,6 +1528,13 @@ TEST(EngineCycleStats, ExplicitWindowConstructorIsWired) {
 
     EXPECT_GE(engine.rollingMeanCycleUs(), engine.minCycleUs());
     EXPECT_LE(engine.rollingMeanCycleUs(), engine.maxCycleUs());
+}
+
+// The rolling window reaches RollingCycleWindow, whose constructor refuses SIZE_MAX, so an Engine built with it throws
+// and never runs a cycle. The destructor that times a cycle records into that window, where a throw would end the
+// process.
+TEST(EngineCycleStats, SizeMaxRollingWindowIsRefusedAtConstruction) {
+    EXPECT_THROW(Engine{std::numeric_limits<std::size_t>::max()}, std::invalid_argument);
 }
 
 // A cycle that throws is counted by cycleCount(), so it is timed too: every statistic covers the

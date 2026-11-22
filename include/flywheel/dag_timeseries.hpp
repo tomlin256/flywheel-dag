@@ -91,6 +91,7 @@
 #include <cmath>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 
 namespace dag::ts {
 

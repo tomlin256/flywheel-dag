@@ -27,6 +27,11 @@ inline RollingCycleWindow::RollingCycleWindow(std::size_t window)
 {
     if (window == 0)
         throw std::invalid_argument("RollingCycleWindow: window must be >= 1");
+    // The buffer holds a slot more than the window. For SIZE_MAX that count wraps to 0, and record()'s first push would
+    // throw, from the destructor that times a cycle, where a throw ends the process. buf_(0) allocates nothing, so the
+    // check can follow it. A smaller window too large to hold is refused by buf_'s allocation.
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument("RollingCycleWindow: window must be < SIZE_MAX");
 }
 
 inline void RollingCycleWindow::record(uint64_t ns) {

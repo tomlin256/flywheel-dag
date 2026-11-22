@@ -149,6 +149,13 @@ inline std::shared_ptr<RollingStats> RollingStats::make(
     if (window == 0)
         throw std::invalid_argument(
             "RollingStats '" + name + "': window must be at least 1");
+    // The buffer holds one more than the window. For SIZE_MAX that size wraps to
+    // 0, and the first push would throw the buffer's error: refused here, by
+    // name, as 0 is. A smaller window too large to hold is refused by the
+    // buffer's allocation, in the constructor.
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "RollingStats '" + name + "': window must be less than SIZE_MAX");
     auto self = std::shared_ptr<RollingStats>(
         new RollingStats(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
@@ -291,10 +298,14 @@ inline std::shared_ptr<RollingSumNode> RollingSumNode::make(
     std::string name, NodePtr upstream, std::size_t window,
     EqualityPolicyPtr eq)
 {
-    // See RollingStats::make — throws rather than asserts for the same reason.
+    // See RollingStats::make — throws rather than asserts, for 0 and for
+    // SIZE_MAX, for the same reasons.
     if (window == 0)
         throw std::invalid_argument(
             "RollingSumNode '" + name + "': window must be at least 1");
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "RollingSumNode '" + name + "': window must be less than SIZE_MAX");
     auto self = std::shared_ptr<RollingSumNode>(
         new RollingSumNode(std::move(name), std::move(upstream), window, std::move(eq)));
     wire(self, self->inputs());
@@ -406,6 +417,11 @@ inline void RollingSumNode::doRestoreState(const INodeState& s, State& st) {
 inline std::shared_ptr<RollingMinMaxNode> RollingMinMaxNode::make(
     std::string name, NodePtr upstream, std::size_t window)
 {
+    // Both buffers hold one more than the window, which wraps to 0 for SIZE_MAX:
+    // see RollingStats::make. A window of 0 is accepted.
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "RollingMinMaxNode '" + name + "': window must be less than SIZE_MAX");
     auto self = std::shared_ptr<RollingMinMaxNode>(
         new RollingMinMaxNode(std::move(name), std::move(upstream), window));
     wire(self, self->inputs());
@@ -734,6 +750,9 @@ inline std::shared_ptr<ZScoreNode> ZScoreNode::make(
     if (window == 0)
         throw std::invalid_argument(
             "ZScoreNode '" + name + "': window must be at least 1");
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "ZScoreNode '" + name + "': window must be less than SIZE_MAX");
     auto stats = RollingStats::make(name + ".stats", upstream, window);
     auto self = std::shared_ptr<ZScoreNode>(
         new ZScoreNode(std::move(name), upstream, std::move(stats), std::move(eq)));
@@ -839,6 +858,9 @@ inline std::shared_ptr<OutlierGateNode> OutlierGateNode::make(
     if (window == 0)
         throw std::invalid_argument(
             "OutlierGateNode '" + name + "': window must be at least 1");
+    if (window == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "OutlierGateNode '" + name + "': window must be less than SIZE_MAX");
     // One shared RollingStats feeds both ZScore and mean access
     auto stats  = RollingStats::make(name + ".stats", upstream, window);
     auto zscore = ZScoreNode::make(name + ".z", upstream, stats);
@@ -1087,6 +1109,11 @@ std::shared_ptr<DelayNode<T>> DelayNode<T>::make(
     T initialValue,
     EqualityPolicyPtr eq)
 {
+    // The buffer holds one more than the delay, which wraps to 0 for SIZE_MAX:
+    // see RollingStats::make. A delay of 0 is accepted.
+    if (delay == std::numeric_limits<std::size_t>::max())
+        throw std::invalid_argument(
+            "DelayNode '" + name + "': delay must be less than SIZE_MAX");
     auto self = std::shared_ptr<DelayNode<T>>(
         new DelayNode<T>(std::move(name), std::move(upstream), delay,
                          std::move(initialValue), std::move(eq)));

@@ -115,7 +115,11 @@ run alone under a 10 s watchdog, with a control that changes nothing:
 | the `SIZE_MAX` check removed from `RollingCycleWindow` | `SizeMaxWindowThrows` and `SizeMaxRollingWindowIsRefusedAtConstruction` |
 | `RollingSumNode`'s message without "less than SIZE_MAX" | `RollingSumNodeIsRejected` |
 | a check that refuses `SIZE_MAX − 1` by name too, in `RollingStats` | `EachOfTheSixIsRefusedByItsBuffer` |
-| the same, in `RollingCycleWindow` | `WindowOneBelowSizeMaxIsRefusedByItsBuffer` |
+| `RollingCycleWindow`'s buffer sized at `window + 2` | `WindowOneBelowSizeMaxIsRefusedByItsBuffer`: `SIZE_MAX − 1` wraps to 0 and is accepted |
+
+The last row replaces the one first planned for it, a check that refuses `SIZE_MAX − 1` by name in
+`RollingCycleWindow`. That change is equivalent, and no test can see it: the check runs in the constructor's body,
+after `buf_`'s allocation has already refused `SIZE_MAX − 1` with `std::length_error`.
 | a check for `SIZE_MAX` in `WindowNode::make()` | `WindowNodeHoldsEverySample` |
 | `RollingStats`' buffer sized at `window + 2` | `EachOfTheSixIsRefusedByItsBuffer`: `SIZE_MAX − 1` wraps to 0 and is accepted |
 
@@ -182,6 +186,6 @@ Commit: `docs: record the outcome`.
 | Step | Status | Notes |
 |---|---|---|
 | 0 — Approval | Done | Approved 2026-11-22 as written. flywheel-dag#83 links this file. |
-| 1 — The checks, tests first | Not started | |
+| 1 — The checks, tests first | Done | Eight of the eleven new tests red on the unfixed headers, all eleven green with the checks. Twelve hand-made changes each failed exactly the tests predicted, and the control none; the change first planned for one row was equivalent and was replaced. ctest 154 of 154, no warnings, invariants match. |
 | 2 — The comments | Not started | |
 | 3 — Close | Not started | |

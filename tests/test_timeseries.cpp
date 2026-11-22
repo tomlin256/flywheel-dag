@@ -806,6 +806,123 @@ TEST(WindowOfOne, EachOfTheFourEvaluatesAtTheLatestSample) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Window validation — a window of SIZE_MAX
+//
+// RollingStats, RollingSumNode and RollingMinMaxNode size their ring buffers at
+// one more than the window, and DelayNode at one more than the delay. For
+// SIZE_MAX that size wraps to 0, so make() throws std::invalid_argument for it,
+// naming the node, as it does for a window of 0. ZScoreNode and OutlierGateNode
+// check before they build the RollingStats they own, so the message names the
+// node the caller built and not that RollingStats.
+//
+// A smaller window too large to hold is refused in make() by the buffer's
+// allocation: one below SIZE_MAX asks for a buffer of SIZE_MAX, more than a
+// std::vector holds, and the vector throws std::length_error before it
+// allocates. So no window is accepted that fails at an evaluation.
+//
+// WindowNode keeps a std::deque with no spare slot. SIZE_MAX is a window it
+// never fills.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+constexpr std::size_t kSizeMax = std::numeric_limits<std::size_t>::max();
+
+/// `make(name, upstream, window)` builds the node under test. `kind` is its class
+/// name and `argument` the name of its window, as its message spells them.
+template <typename Make>
+void expectRejectsAWindowOfSizeMax(const std::string& kind, const std::string& argument,
+                                   const Make& make) {
+    auto in = Input<double>::make("in", 0.0);
+    try {
+        static_cast<void>(make("rejected", in, kSizeMax));
+        FAIL() << kind << "::make() accepted a " << argument << " of SIZE_MAX";
+    } catch (const std::invalid_argument& e) {
+        const std::string msg = e.what();
+        EXPECT_TRUE(msg.starts_with(kind + " 'rejected': ")) << "actual: " << msg;
+        EXPECT_NE(msg.find(argument + " must be less than SIZE_MAX"), std::string::npos)
+            << "actual: " << msg;
+    }
+}
+
+}  // namespace
+
+TEST(WindowOfSizeMax, RollingStatsIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "RollingStats", "window",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return RollingStats::make(name, in, window);
+        });
+}
+
+TEST(WindowOfSizeMax, RollingSumNodeIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "RollingSumNode", "window",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return RollingSumNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfSizeMax, RollingMinMaxNodeIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "RollingMinMaxNode", "window",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return RollingMinMaxNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfSizeMax, DelayNodeIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "DelayNode", "delay",
+        [](const std::string& name, const NodePtr& in, std::size_t delay) {
+            return DelayNode<double>::make(name, in, delay);
+        });
+}
+
+TEST(WindowOfSizeMax, ZScoreNodeIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "ZScoreNode", "window",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return ZScoreNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfSizeMax, OutlierGateNodeIsRejected) {
+    expectRejectsAWindowOfSizeMax(
+        "OutlierGateNode", "window",
+        [](const std::string& name, const NodePtr& in, std::size_t window) {
+            return OutlierGateNode::make(name, in, window);
+        });
+}
+
+TEST(WindowOfSizeMax, WindowNodeHoldsEverySample) {
+    auto in     = Input<double>::make("in", 0.0);
+    auto window = WindowNode<double>::make("window", in, kSizeMax);
+
+    EvalContext ctx;
+    for (const double x : {1.0, 2.0, 3.0}) {
+        in->set(x);
+        EXPECT_NO_THROW(window->eval(ctx));
+    }
+    EXPECT_EQ(window->window(), (std::deque<double>{1.0, 2.0, 3.0}));
+    EXPECT_FALSE(window->full());
+}
+
+// One below SIZE_MAX, the buffer the node asks for is SIZE_MAX, more than a
+// std::vector holds. ZScoreNode and OutlierGateNode pass the window to the
+// RollingStats they build, whose buffer refuses it.
+TEST(WindowOneBelowSizeMax, EachOfTheSixIsRefusedByItsBuffer) {
+    auto in = Input<double>::make("in", 0.0);
+    constexpr std::size_t kBelow = kSizeMax - 1;
+
+    EXPECT_THROW(static_cast<void>(RollingStats::make("stats", in, kBelow)), std::length_error);
+    EXPECT_THROW(static_cast<void>(RollingSumNode::make("sum", in, kBelow)), std::length_error);
+    EXPECT_THROW(static_cast<void>(RollingMinMaxNode::make("minmax", in, kBelow)), std::length_error);
+    EXPECT_THROW(static_cast<void>(DelayNode<double>::make("delay", in, kBelow)), std::length_error);
+    EXPECT_THROW(static_cast<void>(ZScoreNode::make("score", in, kBelow)), std::length_error);
+    EXPECT_THROW(static_cast<void>(OutlierGateNode::make("gate", in, kBelow)), std::length_error);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Every IWindowed::windowStatusNode() must be InvalidationMode::Eager: its
 // functor reads filled() off the captured node, and filled() advances while that
 // node's value, the declared input, sits still. The note above the
