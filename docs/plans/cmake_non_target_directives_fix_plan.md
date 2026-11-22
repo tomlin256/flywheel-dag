@@ -355,8 +355,8 @@ unit by unit).
 reproduces the red on the unchanged tree, with four errors in the default tree and six in `asan` and `tsan`, at the lines of
 the Problem section; the final tree configures with CI's two flags on 4.5.0 and prints googletest's two reports as
 warnings; and the Mac (4.4.5 and 4.5.0), `ubuntu-dev` (GCC 13.3, 4.4.5) and a GCC 15.2 container (4.5.0) build with no
-warning and pass the suite and the benchmark invariants. The GCC 15.2 run is the first GCC verdict on flywheel-dag#80's
-commits, and it found nothing.
+warning and pass the suite and the benchmark invariants. Step 6 showed no GCC 15 finding in flywheel-dag#80's code: both
+GCC 15.2 builds, the interim one and this one, have no warning, so no issue was opened for one.
 
 **What differed from the plan.** `CLAUDE.md` got no line (Step 5). The behaviour cases are a test of their own and hold
 three cases more than the table lists, and the demotion is applied at the top level only, because Step 1c measured that a
@@ -367,8 +367,9 @@ files, not two.
 canaries and the coverage test, as the plan said. A line in `CLAUDE.md`: say so and it is one more commit.
 
 **What went wrong on the way.** The permission classifier refused the 4.5.0 binary once, and the steps that needed it
-waited for a "try again" and nothing was done to get round it. A shell call used a bare `python3` where the guidelines say
-`pipenv run`; it only printed a line.
+waited for a "try again" and nothing was done to get round it. Three shell calls ran a bare `python3` where the guidelines
+say `pipenv run`: a check that it runs, a read of a scratch probe tree's `compile_commands.json`, and a one-line
+placeholder. None changed a file.
 
 **Environment.** Docker was not running when the work began: `open -a Docker`, then `docker start ubuntu-dev`, which had
 exited with 143 46 hours earlier.
