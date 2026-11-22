@@ -22,9 +22,19 @@
 # needs no network and compiles nothing. This file's flags are the oracle, and the
 # spelling check holds the five files to them.
 #
-# The behaviour needs CMake 4.4. A CMake before it is one the README still allows and
-# no CI job runs, so the behaviour is skipped, and the status line says so; the spelling
-# is still checked.
+# CMake 4.5 added the category non-target-directive, which the flags make an error and
+# which is off without them. Three probes hold it: add_compile_options fails with CMake
+# Error (non-target-directive) under the flags, configures silently without them, and
+# target_compile_options configures under them. They are what gives test_strict_configure
+# its meaning: were a CMake to stop reporting the category, the demotion in the root
+# would have nothing to demote, and the strict configure would pass proving nothing.
+# The probes hold the command names as text, so the check that no CMake file calls one
+# (check_non_target_directives.cmake) does not read this file.
+#
+# The behaviour needs CMake 4.4, and the category cases CMake 4.5. A CMake before 4.4 is
+# one the README still allows and no CI job runs, so the behaviour is skipped, and the
+# status line says so; the spelling is still checked. On 4.4 the category cases are
+# skipped and the status line says that.
 
 cmake_minimum_required(VERSION 4.0)
 
@@ -68,21 +78,28 @@ list(LENGTH spelled spelled_count)
 # ── the behaviour ────────────────────────────────────────────────────────────
 file(REMOVE_RECURSE "${SCRATCH_DIR}")
 
-# probe(<rc> <output> <name> <kind> [<flags>...]): configure a project that says
-# message(<kind> "probe") with <flags>. <output> holds the output and the error output
-# together.
-function(probe rc_var out_var name kind)
+# probe_code(<rc> <output> <name> <code> [<flags>...]): configure a project whose body is
+# <code>, with <flags>. <output> holds the output and the error output together.
+function(probe_code rc_var out_var name code)
     set(dir "${SCRATCH_DIR}/${name}")
     file(MAKE_DIRECTORY "${dir}")
     file(WRITE "${dir}/CMakeLists.txt"
          "cmake_minimum_required(VERSION 4.0)\n"
          "project(probe NONE)\n"
-         "message(${kind} \"probe\")\n")
+         "${code}\n")
     execute_process(
         COMMAND ${CMAKE_COMMAND} -G "${GENERATOR}" -S "${dir}" -B "${dir}/build" ${ARGN}
         RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
     set(${rc_var} "${rc}" PARENT_SCOPE)
     set(${out_var} "${out}${err}" PARENT_SCOPE)
+endfunction()
+
+# probe(<rc> <output> <name> <kind> [<flags>...]): probe_code for a project that says
+# message(<kind> "probe").
+function(probe rc_var out_var name kind)
+    probe_code(rc out "${name}" "message(${kind} \"probe\")" ${ARGN})
+    set(${rc_var} "${rc}" PARENT_SCOPE)
+    set(${out_var} "${out}" PARENT_SCOPE)
 endfunction()
 
 # A failed configure exits with a positive number. Anything else, such as the text
@@ -146,7 +163,39 @@ else()
     endif()
     math(EXPR cases "${cases} + 1")
 
-    set(behaviour "${cases} cases ran on CMake ${CMAKE_VERSION}")
+    # The category of CMake 4.5. The flags make a directory-wide option an error, a CMake
+    # without them says nothing, and a target command is what the error asks for.
+    set(category_note "")
+    if(CMAKE_VERSION VERSION_LESS 4.5)
+        string(CONCAT category_note "; the non-target-directive cases are skipped, since CMake "
+                                    "${CMAKE_VERSION} has no such category")
+    else()
+        probe_code(rc out directive "add_compile_options(-Wall)" ${strict_flags})
+        failed(rc did_fail)
+        if(NOT did_fail OR NOT out MATCHES "CMake Error \\(non-target-directive\\)")
+            string(APPEND problems "  ${strict_text} did not make add_compile_options a "
+                                   "CMake Error (non-target-directive); exit ${rc}:\n${out}\n")
+        endif()
+        math(EXPR cases "${cases} + 1")
+
+        probe_code(rc out directive_unflagged "add_compile_options(-Wall)")
+        if(NOT rc STREQUAL "0" OR out MATCHES "non-target-directive")
+            string(APPEND problems "  add_compile_options without the flags did not configure "
+                                   "silently; exit ${rc}:\n${out}\n")
+        endif()
+        math(EXPR cases "${cases} + 1")
+
+        probe_code(rc out target_command
+                   "add_library(probe_library INTERFACE)\ntarget_compile_options(probe_library INTERFACE -Wall)"
+                   ${strict_flags})
+        if(NOT rc STREQUAL "0" OR out MATCHES "non-target-directive")
+            string(APPEND problems "  ${strict_text} refused target_compile_options; "
+                                   "exit ${rc}:\n${out}\n")
+        endif()
+        math(EXPR cases "${cases} + 1")
+    endif()
+
+    set(behaviour "${cases} cases ran on CMake ${CMAKE_VERSION}${category_note}")
 endif()
 
 if(NOT problems STREQUAL "")

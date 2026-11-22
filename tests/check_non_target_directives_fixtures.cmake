@@ -6,8 +6,8 @@
 #   cmake -DSOURCE_DIR=<source> -DSCRATCH_DIR=<dir> -P check_non_target_directives_fixtures.cmake
 #
 # It writes small trees under SCRATCH_DIR and runs SOURCE_DIR/tests/check_non_target_directives.cmake over each, which is the script
-# that test_non_target_directives runs over the checkout. The trees hold the seven commands as text, so this file is one of the two that
-# that script does not read (it says so): a script run by cmake -P cannot call them, and this is the one that holds the script's
+# that test_non_target_directives runs over the checkout. The trees hold the seven commands as text, so this file is one of the four that
+# that script does not read (it names them): a script run by cmake -P cannot call them, and this is the one that holds the script's
 # own behaviour.
 #
 # What it holds:

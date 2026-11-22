@@ -16,10 +16,12 @@
 # It reads the code, comments dropped, of every CMakeLists.txt, *.cmake and *.cmake.in in the checkout, except a build tree
 # (build*/ and cmake-build-*/, which hold the dependencies' files, and are ignored by git) and .git/. A call is a command name,
 # in any case, followed by an open parenthesis or by the end of its line, and not part of a longer name: target_link_libraries
-# is not link_libraries. A name inside a string, followed by a parenthesis, is a hit too: reword the string. Two files are not
-# read, because each holds the seven names as text that it writes into a project to see this script refuse it, and a script that
-# runs under cmake -P cannot call them: this one, and tests/check_non_target_directives_fixtures.cmake
-# (test_non_target_directives_fixtures, which holds this script's own behaviour).
+# is not link_libraries. A name inside a string, followed by a parenthesis, is a hit too: reword the string. Four files are not
+# read, because each holds some of the seven names as text that it writes into a project, and a script that runs under cmake -P
+# cannot call them: this one; tests/check_non_target_directives_fixtures.cmake (test_non_target_directives_fixtures, which writes
+# trees to see this script refuse them); tests/check_cmake_diagnostics.cmake (test_cmake_diagnostics, whose probes show that the
+# strict flags make a call an error); and tests/check_strict_configure.cmake (test_strict_configure, whose parent project fetches a
+# dependency that makes one).
 #
 # It fails too when it reads fewer than MIN_FILES files, so that a moved or renamed layout cannot pass by reading nothing: the
 # real run asks for three, and the checkout has dozens.
@@ -44,7 +46,11 @@ set(directives
     include_directories
     link_directories
     link_libraries)
-set(not_read tests/check_non_target_directives.cmake tests/check_non_target_directives_fixtures.cmake)
+set(not_read
+    tests/check_non_target_directives.cmake
+    tests/check_non_target_directives_fixtures.cmake
+    tests/check_cmake_diagnostics.cmake
+    tests/check_strict_configure.cmake)
 
 # A command name that is not the tail of a longer one, then an open parenthesis, or nothing more on its line.
 string(JOIN "|" alternatives ${directives})

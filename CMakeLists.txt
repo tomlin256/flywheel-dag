@@ -163,7 +163,21 @@ endif()
 # hash together. test_fetch_declarations holds every declaration in the checkout
 # to one of the two forms.
 # ─────────────────────────────────────────────────────────────────────────────
-include(FetchContent)
+# CMake 4.5 reports an include path that a whole directory shares, which googletest sets in two of its CMakeLists.txt files, as a
+# non-target-directive, and -Werror=author makes that an error. A dependency is not ours to change, so what this project fetches
+# reports it as a warning, and its own files still get the error. A macro runs with the diagnostics that were in force where it was
+# defined, and FetchContent_MakeAvailable adds a subdirectory through macros that include(FetchContent) defines, so the demotion is in
+# force for that include and not for the later call. The module has no include guard, so an include in a subproject would define the
+# macros again for its parent's later calls, with the demotion: only the top level demotes. Before 4.5 the category does not exist.
+# test_strict_configure holds all of this.
+if(_flywheel_dag_top_level AND NOT CMAKE_VERSION VERSION_LESS 4.5)
+    block(SCOPE_FOR DIAGNOSTICS)
+        cmake_diagnostic(DEMOTE CMD_NON_TARGET_DIRECTIVE WARN)
+        include(FetchContent)
+    endblock()
+else()
+    include(FetchContent)
+endif()
 
 if(NOT TARGET spdlog::spdlog)
     FetchContent_Declare(

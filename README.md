@@ -403,7 +403,9 @@ CMake 4.5 adds `non-target-directive`, a diagnostic that is off by default and s
 options therefore go to targets: `flywheel_dag_add_target_options` (`cmake/flywheel_dag_target_options.cmake`) gives the
 warning flags and the sanitizer options to the targets of a finished tree, and `test_non_target_directives` fails on a
 call of any of the seven commands in a CMake file of the checkout, on every CMake. A new CMake file uses a target
-command, or that function.
+command, or that function. googletest makes two such calls and is not ours to change, so on CMake 4.5 or later the
+top-level configure reports the category for what it fetches as a warning, and for this project's own files as an
+error; `test_strict_configure` holds both. A project that pulls the engine in gets no such demotion.
 
 `FLYWHEEL_DAG_BUILD_TESTS`, `FLYWHEEL_DAG_BUILD_EXAMPLES`, `FLYWHEEL_DAG_BUILD_BENCHMARKS` and
 `FLYWHEEL_DAG_INSTALL` are on when flywheel-dag is the top-level project and off when it is a

@@ -464,9 +464,11 @@ endif()
 # -Werror=author -Werror=deprecated, and the check holds the five to that spelling. On
 # CMake 4.4 or later it also configures a probe project to see that the flags make an
 # author warning and a deprecation fatal; an older CMake ignores -Werror=author without
-# a word, so there it checks the spelling only and says so. The probe compiles nothing
-# and needs no network. Registered at the top level, where the checkout it reads is the
-# engine's.
+# a word, so there it checks the spelling only and says so. On CMake 4.5 or later three
+# more probes hold the non-target-directive category that the flags make an error: a
+# directory-wide option is an error under them and silent without them, and a target
+# command is accepted. The probes compile nothing and need no network. Registered at the
+# top level, where the checkout it reads is the engine's.
 if(_flywheel_dag_top_level)
   add_test(NAME test_cmake_diagnostics
     COMMAND ${CMAKE_COMMAND}
@@ -474,6 +476,27 @@ if(_flywheel_dag_top_level)
       -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/cmake_diagnostics
       -DGENERATOR=${CMAKE_GENERATOR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check_cmake_diagnostics.cmake)
+endif()
+
+# The strict configure that CI runs configures the real project. On CMake 4.5 or later, which reports a directory-wide include path as a
+# non-target-directive and makes that an error under -Werror=author, the check configures the root offline into scratch trees, in the
+# default, asan and tsan configurations: each must exit 0 with no CMake Error, googletest's own calls must be the warnings that the
+# root's demotion makes of them, and none may be for a file of this project. With no flags the configure says nothing about the
+# category. A parent project that pulls the engine in and then fetches a dependency of its own that makes the same call must still get
+# the error, since only the top level demotes. Before 4.5 it is skipped and says so. It compiles nothing and needs no network.
+# Registered as test_warning_option is, which also configures the real root.
+if(_flywheel_dag_top_level AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
+   AND (CMAKE_GENERATOR MATCHES "Makefiles" OR CMAKE_GENERATOR STREQUAL "Ninja"))
+  add_test(NAME test_strict_configure
+    COMMAND ${CMAKE_COMMAND}
+      -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DSCRATCH_DIR=${CMAKE_CURRENT_BINARY_DIR}/strict_configure
+      -DGENERATOR=${CMAKE_GENERATOR}
+      -DCXX=${CMAKE_CXX_COMPILER}
+      -DSPDLOG_SOURCE_DIR=${spdlog_SOURCE_DIR}
+      -DNLOHMANN_JSON_SOURCE_DIR=${nlohmann_json_SOURCE_DIR}
+      -DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_strict_configure.cmake)
 endif()
 
 # Options go to targets, never to a directory. cmake/flywheel_dag_target_options.cmake holds the one function that gives them, and this
